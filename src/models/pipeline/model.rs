@@ -1,5 +1,6 @@
-use r2d2::{ ManageConnection, PooledConnection };
+use postgres;
 use serde::{ Deserialize, Serialize };
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 pub struct Pipeline {
@@ -12,23 +13,30 @@ pub struct Pipeline {
 
 impl Pipeline {
 
-    pub fn find<M>(client: PooledConnection<M>, id: String) -> Result<Self, Error> 
-        where T: r2d2::ManageConnection
+    pub fn find(client: &mut postgres::Client, id: Uuid) -> Result<Option<Self>, postgres::error::Error> 
     {
-        let row = client.query(
+        let results = &client.query(
             "SELECT pipeline_id, name, description, created_at, created_by \
              FROM test_framework.pipeline \
              WHERE pipeline_id = $1",
              &[&id],
-        )?[0];
+        )?;
 
-        Pipeline {
-            pipeline_id: row.get(0),
-            name: row.get(1),
-            description: row.get(2),
-            created_at: row.get(3),
-            created_by: row.get(4)
+        if results.len() < 1 {
+            return Ok(None)
         }
+
+        let result_id: Uuid = results[0].get(0);
+
+        Ok(Some(
+            Pipeline {
+                pipeline_id: Some((result_id).to_hyphenated().to_string()),
+                name: results[0].get(1),
+                description: results[0].get(2),
+                created_at: results[0].get(3),
+                created_by: results[0].get(4)
+            }
+        ))
     }
 
 }

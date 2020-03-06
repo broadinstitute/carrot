@@ -1,17 +1,42 @@
 use crate::models::pipeline::model::Pipeline;
-use actix_web::{get, post, delete, web, HttpResponse, Responder};
+use actix_web::{get, post, delete, web, Error, HttpResponse};
+use log::{ info, error };
+use postgres::NoTls;
+use r2d2::Pool;
+use r2d2_postgres::PostgresConnectionManager;
+use uuid::Uuid;
 
 #[get("/pipelines/{id}")]
-async fn find() -> impl Responder {
-    HttpResponse::Ok().json(
-        Pipeline { 
-            pipeline_id: Some(String::from("1")), 
-            name: String::from("test-pipeline"), 
-            description: None,  
-            created_at: String::from("2020-03-05T10:15:06-05:00"),
-            created_by: Some(String::from("klydon@broadinstitute.org"))
+async fn find(path: web::Path<String>, pool: web::Data<Pool<PostgresConnectionManager<NoTls>>>) -> Result<HttpResponse, Error> {
+    
+    let id = match Uuid::parse_str(&path.into_inner()[..]){
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            return Ok(
+                HttpResponse::BadRequest()
+                .reason("Id not formatted properly")
+                .finish()
+            );
         }
-    )
+    };
+
+    let res = web::block(move || {
+        let client = &mut *(pool.get().unwrap());
+
+        match Pipeline::find(client, id) {
+            Ok(pipeline) => Ok(pipeline),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+
+    })
+    .await
+    .map(|pipeline| HttpResponse::Ok().json(pipeline))
+    .map_err(|e| HttpResponse::InternalServerError(e))?;
+    Ok(res)
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
