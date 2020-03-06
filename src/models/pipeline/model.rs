@@ -1,13 +1,14 @@
+use chrono::{ DateTime, Utc };
 use postgres;
 use serde::{ Deserialize, Serialize };
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 pub struct Pipeline {
-    pub pipeline_id : Option<String>,
+    pub pipeline_id : Option<Uuid>,
     pub name: String,
     pub description: Option<String>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
     pub created_by: Option<String>,
 }
 
@@ -25,12 +26,10 @@ impl Pipeline {
         if results.len() < 1 {
             return Ok(None)
         }
-
-        let result_id: Uuid = results[0].get(0);
-
+        
         Ok(Some(
             Pipeline {
-                pipeline_id: Some((result_id).to_hyphenated().to_string()),
+                pipeline_id: results[0].get(0),
                 name: results[0].get(1),
                 description: results[0].get(2),
                 created_at: results[0].get(3),

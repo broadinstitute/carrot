@@ -21,6 +21,8 @@ async fn find(path: web::Path<String>, pool: web::Data<Pool<PostgresConnectionMa
         }
     };
 
+    info!("Uuid requested: {}", id);
+
     let res = web::block(move || {
         let client = &mut *(pool.get().unwrap());
 
@@ -35,7 +37,7 @@ async fn find(path: web::Path<String>, pool: web::Data<Pool<PostgresConnectionMa
     })
     .await
     .map(|pipeline| HttpResponse::Ok().json(pipeline))
-    .map_err(|e| HttpResponse::InternalServerError(e))?;
+    .map_err(|_| HttpResponse::InternalServerError())?;
     Ok(res)
 }
 
