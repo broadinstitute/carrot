@@ -1,14 +1,12 @@
+use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::pipeline::model::Pipeline;
 use actix_web::{get, post, delete, web, Error, HttpRequest, HttpResponse, Responder};
 use log::{ info, error };
-use postgres::NoTls;
-use r2d2::Pool;
-use r2d2_postgres::PostgresConnectionManager;
 use uuid::Uuid;
 
 #[get("/pipelines/{id}")]
-async fn find_by_id(req: HttpRequest, pool: web::Data<Pool<PostgresConnectionManager<NoTls>>>) -> impl Responder{
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder{
     
     //Pull id param from path
     let id = & req.match_info().get("id").unwrap();
@@ -30,9 +28,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<Pool<PostgresConnectionMan
     //Query DB for pipeline in new thread
     web::block(move || {
 
-        let client = &mut *(pool.get().unwrap());
+        let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Pipeline::find_by_id(client, id) {
+        match Pipeline::find_by_id(&conn, id) {
             Ok(pipeline) => Ok(pipeline),
             Err(e) => {
                 error!("{}", e);
@@ -42,20 +40,26 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<Pool<PostgresConnectionMan
 
     })
     .await
-    .map(|pipeline| {
-        match pipeline {
-            Some(data) => {
-                HttpResponse::Ok().json(data)
-            },
-            None => {
-                HttpResponse::NotFound()
-                    .json(ErrorBody{
-                        title: "No pipeline found",
-                        status: 404,
-                        detail: "No pipeline found with the specified ID"
-                    })
-            }
+    .map(|results| {
+        if results.len() < 1{
+            HttpResponse::NotFound()
+                .json(ErrorBody{
+                    title: "No pipeline found",
+                    status: 404,
+                    detail: "No pipeline found with the specified ID"
+                })
+        } else if results.len() > 1 {
+            HttpResponse::InternalServerError()
+                .json(ErrorBody{
+                    title: "Multiple pipelines found",
+                    status: 500,
+                    detail: "Multiple pipelines found with the specified ID.  This should not happen."
+                })
+        } else {
+            HttpResponse::Ok()
+                .json(results.get(0))
         }
+                
     })
     .map_err(|e| {
         error!("{}", e);

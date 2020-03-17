@@ -15,7 +15,7 @@ pub struct Template {
 }
 
 impl Template {
-
+/*
     pub fn find(client: &mut postgres::Client, id: Uuid) -> Result<Option<Self>, postgres::error::Error> 
     {
         let results = &client.query(
@@ -41,5 +41,5 @@ impl Template {
             }
         ))
     }
-
+*/
 }

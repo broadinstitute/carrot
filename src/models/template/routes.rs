@@ -3,9 +3,9 @@ use actix_web::{get, post, delete, web, Error, HttpResponse};
 use log::{ info, error };
 use postgres::NoTls;
 use r2d2::Pool;
-use r2d2_postgres::PostgresConnectionManager;
 use uuid::Uuid;
 
+/*
 #[get("/templates/{id}")]
 async fn find(path: web::Path<String>, pool: web::Data<Pool<PostgresConnectionManager<NoTls>>>) -> Result<HttpResponse, Error> {
     
@@ -39,6 +39,8 @@ async fn find(path: web::Path<String>, pool: web::Data<Pool<PostgresConnectionMa
     Ok(res)
 }
 
+
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(find);
 }
+*/
