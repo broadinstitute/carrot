@@ -1,6 +1,6 @@
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::pipeline::model::Pipeline;
+use crate::models::pipeline::model::{ Pipeline, PipelineQuery, NewPipeline };
 use actix_web::{get, post, delete, web, Error, HttpRequest, HttpResponse, Responder};
 use log::{ info, error };
 use uuid::Uuid;
@@ -74,6 +74,84 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
     
 }
 
+#[get("/pipelines")]
+async fn find(web::Query(query): web::Query<PipelineQuery>, pool: web::Data<db::DbPool>) -> impl Responder{
+    //Query DB for pipelines in new thread
+    web::block(move || {
+
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match Pipeline::find(&conn, query) {
+            Ok(pipeline) => Ok(pipeline),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+
+    })
+    .await
+    .map(|results| {
+        if results.len() < 1{
+            HttpResponse::NotFound()
+                .json(ErrorBody{
+                    title: "No pipelines found",
+                    status: 404,
+                    detail: "No pipelines found with the specified parameters"
+                })
+        } else {
+            HttpResponse::Ok()
+                .json(results)
+        }
+                
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        HttpResponse::InternalServerError()
+            .json(ErrorBody{
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to retrieve requested pipeline(s) from DB"
+            })
+    })
+    .unwrap()
+}
+
+#[post("/pipelines")]
+async fn create(web::Json(new_pipeline): web::Json<NewPipeline>, pool: web::Data<db::DbPool>) -> impl Responder {
+    //Insert in new thread
+    web::block(move || {
+
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match Pipeline::create(&conn, new_pipeline) {
+            Ok(pipeline) => Ok(pipeline),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+
+    })
+    .await
+    .map(|results| {
+        HttpResponse::Ok()
+            .json(results)
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        HttpResponse::InternalServerError()
+            .json(ErrorBody{
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to insert new pipeline"
+            })
+    })
+    .unwrap()
+}
+
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(find_by_id);
+    cfg.service(find);
+    cfg.service(create);
 }

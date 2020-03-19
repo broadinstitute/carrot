@@ -1,4 +1,5 @@
 use crate::schema::test_framework::pipeline::dsl::*;
+use crate::schema::test_framework::pipeline;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -7,7 +8,7 @@ use uuid::Uuid;
 
 #[derive(Queryable, Serialize)]
 pub struct Pipeline {
-    pub pipeline_id : Uuid,
+    pub pipeline_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub created_at: NaiveDateTime,
@@ -25,6 +26,14 @@ pub struct PipelineQuery {
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+#[derive(Deserialize, Insertable)]
+#[table_name="pipeline"]
+pub struct NewPipeline {
+    pub name: String,
+    pub description: Option<String>,
+    pub created_by: Option<String>,
 }
 
 impl Pipeline {
@@ -112,5 +121,11 @@ impl Pipeline {
 
         query.load::<Pipeline>(conn)
 
+    }
+
+    pub fn create(conn: &PgConnection, params: NewPipeline) -> Result<Pipeline, diesel::result::Error> {
+        diesel::insert_into(pipeline)
+            .values(&params)
+            .get_result(conn)
     }
 }
