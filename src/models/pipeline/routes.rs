@@ -1,7 +1,7 @@
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::pipeline::model::{ Pipeline, PipelineQuery, NewPipeline };
-use actix_web::{get, post, delete, web, Error, HttpRequest, HttpResponse, Responder};
+use crate::models::pipeline::model::{ Pipeline, PipelineChangeset, PipelineQuery, NewPipeline };
+use actix_web::{get, post, put, web, HttpRequest, HttpResponse, Responder};
 use log::{ info, error };
 use uuid::Uuid;
 
@@ -16,12 +16,14 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         Ok(id) => id,
         Err(e) => {
             error!("{}", e);
-            return HttpResponse::BadRequest()
-                .json(ErrorBody{
-                    title: "ID formatted incorrectly",
-                    status: 400,
-                    detail: "ID must be formatted as a Uuid"
-                });
+            return Ok(
+                HttpResponse::BadRequest()
+                    .json(ErrorBody{
+                        title: "ID formatted incorrectly",
+                        status: 400,
+                        detail: "ID must be formatted as a Uuid"
+                    })
+            );
         }
     };
 
@@ -70,7 +72,6 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "Error while attempting to retrieve requested pipeline from DB"
             })
     })
-    .unwrap()
     
 }
 
@@ -114,7 +115,6 @@ async fn find(web::Query(query): web::Query<PipelineQuery>, pool: web::Data<db::
                 detail: "Error while attempting to retrieve requested pipeline(s) from DB"
             })
     })
-    .unwrap()
 }
 
 #[post("/pipelines")]
@@ -147,11 +147,59 @@ async fn create(web::Json(new_pipeline): web::Json<NewPipeline>, pool: web::Data
                 detail: "Error while attempting to insert new pipeline"
             })
     })
-    .unwrap()
+}
+
+#[put("/pipelines/{id}")]
+async fn update(id: web::Path<String>, web::Json(pipeline_changes): web::Json<PipelineChangeset>, pool: web::Data<db::DbPool>) -> impl Responder {
+    //Parse ID into Uuid
+    let id = match Uuid::parse_str(&*id){
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            return Ok(
+                HttpResponse::BadRequest()
+                    .json(ErrorBody{
+                        title: "ID formatted incorrectly",
+                        status: 400,
+                        detail: "ID must be formatted as a Uuid"
+                    })
+            );
+        }
+    };
+    
+    //Insert in new thread
+    web::block(move || {
+
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match Pipeline::update(&conn, id, pipeline_changes) {
+            Ok(pipeline) => Ok(pipeline),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+
+    })
+    .await
+    .map(|results| {
+        HttpResponse::Ok()
+            .json(results)
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        HttpResponse::InternalServerError()
+            .json(ErrorBody{
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to update pipeline"
+            })
+    })
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(find_by_id);
     cfg.service(find);
     cfg.service(create);
+    cfg.service(update);
 }

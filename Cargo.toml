@@ -17,8 +17,9 @@ dotenv = "0.15.0"
 env_logger = "0.7.1"
 log = "0.4.8"
 # DB connection and pooling
-diesel = { version = "1.4.3", features = ["postgres", "r2d2", "uuidv07", "chrono"] }
+diesel = { version = "1.4.3", features = ["postgres", "r2d2", "uuidv07", "chrono", "serde_json"] }
 postgres = { version = "0.17.1", features = ["with-uuid-0_8", "with-chrono-0_4"] }
+diesel-derive-enum = { version = "0.4", features = ["postgres"] }
 r2d2 = "0.8.8"
 # Serializing/Deserializing data
 serde = "1.0.104"

@@ -1,5 +1,6 @@
 mod db;
 mod app;
+mod custom_sql_types;
 mod models;
 mod error_body;
 mod schema;

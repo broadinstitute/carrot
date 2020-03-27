@@ -1,8 +1,9 @@
-use crate::schema::test_framework::pipeline::dsl::*;
-use crate::schema::test_framework::pipeline;
+use crate::schema::pipeline::dsl::*;
+use crate::schema::pipeline;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use diesel::query_builder::AsChangeset;
 use serde::{ Deserialize, Serialize };
 use uuid::Uuid;
 
@@ -34,6 +35,13 @@ pub struct NewPipeline {
     pub name: String,
     pub description: Option<String>,
     pub created_by: Option<String>,
+}
+
+#[derive(Deserialize, AsChangeset)]
+#[table_name="pipeline"]
+pub struct PipelineChangeset {
+    pub name: Option<String>,
+    pub description: Option<String>
 }
 
 impl Pipeline {
@@ -123,9 +131,21 @@ impl Pipeline {
 
     }
 
+    pub fn get_id_by_name(conn: &PgConnection, pipeline_name: String) -> Result<Vec<String>, diesel::result::Error> {
+        pipeline.filter(name.eq(pipeline_name))
+            .select(name)
+            .load(conn)
+    }
+
     pub fn create(conn: &PgConnection, params: NewPipeline) -> Result<Pipeline, diesel::result::Error> {
         diesel::insert_into(pipeline)
             .values(&params)
+            .get_result(conn)
+    }
+
+    pub fn update(conn: &PgConnection, id: Uuid, params: PipelineChangeset) -> Result<Pipeline, diesel::result::Error> {
+        diesel::update(pipeline.filter(pipeline_id.eq(id)))
+            .set(params)
             .get_result(conn)
     }
 }
