@@ -1,26 +1,25 @@
-use crate::schema::pipeline::dsl::*;
-use crate::schema::pipeline;
+use crate::schema::template_result::dsl::*;
+use crate::schema::template_result;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use diesel::query_builder::AsChangeset;
 use serde::{ Deserialize, Serialize };
 use uuid::Uuid;
 
 #[derive(Queryable, Serialize)]
-pub struct Pipeline {
-    pub pipeline_id: Uuid,
-    pub name: String,
-    pub description: Option<String>,
+pub struct TemplateResultData {
+    pub template_id: Uuid,
+    pub result_id: Uuid,
+    pub result_key: String,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub struct PipelineQuery {
-    pub pipeline_id: Option<Uuid>,
-    pub name: Option<String>,
-    pub description: Option<String>,
+pub struct TemplateResultQuery {
+    pub template_id: Option<Uuid>,
+    pub result_id: Option<Uuid>,
+    pub result_key: Option<String>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -30,39 +29,27 @@ pub struct PipelineQuery {
 }
 
 #[derive(Deserialize, Insertable)]
-#[table_name="pipeline"]
-pub struct NewPipeline {
-    pub name: String,
-    pub description: Option<String>,
+#[table_name="template_result"]
+pub struct NewTemplateResult {
+    pub template_id: Uuid,
+    pub result_id: Uuid,
+    pub result_key: String,
     pub created_by: Option<String>,
 }
 
-#[derive(Deserialize, AsChangeset)]
-#[table_name="pipeline"]
-pub struct PipelineChangeset {
-    pub name: Option<String>,
-    pub description: Option<String>
-}
+impl TemplateResultData {
 
-impl Pipeline {
+    pub fn find(conn: &PgConnection, params: TemplateResultQuery) -> Result<Vec<Self>, diesel::result::Error> {
+        let mut query = template_result.into_boxed();
 
-    pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
-        pipeline.filter(pipeline_id.eq(id))
-            .load::<Pipeline>(conn)
-    }
-
-    pub fn find(conn: &PgConnection, params: PipelineQuery) -> Result<Vec<Self>, diesel::result::Error> {
-
-        let mut query = pipeline.into_boxed();
-
-        if let Some(param) = params.pipeline_id {
-            query = query.filter(pipeline_id.eq(param));
+        if let Some(param) = params.template_id {
+            query = query.filter(template_id.eq(param));
         }
-        if let Some(param) = params.name {
-            query = query.filter(name.eq(param));
+        if let Some(param) = params.result_id {
+            query = query.filter(result_id.eq(param));
         }
-        if let Some(param) = params.description {
-            query = query.filter(description.eq(param));
+        if let Some(param) = params.result_key {
+            query = query.filter(result_key.eq(param));
         }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
@@ -78,25 +65,25 @@ impl Pipeline {
             let sort = util::parse_sort_string(sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
-                    "pipeline_id" => {
+                    "template_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(pipeline_id.asc());
+                            query = query.then_order_by(template_id.asc());
                         } else {
-                            query = query.then_order_by(pipeline_id.desc());
+                            query = query.then_order_by(template_id.desc());
                         }
                     },
-                    "name" => {
+                    "result_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(name.asc());
+                            query = query.then_order_by(result_id.asc());
                         } else {
-                            query = query.then_order_by(name.desc());
+                            query = query.then_order_by(result_id.desc());
                         }
                     },
-                    "description" => {
+                    "result_key" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(description.asc());
+                            query = query.then_order_by(result_key.asc());
                         } else {
-                            query = query.then_order_by(description.desc());
+                            query = query.then_order_by(result_key.desc());
                         }
                     },
                     "created_at" => {
@@ -127,25 +114,13 @@ impl Pipeline {
             query = query.offset(param);
         }
 
-        query.load::<Pipeline>(conn)
-
+        query.load::<Self>(conn)
     }
 
-    pub fn get_id_by_name(conn: &PgConnection, pipeline_name: String) -> Result<Vec<String>, diesel::result::Error> {
-        pipeline.filter(name.eq(pipeline_name))
-            .select(name)
-            .load(conn)
-    }
-
-    pub fn create(conn: &PgConnection, params: NewPipeline) -> Result<Pipeline, diesel::result::Error> {
-        diesel::insert_into(pipeline)
+    pub fn create(conn: &PgConnection, params: NewTemplateResult) -> Result<Self, diesel::result::Error> {
+        diesel::insert_into(template_result)
             .values(&params)
             .get_result(conn)
     }
 
-    pub fn update(conn: &PgConnection, id: Uuid, params: PipelineChangeset) -> Result<Pipeline, diesel::result::Error> {
-        diesel::update(pipeline.filter(pipeline_id.eq(id)))
-            .set(params)
-            .get_result(conn)
-    }
 }

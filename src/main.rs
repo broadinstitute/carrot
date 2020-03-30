@@ -3,6 +3,7 @@ mod app;
 mod custom_sql_types;
 mod models;
 mod error_body;
+mod routes;
 mod schema;
 mod util;
 

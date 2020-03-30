@@ -1,32 +1,32 @@
-use crate::schema::template::dsl::*;
+use crate::schema::test::dsl::*;
+use crate::schema::test;
 use crate::schema::template;
-use crate::schema::pipeline;
-use crate::models::pipeline::model::Pipeline;
+use crate::models::template::TemplateData;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use diesel::query_builder::AsChangeset;
 use serde::{ Deserialize, Serialize };
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Queryable, Serialize)]
-pub struct Template {
+pub struct TestData {
+    pub test_id: Uuid,
     pub template_id : Uuid,
-    pub pipeline_id : Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub test_wdl: String,
-    pub eval_wdl: String,
+    pub test_input_defaults: Option<Value>,
+    pub eval_input_defaults: Option<Value>,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub struct TemplateQuery {
+pub struct TestQuery {
+    pub test_id: Option<Uuid>,
     pub template_id: Option<Uuid>,
-    pub pipeline_id: Option<Uuid>,
     pub name: Option<String>,
-    pub pipeline_name: Option<String>,
+    pub template_name: Option<String>,
     pub description: Option<String>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
@@ -37,40 +37,40 @@ pub struct TemplateQuery {
 }
 
 #[derive(Deserialize, Insertable)]
-#[table_name="template"]
-pub struct NewTemplate {
+#[table_name="test"]
+pub struct NewTest {
     pub name: String,
-    pub pipeline_id: Uuid,
+    pub template_id: Uuid,
     pub description: Option<String>,
-    pub test_wdl: String,
-    pub eval_wdl: String,
+    pub test_input_defaults: Option<Value>,
+    pub eval_input_defaults: Option<Value>,
     pub created_by: Option<String>,
 }
 
 #[derive(Deserialize, AsChangeset)]
-#[table_name="template"]
-pub struct TemplateChangeset {
+#[table_name="test"]
+pub struct TestChangeset {
     pub name: Option<String>,
     pub description: Option<String>
 }
 
-impl Template {
+impl TestData {
 
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
-        template.filter(template_id.eq(id))
-            .load::<Template>(conn)
+        test.filter(test_id.eq(id))
+            .load::<Self>(conn)
     }
 
-    pub fn find(conn: &PgConnection, params: TemplateQuery) -> Result<Vec<Self>, diesel::result::Error> {
-        let mut query = template.into_boxed();
+    pub fn find(conn: &PgConnection, params: TestQuery) -> Result<Vec<Self>, diesel::result::Error> {
+        let mut query = test.into_boxed();
 
-        if let Some(param) = params.pipeline_name {
-            let pipelines = pipeline::dsl::pipeline.filter(pipeline::dsl::name.eq(param))
-                .load::<Pipeline>(conn);
-            match pipelines{
-                Ok(pipelines_res) => {
-                    if pipelines_res.len() > 0 {
-                        query = query.filter(pipeline_id.eq(pipelines_res[0].pipeline_id));
+        if let Some(param) = params.template_name {
+            let templates = template::dsl::template.filter(template::dsl::name.eq(param))
+                .load::<TemplateData>(conn);
+            match templates{
+                Ok(templates_res) => {
+                    if templates_res.len() > 0 {
+                        query = query.filter(template_id.eq(templates_res[0].template_id));
                     } else {
                         return Ok(Vec::new());
                     }
@@ -84,8 +84,8 @@ impl Template {
         if let Some(param) = params.template_id {
             query = query.filter(template_id.eq(param));
         }
-        if let Some(param) = params.pipeline_id {
-            query = query.filter(pipeline_id.eq(param));
+        if let Some(param) = params.test_id {
+            query = query.filter(test_id.eq(param));
         }
         if let Some(param) = params.name {
             query = query.filter(name.eq(param));
@@ -114,11 +114,11 @@ impl Template {
                             query = query.then_order_by(template_id.desc());
                         }
                     },
-                    "pipeline_id" => {
+                    "test_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(pipeline_id.asc());
+                            query = query.then_order_by(test_id.asc());
                         } else {
-                            query = query.then_order_by(pipeline_id.desc());
+                            query = query.then_order_by(test_id.desc());
                         }
                     },
                     "name" => {
@@ -163,19 +163,17 @@ impl Template {
             query = query.offset(param);
         }
 
-        query.select((template::template_id, template::pipeline_id, template::name, template::description,
-            template::test_wdl, template::eval_wdl, template::created_at, template::created_by))
-            .load::<Template>(conn)
+        query.load::<Self>(conn)
     }
 
-    pub fn create(conn: &PgConnection, params: NewTemplate) -> Result<Template, diesel::result::Error> {
-        diesel::insert_into(template)
+    pub fn create(conn: &PgConnection, params: NewTest) -> Result<Self, diesel::result::Error> {
+        diesel::insert_into(test)
             .values(&params)
             .get_result(conn)
     }
 
-    pub fn update(conn: &PgConnection, id: Uuid, params: TemplateChangeset) -> Result<Template, diesel::result::Error> {
-        diesel::update(template.filter(template_id.eq(id)))
+    pub fn update(conn: &PgConnection, id: Uuid, params: TestChangeset) -> Result<Self, diesel::result::Error> {
+        diesel::update(test.filter(test_id.eq(id)))
             .set(params)
             .get_result(conn)
     }

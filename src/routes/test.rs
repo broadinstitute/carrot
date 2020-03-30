@@ -1,12 +1,13 @@
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::pipeline::model::{ Pipeline, PipelineChangeset, PipelineQuery, NewPipeline };
+use crate::models::test::{ NewTest, TestData, TestChangeset, TestQuery };
 use actix_web::{get, post, put, web, HttpRequest, HttpResponse, Responder};
-use log::{ info, error };
+use log::error;
 use uuid::Uuid;
 
-#[get("/pipelines/{id}")]
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder{
+
+#[get("/tests/{id}")]
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     
     //Pull id param from path
     let id = & req.match_info().get("id").unwrap();
@@ -26,14 +27,15 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             );
         }
     };
-
-    //Query DB for pipeline in new thread
+    
+    
+    //Query DB for test in new thread
     web::block(move || {
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Pipeline::find_by_id(&conn, id) {
-            Ok(pipeline) => Ok(pipeline),
+        match TestData::find_by_id(&conn, id) {
+            Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -46,16 +48,16 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         if results.len() < 1{
             HttpResponse::NotFound()
                 .json(ErrorBody{
-                    title: "No pipeline found",
+                    title: "No test found",
                     status: 404,
-                    detail: "No pipeline found with the specified ID"
+                    detail: "No test found with the specified ID"
                 })
         } else if results.len() > 1 {
             HttpResponse::InternalServerError()
                 .json(ErrorBody{
-                    title: "Multiple pipelines found",
+                    title: "Multiple tests found",
                     status: 500,
-                    detail: "Multiple pipelines found with the specified ID.  This should not happen."
+                    detail: "Multiple tests found with the specified ID.  This should not happen."
                 })
         } else {
             HttpResponse::Ok()
@@ -69,21 +71,20 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to retrieve requested pipeline from DB"
+                detail: "Error while attempting to retrieve requested test from DB"
             })
     })
-    
 }
 
-#[get("/pipelines")]
-async fn find(web::Query(query): web::Query<PipelineQuery>, pool: web::Data<db::DbPool>) -> impl Responder{
-    //Query DB for pipelines in new thread
+#[get("/tests")]
+async fn find(web::Query(query): web::Query<TestQuery>, pool: web::Data<db::DbPool>) -> impl Responder{
+    //Query DB for tests in new thread
     web::block(move || {
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Pipeline::find(&conn, query) {
-            Ok(pipeline) => Ok(pipeline),
+        match TestData::find(&conn, query) {
+            Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -96,9 +97,9 @@ async fn find(web::Query(query): web::Query<PipelineQuery>, pool: web::Data<db::
         if results.len() < 1{
             HttpResponse::NotFound()
                 .json(ErrorBody{
-                    title: "No pipelines found",
+                    title: "No test found",
                     status: 404,
-                    detail: "No pipelines found with the specified parameters"
+                    detail: "No tests found with the specified parameters"
                 })
         } else {
             HttpResponse::Ok()
@@ -112,20 +113,20 @@ async fn find(web::Query(query): web::Query<PipelineQuery>, pool: web::Data<db::
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to retrieve requested pipeline(s) from DB"
+                detail: "Error while attempting to retrieve requested test(s) from DB"
             })
     })
 }
 
-#[post("/pipelines")]
-async fn create(web::Json(new_pipeline): web::Json<NewPipeline>, pool: web::Data<db::DbPool>) -> impl Responder {
+#[post("/tests")]
+async fn create(web::Json(new_test): web::Json<NewTest>, pool: web::Data<db::DbPool>) -> impl Responder {
     //Insert in new thread
     web::block(move || {
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Pipeline::create(&conn, new_pipeline) {
-            Ok(pipeline) => Ok(pipeline),
+        match TestData::create(&conn, new_test) {
+            Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -144,13 +145,15 @@ async fn create(web::Json(new_pipeline): web::Json<NewPipeline>, pool: web::Data
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to insert new pipeline"
+                detail: "Error while attempting to insert new test"
             })
     })
 }
 
-#[put("/pipelines/{id}")]
-async fn update(id: web::Path<String>, web::Json(pipeline_changes): web::Json<PipelineChangeset>, pool: web::Data<db::DbPool>) -> impl Responder {
+
+
+#[put("/test/{id}")]
+async fn update(id: web::Path<String>, web::Json(test_changes): web::Json<TestChangeset>, pool: web::Data<db::DbPool>) -> impl Responder {
     //Parse ID into Uuid
     let id = match Uuid::parse_str(&*id){
         Ok(id) => id,
@@ -172,7 +175,7 @@ async fn update(id: web::Path<String>, web::Json(pipeline_changes): web::Json<Pi
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Pipeline::update(&conn, id, pipeline_changes) {
+        match TestData::update(&conn, id, test_changes) {
             Ok(pipeline) => Ok(pipeline),
             Err(e) => {
                 error!("{}", e);
@@ -192,7 +195,7 @@ async fn update(id: web::Path<String>, web::Json(pipeline_changes): web::Json<Pi
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to update pipeline"
+                detail: "Error while attempting to update test"
             })
     })
 }

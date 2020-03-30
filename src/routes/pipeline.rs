@@ -1,13 +1,12 @@
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::template::model::{ NewTemplate, Template, TemplateChangeset, TemplateQuery };
+use crate::models::pipeline::{ PipelineData, PipelineChangeset, PipelineQuery, NewPipeline };
 use actix_web::{get, post, put, web, HttpRequest, HttpResponse, Responder};
-use log::{ info, error };
+use log::error;
 use uuid::Uuid;
 
-
-#[get("/templates/{id}")]
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+#[get("/pipelines/{id}")]
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder{
     
     //Pull id param from path
     let id = & req.match_info().get("id").unwrap();
@@ -27,14 +26,14 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             );
         }
     };
-    
-    //Query DB for template in new thread
+
+    //Query DB for pipeline in new thread
     web::block(move || {
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Template::find_by_id(&conn, id) {
-            Ok(template) => Ok(template),
+        match PipelineData::find_by_id(&conn, id) {
+            Ok(pipeline) => Ok(pipeline),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -47,16 +46,16 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         if results.len() < 1{
             HttpResponse::NotFound()
                 .json(ErrorBody{
-                    title: "No template found",
+                    title: "No pipeline found",
                     status: 404,
-                    detail: "No template found with the specified ID"
+                    detail: "No pipeline found with the specified ID"
                 })
         } else if results.len() > 1 {
             HttpResponse::InternalServerError()
                 .json(ErrorBody{
-                    title: "Multiple templates found",
+                    title: "Multiple pipelines found",
                     status: 500,
-                    detail: "Multiple templates found with the specified ID.  This should not happen."
+                    detail: "Multiple pipelines found with the specified ID.  This should not happen."
                 })
         } else {
             HttpResponse::Ok()
@@ -70,20 +69,21 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to retrieve requested template from DB"
+                detail: "Error while attempting to retrieve requested pipeline from DB"
             })
     })
+    
 }
 
-#[get("/templates")]
-async fn find(web::Query(query): web::Query<TemplateQuery>, pool: web::Data<db::DbPool>) -> impl Responder{
-    //Query DB for templates in new thread
+#[get("/pipelines")]
+async fn find(web::Query(query): web::Query<PipelineQuery>, pool: web::Data<db::DbPool>) -> impl Responder{
+    //Query DB for pipelines in new thread
     web::block(move || {
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Template::find(&conn, query) {
-            Ok(template) => Ok(template),
+        match PipelineData::find(&conn, query) {
+            Ok(pipeline) => Ok(pipeline),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -96,9 +96,9 @@ async fn find(web::Query(query): web::Query<TemplateQuery>, pool: web::Data<db::
         if results.len() < 1{
             HttpResponse::NotFound()
                 .json(ErrorBody{
-                    title: "No template found",
+                    title: "No pipelines found",
                     status: 404,
-                    detail: "No templates found with the specified parameters"
+                    detail: "No pipelines found with the specified parameters"
                 })
         } else {
             HttpResponse::Ok()
@@ -112,22 +112,20 @@ async fn find(web::Query(query): web::Query<TemplateQuery>, pool: web::Data<db::
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to retrieve requested template(s) from DB"
+                detail: "Error while attempting to retrieve requested pipeline(s) from DB"
             })
     })
-
-
 }
 
-#[post("/templates")]
-async fn create(web::Json(new_template): web::Json<NewTemplate>, pool: web::Data<db::DbPool>) -> impl Responder {
+#[post("/pipelines")]
+async fn create(web::Json(new_pipeline): web::Json<NewPipeline>, pool: web::Data<db::DbPool>) -> impl Responder {
     //Insert in new thread
     web::block(move || {
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Template::create(&conn, new_template) {
-            Ok(template) => Ok(template),
+        match PipelineData::create(&conn, new_pipeline) {
+            Ok(pipeline) => Ok(pipeline),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -146,13 +144,13 @@ async fn create(web::Json(new_template): web::Json<NewTemplate>, pool: web::Data
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to insert new template"
+                detail: "Error while attempting to insert new pipeline"
             })
     })
 }
 
-#[put("/templates/{id}")]
-async fn update(id: web::Path<String>, web::Json(template_changes): web::Json<TemplateChangeset>, pool: web::Data<db::DbPool>) -> impl Responder {
+#[put("/pipelines/{id}")]
+async fn update(id: web::Path<String>, web::Json(pipeline_changes): web::Json<PipelineChangeset>, pool: web::Data<db::DbPool>) -> impl Responder {
     //Parse ID into Uuid
     let id = match Uuid::parse_str(&*id){
         Ok(id) => id,
@@ -174,7 +172,7 @@ async fn update(id: web::Path<String>, web::Json(template_changes): web::Json<Te
 
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match Template::update(&conn, id, template_changes) {
+        match PipelineData::update(&conn, id, pipeline_changes) {
             Ok(pipeline) => Ok(pipeline),
             Err(e) => {
                 error!("{}", e);
@@ -194,11 +192,10 @@ async fn update(id: web::Path<String>, web::Json(template_changes): web::Json<Te
             .json(ErrorBody{
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to update template"
+                detail: "Error while attempting to update pipeline"
             })
     })
 }
-
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(find_by_id);
