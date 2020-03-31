@@ -26,10 +26,13 @@ pub struct RunData {
 #[derive(Deserialize)]
 pub struct RunQuery {
     pub name: Option<String>,
+    pub status: Option<RunStatusEnum>,
+    pub test_input: Option<Value>,
+    pub eval_input: Option<Value>,
+    pub cromwell_job_id: Option<String>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
-    pub status: Option<RunStatusEnum>,
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
@@ -50,6 +53,15 @@ impl RunData {
         }
         if let Some(param) = params.status {
             query = query.filter(status.eq(param));
+        }
+        if let Some(param) = params.test_input {
+            query = query.filter(test_input.eq(param));
+        }
+        if let Some(param) = params.eval_input {
+            query = query.filter(eval_input.eq(param));
+        }
+        if let Some(param) = params.cromwell_job_id {
+            query = query.filter(cromwell_job_id.eq(param));
         }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
@@ -164,6 +176,15 @@ impl RunData {
         }
         if let Some(param) = params.status {
             query = query.filter(status.eq(param));
+        }
+        if let Some(param) = params.test_input {
+            query = query.filter(test_input.eq(param));
+        }
+        if let Some(param) = params.eval_input {
+            query = query.filter(eval_input.eq(param));
+        }
+        if let Some(param) = params.cromwell_job_id {
+            query = query.filter(cromwell_job_id.eq(param));
         }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
@@ -280,6 +301,15 @@ impl RunData {
         }
         if let Some(param) = params.status {
             query = query.filter(status.eq(param));
+        }
+        if let Some(param) = params.test_input {
+            query = query.filter(test_input.eq(param));
+        }
+        if let Some(param) = params.eval_input {
+            query = query.filter(eval_input.eq(param));
+        }
+        if let Some(param) = params.cromwell_job_id {
+            query = query.filter(cromwell_job_id.eq(param));
         }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));

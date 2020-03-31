@@ -39,6 +39,12 @@ pub struct NewTemplateResult {
 
 impl TemplateResultData {
 
+    pub fn find_by_template_and_result(conn: &PgConnection, query_template_id: Uuid, query_result_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
+        template_result.filter(result_id.eq(query_result_id))
+            .filter(template_id.eq(query_template_id))
+            .load::<Self>(conn)
+    }
+
     pub fn find(conn: &PgConnection, params: TemplateResultQuery) -> Result<Vec<Self>, diesel::result::Error> {
         let mut query = template_result.into_boxed();
 

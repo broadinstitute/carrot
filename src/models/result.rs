@@ -37,6 +37,7 @@ pub struct NewResult {
     pub name: String,
     pub result_type: ResultTypeEnum,
     pub description: Option<String>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Deserialize, AsChangeset)]

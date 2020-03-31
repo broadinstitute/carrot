@@ -35,7 +35,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ResultData::find_by_id(&conn, id) {
-            Ok(test) => Ok(test),
+            Ok(result) => Ok(result),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -150,9 +150,7 @@ async fn create(web::Json(new_test): web::Json<NewResult>, pool: web::Data<db::D
     })
 }
 
-
-
-#[put("/test/{id}")]
+#[put("/results/{id}")]
 async fn update(id: web::Path<String>, web::Json(result_changes): web::Json<ResultChangeset>, pool: web::Data<db::DbPool>) -> impl Responder {
     //Parse ID into Uuid
     let id = match Uuid::parse_str(&*id){
@@ -176,7 +174,7 @@ async fn update(id: web::Path<String>, web::Json(result_changes): web::Json<Resu
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ResultData::update(&conn, id, result_changes) {
-            Ok(pipeline) => Ok(pipeline),
+            Ok(result) => Ok(result),
             Err(e) => {
                 error!("{}", e);
                 Err(e)

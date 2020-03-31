@@ -27,6 +27,8 @@ pub struct TemplateQuery {
     pub name: Option<String>,
     pub pipeline_name: Option<String>,
     pub description: Option<String>,
+    pub test_wdl: Option<String>,
+    pub eval_wdl: Option<String>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -92,6 +94,12 @@ impl TemplateData {
         if let Some(param) = params.description {
             query = query.filter(description.eq(param));
         }
+        if let Some(param) = params.test_wdl {
+            query = query.filter(test_wdl.eq(param));
+        }
+        if let Some(param) = params.eval_wdl {
+            query = query.filter(eval_wdl.eq(param));
+        }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
         }
@@ -132,6 +140,20 @@ impl TemplateData {
                             query = query.then_order_by(description.asc());
                         } else {
                             query = query.then_order_by(description.desc());
+                        }
+                    },
+                    "test_wdl" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_wdl.asc());
+                        } else {
+                            query = query.then_order_by(test_wdl.desc());
+                        }
+                    },
+                    "eval_wdl" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_wdl.asc());
+                        } else {
+                            query = query.then_order_by(eval_wdl.desc());
                         }
                     },
                     "created_at" => {

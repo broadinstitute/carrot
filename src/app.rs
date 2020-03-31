@@ -7,4 +7,5 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     routes::test::init_routes(cfg);
     routes::run::init_routes(cfg);
     routes::result::init_routes(cfg);
+    routes::template_result::init_routes(cfg);
 }

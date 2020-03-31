@@ -28,6 +28,8 @@ pub struct TestQuery {
     pub name: Option<String>,
     pub template_name: Option<String>,
     pub description: Option<String>,
+    pub test_input_defaults: Option<Value>,
+    pub eval_input_defaults: Option<Value>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -93,8 +95,11 @@ impl TestData {
         if let Some(param) = params.description {
             query = query.filter(description.eq(param));
         }
-        if let Some(param) = params.created_before {
-            query = query.filter(created_at.lt(param));
+        if let Some(param) = params.test_input_defaults {
+            query = query.filter(test_input_defaults.eq(param));
+        }
+        if let Some(param) = params.eval_input_defaults {
+            query = query.filter(eval_input_defaults.lt(param));
         }
         if let Some(param) = params.created_after {
             query = query.filter(created_at.gt(param));
@@ -133,6 +138,20 @@ impl TestData {
                             query = query.then_order_by(description.asc());
                         } else {
                             query = query.then_order_by(description.desc());
+                        }
+                    },
+                    "test_input_defaults" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_input_defaults.asc());
+                        } else {
+                            query = query.then_order_by(test_input_defaults.desc());
+                        }
+                    },
+                    "eval_input_defaults" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_input_defaults.asc());
+                        } else {
+                            query = query.then_order_by(eval_input_defaults.desc());
                         }
                     },
                     "created_at" => {

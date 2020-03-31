@@ -176,7 +176,7 @@ async fn update(id: web::Path<String>, web::Json(test_changes): web::Json<TestCh
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TestData::update(&conn, id, test_changes) {
-            Ok(pipeline) => Ok(pipeline),
+            Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
