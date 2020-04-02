@@ -5,14 +5,14 @@ use crate::schema::test;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Queryable, Serialize)]
 pub struct RunData {
     pub run_id: Uuid,
-    pub test_id : Uuid,
+    pub test_id: Uuid,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_input: Value,
@@ -40,13 +40,15 @@ pub struct RunQuery {
 
 impl RunData {
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
-        run.filter(run_id.eq(id))
-            .load::<Self>(conn)
+        run.filter(run_id.eq(id)).load::<Self>(conn)
     }
 
-    pub fn find_for_test(conn: &PgConnection, id: Uuid, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {
-        let mut query = run.into_boxed()
-            .filter(test_id.eq(id));
+    pub fn find_for_test(
+        conn: &PgConnection,
+        id: Uuid,
+        params: RunQuery,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        let mut query = run.into_boxed().filter(test_id.eq(id));
 
         if let Some(param) = params.name {
             query = query.filter(name.eq(param));
@@ -83,73 +85,71 @@ impl RunData {
                         } else {
                             query = query.then_order_by(run_id.desc());
                         }
-                    },
+                    }
                     "test_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_id.asc());
                         } else {
                             query = query.then_order_by(test_id.desc());
                         }
-                    },
+                    }
                     "name" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(name.asc());
                         } else {
                             query = query.then_order_by(name.desc());
                         }
-                    },
+                    }
                     "status" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(status.asc());
                         } else {
                             query = query.then_order_by(status.desc());
                         }
-                    },
+                    }
                     "test_input" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_input.asc());
                         } else {
                             query = query.then_order_by(test_input.desc());
                         }
-                    },
+                    }
                     "eval_input" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(eval_input.asc());
                         } else {
                             query = query.then_order_by(eval_input.desc());
                         }
-                    },
+                    }
                     "cromwell_job_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(cromwell_job_id.asc());
                         } else {
                             query = query.then_order_by(cromwell_job_id.desc());
                         }
-                    },
+                    }
                     "created_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_at.asc());
                         } else {
                             query = query.then_order_by(created_at.desc());
                         }
-                    },
+                    }
                     "finished_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(finished_at.asc());
                         } else {
                             query = query.then_order_by(finished_at.desc());
                         }
-                    },
+                    }
                     "created_by" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_by.asc());
                         } else {
                             query = query.then_order_by(created_by.desc());
                         }
-                    },
-                    &_ => {
-
                     }
+                    &_ => {}
                 }
             }
         }
@@ -162,14 +162,17 @@ impl RunData {
         }
 
         query.load::<Self>(conn)
-
     }
 
-    pub fn find_for_template(conn: &PgConnection, id: Uuid, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {
-        let template_subquery = test::dsl::test.filter(test::dsl::template_id.eq(id))
+    pub fn find_for_template(
+        conn: &PgConnection,
+        id: Uuid,
+        params: RunQuery,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        let template_subquery = test::dsl::test
+            .filter(test::dsl::template_id.eq(id))
             .select(test::dsl::test_id);
-        let mut query = run.into_boxed()
-            .filter(test_id.eq_any(template_subquery));
+        let mut query = run.into_boxed().filter(test_id.eq_any(template_subquery));
 
         if let Some(param) = params.name {
             query = query.filter(name.eq(param));
@@ -206,73 +209,71 @@ impl RunData {
                         } else {
                             query = query.then_order_by(run_id.desc());
                         }
-                    },
+                    }
                     "test_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_id.asc());
                         } else {
                             query = query.then_order_by(test_id.desc());
                         }
-                    },
+                    }
                     "name" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(name.asc());
                         } else {
                             query = query.then_order_by(name.desc());
                         }
-                    },
+                    }
                     "status" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(status.asc());
                         } else {
                             query = query.then_order_by(status.desc());
                         }
-                    },
+                    }
                     "test_input" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_input.asc());
                         } else {
                             query = query.then_order_by(test_input.desc());
                         }
-                    },
+                    }
                     "eval_input" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(eval_input.asc());
                         } else {
                             query = query.then_order_by(eval_input.desc());
                         }
-                    },
+                    }
                     "cromwell_job_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(cromwell_job_id.asc());
                         } else {
                             query = query.then_order_by(cromwell_job_id.desc());
                         }
-                    },
+                    }
                     "created_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_at.asc());
                         } else {
                             query = query.then_order_by(created_at.desc());
                         }
-                    },
+                    }
                     "finished_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(finished_at.asc());
                         } else {
                             query = query.then_order_by(finished_at.desc());
                         }
-                    },
+                    }
                     "created_by" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_by.asc());
                         } else {
                             query = query.then_order_by(created_by.desc());
                         }
-                    },
-                    &_ => {
-
                     }
+                    &_ => {}
                 }
             }
         }
@@ -285,16 +286,20 @@ impl RunData {
         }
 
         query.load::<Self>(conn)
-
     }
 
-    pub fn find_for_pipeline(conn: &PgConnection, id: Uuid, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {
-        let pipeline_subquery = template::dsl::template.filter(template::dsl::pipeline_id.eq(id))
+    pub fn find_for_pipeline(
+        conn: &PgConnection,
+        id: Uuid,
+        params: RunQuery,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        let pipeline_subquery = template::dsl::template
+            .filter(template::dsl::pipeline_id.eq(id))
             .select(template::dsl::template_id);
-        let template_subquery = test::dsl::test.filter(test::dsl::template_id.eq_any(pipeline_subquery))
+        let template_subquery = test::dsl::test
+            .filter(test::dsl::template_id.eq_any(pipeline_subquery))
             .select(test::dsl::test_id);
-        let mut query = run.into_boxed()
-            .filter(test_id.eq_any(template_subquery));
+        let mut query = run.into_boxed().filter(test_id.eq_any(template_subquery));
 
         if let Some(param) = params.name {
             query = query.filter(name.eq(param));
@@ -331,73 +336,71 @@ impl RunData {
                         } else {
                             query = query.then_order_by(run_id.desc());
                         }
-                    },
+                    }
                     "test_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_id.asc());
                         } else {
                             query = query.then_order_by(test_id.desc());
                         }
-                    },
+                    }
                     "name" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(name.asc());
                         } else {
                             query = query.then_order_by(name.desc());
                         }
-                    },
+                    }
                     "status" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(status.asc());
                         } else {
                             query = query.then_order_by(status.desc());
                         }
-                    },
+                    }
                     "test_input" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_input.asc());
                         } else {
                             query = query.then_order_by(test_input.desc());
                         }
-                    },
+                    }
                     "eval_input" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(eval_input.asc());
                         } else {
                             query = query.then_order_by(eval_input.desc());
                         }
-                    },
+                    }
                     "cromwell_job_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(cromwell_job_id.asc());
                         } else {
                             query = query.then_order_by(cromwell_job_id.desc());
                         }
-                    },
+                    }
                     "created_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_at.asc());
                         } else {
                             query = query.then_order_by(created_at.desc());
                         }
-                    },
+                    }
                     "finished_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(finished_at.asc());
                         } else {
                             query = query.then_order_by(finished_at.desc());
                         }
-                    },
+                    }
                     "created_by" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_by.asc());
                         } else {
                             query = query.then_order_by(created_by.desc());
                         }
-                    },
-                    &_ => {
-
                     }
+                    &_ => {}
                 }
             }
         }
@@ -410,6 +413,5 @@ impl RunData {
         }
 
         query.load::<Self>(conn)
-
     }
 }

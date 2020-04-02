@@ -1,8 +1,8 @@
-mod db;
 mod app;
 mod custom_sql_types;
-mod models;
+mod db;
 mod error_body;
+mod models;
 mod routes;
 mod schema;
 mod util;
@@ -10,7 +10,7 @@ mod util;
 #[macro_use]
 extern crate diesel;
 
-use actix_web::{App, HttpServer, middleware::Logger};
+use actix_web::{middleware::Logger, App, HttpServer};
 use dotenv;
 use log::info;
 use std::env;
@@ -31,12 +31,12 @@ async fn main() -> std::io::Result<()> {
 
     info!("Starting server");
     HttpServer::new(move || {
-            App::new()
-                .wrap(Logger::default())
-                .data(pool.clone())
-                .configure(app::config)
-        })
-        .bind(format!("{}:{}", host, port))?
-        .run()
-        .await
+        App::new()
+            .wrap(Logger::default())
+            .data(pool.clone())
+            .configure(app::config)
+    })
+    .bind(format!("{}:{}", host, port))?
+    .run()
+    .await
 }

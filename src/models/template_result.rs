@@ -1,9 +1,9 @@
-use crate::schema::template_result::dsl::*;
 use crate::schema::template_result;
+use crate::schema::template_result::dsl::*;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Queryable, Serialize)]
@@ -29,7 +29,7 @@ pub struct TemplateResultQuery {
 }
 
 #[derive(Deserialize, Insertable)]
-#[table_name="template_result"]
+#[table_name = "template_result"]
 pub struct NewTemplateResult {
     pub template_id: Uuid,
     pub result_id: Uuid,
@@ -38,14 +38,21 @@ pub struct NewTemplateResult {
 }
 
 impl TemplateResultData {
-
-    pub fn find_by_template_and_result(conn: &PgConnection, query_template_id: Uuid, query_result_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
-        template_result.filter(result_id.eq(query_result_id))
+    pub fn find_by_template_and_result(
+        conn: &PgConnection,
+        query_template_id: Uuid,
+        query_result_id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        template_result
+            .filter(result_id.eq(query_result_id))
             .filter(template_id.eq(query_template_id))
             .load::<Self>(conn)
     }
 
-    pub fn find(conn: &PgConnection, params: TemplateResultQuery) -> Result<Vec<Self>, diesel::result::Error> {
+    pub fn find(
+        conn: &PgConnection,
+        params: TemplateResultQuery,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
         let mut query = template_result.into_boxed();
 
         if let Some(param) = params.template_id {
@@ -77,38 +84,36 @@ impl TemplateResultData {
                         } else {
                             query = query.then_order_by(template_id.desc());
                         }
-                    },
+                    }
                     "result_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(result_id.asc());
                         } else {
                             query = query.then_order_by(result_id.desc());
                         }
-                    },
+                    }
                     "result_key" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(result_key.asc());
                         } else {
                             query = query.then_order_by(result_key.desc());
                         }
-                    },
+                    }
                     "created_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_at.asc());
                         } else {
                             query = query.then_order_by(created_at.desc());
                         }
-                    },
+                    }
                     "created_by" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_by.asc());
                         } else {
                             query = query.then_order_by(created_by.desc());
                         }
-                    },
-                    &_ => {
-
                     }
+                    &_ => {}
                 }
             }
         }
@@ -123,10 +128,12 @@ impl TemplateResultData {
         query.load::<Self>(conn)
     }
 
-    pub fn create(conn: &PgConnection, params: NewTemplateResult) -> Result<Self, diesel::result::Error> {
+    pub fn create(
+        conn: &PgConnection,
+        params: NewTemplateResult,
+    ) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(template_result)
             .values(&params)
             .get_result(conn)
     }
-
 }

@@ -1,10 +1,10 @@
 use diesel_derive_enum::*;
-use serde::{ Serialize, Deserialize };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 #[DieselType = "Run_status_enum"]
-pub enum RunStatusEnum{
+pub enum RunStatusEnum {
     Created,
     Running,
     Completed,
@@ -12,9 +12,9 @@ pub enum RunStatusEnum{
 }
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 #[DieselType = "Result_type_enum"]
-pub enum ResultTypeEnum{
+pub enum ResultTypeEnum {
     Numeric,
-    File
+    File,
 }

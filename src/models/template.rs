@@ -1,17 +1,17 @@
-use crate::schema::template::dsl::*;
-use crate::schema::template;
-use crate::schema::pipeline;
 use crate::models::pipeline::PipelineData;
+use crate::schema::pipeline;
+use crate::schema::template;
+use crate::schema::template::dsl::*;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Queryable, Serialize)]
 pub struct TemplateData {
-    pub template_id : Uuid,
-    pub pipeline_id : Uuid,
+    pub template_id: Uuid,
+    pub pipeline_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub test_wdl: String,
@@ -38,7 +38,7 @@ pub struct TemplateQuery {
 }
 
 #[derive(Deserialize, Insertable)]
-#[table_name="template"]
+#[table_name = "template"]
 pub struct NewTemplate {
     pub name: String,
     pub pipeline_id: Uuid,
@@ -49,38 +49,39 @@ pub struct NewTemplate {
 }
 
 #[derive(Deserialize, AsChangeset)]
-#[table_name="template"]
+#[table_name = "template"]
 pub struct TemplateChangeset {
     pub name: Option<String>,
-    pub description: Option<String>
+    pub description: Option<String>,
 }
 
 impl TemplateData {
-
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
-        template.filter(template_id.eq(id))
-            .load::<Self>(conn)
+        template.filter(template_id.eq(id)).load::<Self>(conn)
     }
 
-    pub fn find(conn: &PgConnection, params: TemplateQuery) -> Result<Vec<Self>, diesel::result::Error> {
+    pub fn find(
+        conn: &PgConnection,
+        params: TemplateQuery,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
         let mut query = template.into_boxed();
 
         if let Some(param) = params.pipeline_name {
-            let pipelines = pipeline::dsl::pipeline.filter(pipeline::dsl::name.eq(param))
+            let pipelines = pipeline::dsl::pipeline
+                .filter(pipeline::dsl::name.eq(param))
                 .load::<PipelineData>(conn);
-            match pipelines{
+            match pipelines {
                 Ok(pipelines_res) => {
                     if pipelines_res.len() > 0 {
                         query = query.filter(pipeline_id.eq(pipelines_res[0].pipeline_id));
                     } else {
                         return Ok(Vec::new());
                     }
-                },
+                }
                 Err(e) => {
                     return Err(e);
                 }
-                
-            }        
+            }
         }
         if let Some(param) = params.template_id {
             query = query.filter(template_id.eq(param));
@@ -120,59 +121,57 @@ impl TemplateData {
                         } else {
                             query = query.then_order_by(template_id.desc());
                         }
-                    },
+                    }
                     "pipeline_id" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(pipeline_id.asc());
                         } else {
                             query = query.then_order_by(pipeline_id.desc());
                         }
-                    },
+                    }
                     "name" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(name.asc());
                         } else {
                             query = query.then_order_by(name.desc());
                         }
-                    },
+                    }
                     "description" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(description.asc());
                         } else {
                             query = query.then_order_by(description.desc());
                         }
-                    },
+                    }
                     "test_wdl" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(test_wdl.asc());
                         } else {
                             query = query.then_order_by(test_wdl.desc());
                         }
-                    },
+                    }
                     "eval_wdl" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(eval_wdl.asc());
                         } else {
                             query = query.then_order_by(eval_wdl.desc());
                         }
-                    },
+                    }
                     "created_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_at.asc());
                         } else {
                             query = query.then_order_by(created_at.desc());
                         }
-                    },
+                    }
                     "created_by" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_by.asc());
                         } else {
                             query = query.then_order_by(created_by.desc());
                         }
-                    },
-                    &_ => {
-
                     }
+                    &_ => {}
                 }
             }
         }
@@ -184,8 +183,17 @@ impl TemplateData {
             query = query.offset(param);
         }
 
-        query.select((template::template_id, template::pipeline_id, template::name, template::description,
-            template::test_wdl, template::eval_wdl, template::created_at, template::created_by))
+        query
+            .select((
+                template::template_id,
+                template::pipeline_id,
+                template::name,
+                template::description,
+                template::test_wdl,
+                template::eval_wdl,
+                template::created_at,
+                template::created_by,
+            ))
             .load::<Self>(conn)
     }
 
@@ -195,7 +203,11 @@ impl TemplateData {
             .get_result(conn)
     }
 
-    pub fn update(conn: &PgConnection, id: Uuid, params: TemplateChangeset) -> Result<Self, diesel::result::Error> {
+    pub fn update(
+        conn: &PgConnection,
+        id: Uuid,
+        params: TemplateChangeset,
+    ) -> Result<Self, diesel::result::Error> {
         diesel::update(template.filter(template_id.eq(id)))
             .set(params)
             .get_result(conn)
