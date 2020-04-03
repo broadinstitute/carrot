@@ -1,3 +1,6 @@
+//! Contains modules for interfacing with the database
+
+// Declare model modules as public so they can be accessed elsewhere
 pub mod pipeline;
 pub mod result;
 pub mod run;

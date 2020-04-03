@@ -1,3 +1,8 @@
+//! Contains structs and functions for doing operations on pipelines.
+//! 
+//! A pipeline represents a general tool to be run for a specific purpose, such as HaplotypeCaller
+//! or the GATK best practices pipeline.  Represented in the database by the PIPELINE table.
+
 use crate::schema::pipeline;
 use crate::schema::pipeline::dsl::*;
 use crate::util;
@@ -6,6 +11,9 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Mapping to a pipeline as it exists in the PIPELINE table in the database.
+/// 
+/// An instance of this struct will be returned by any queries for pipelines.
 #[derive(Queryable, Serialize)]
 pub struct PipelineData {
     pub pipeline_id: Uuid,
@@ -15,6 +23,11 @@ pub struct PipelineData {
     pub created_by: Option<String>,
 }
 
+/// Represents all possible parameters for a query of the PIPELINE table
+/// 
+/// All values are optional, so any combination can be used during a query.  Limit and offset are
+/// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
+/// with either asc() or desc().  For example: asc(name),desc(description),pipeline_id
 #[derive(Deserialize)]
 pub struct PipelineQuery {
     pub pipeline_id: Option<Uuid>,
@@ -28,6 +41,10 @@ pub struct PipelineQuery {
     pub offset: Option<i64>,
 }
 
+/// A new pipeline to be inserted into the DB
+/// 
+/// name is a required field, but description and created_by are not, so can be filled with `None`
+/// pipeline_id and created_at are populated automatically by the DB
 #[derive(Deserialize, Insertable)]
 #[table_name = "pipeline"]
 pub struct NewPipeline {
@@ -36,6 +53,9 @@ pub struct NewPipeline {
     pub created_by: Option<String>,
 }
 
+/// Represents fields to change when updating a pipeline
+/// 
+/// Only name and description can be modified after the pipeline has been created
 #[derive(Deserialize, AsChangeset, Debug)]
 #[table_name = "pipeline"]
 pub struct PipelineChangeset {
@@ -44,16 +64,29 @@ pub struct PipelineChangeset {
 }
 
 impl PipelineData {
-    pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
-        pipeline.filter(pipeline_id.eq(id)).load::<Self>(conn)
+    /// Queries the DB for a pipeline with the specified id
+    /// 
+    /// Queries the DB using `conn` to retrieve the first row with a pipeline_id value of `id`
+    /// Returns a result containing either the retrieved pipeline as a PipelineData instance
+    /// or an error if the query fails for some reason or if no pipeline is found matching the 
+    /// criteria
+    pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
+        pipeline.filter(pipeline_id.eq(id)).first::<Self>(conn)
     }
 
+    /// Queries the DB for pipelines matching the specified query criteria
+    /// 
+    /// Queries the DB using `conn` to retrieve pipelines matching the crieria in `params`
+    /// Returns a result containing either a vector of the retrieved pipelines as PipelineData 
+    /// instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
         params: PipelineQuery,
     ) -> Result<Vec<Self>, diesel::result::Error> {
+        // Put the query into a box (pointer) so it can be built dynamically
         let mut query = pipeline.into_boxed();
 
+        // Add filters for each of the params if they have values
         if let Some(param) = params.pipeline_id {
             query = query.filter(pipeline_id.eq(param));
         }
@@ -73,6 +106,7 @@ impl PipelineData {
             query = query.filter(created_by.eq(param));
         }
 
+        // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
             let sort = util::parse_sort_string(sort);
             for sort_clause in sort {
@@ -112,6 +146,7 @@ impl PipelineData {
                             query = query.then_order_by(created_by.desc());
                         }
                     }
+                    // Don't add to the order by clause if the sort key isn't recognized
                     &_ => {}
                 }
             }
@@ -124,15 +159,27 @@ impl PipelineData {
             query = query.offset(param);
         }
 
+        // Perform the query
         query.load::<Self>(conn)
     }
 
+    /// Inserts a new pipeline into the DB
+    /// 
+    /// Creates a new pipeline row in the DB using `conn` with the values specified in `params`
+    /// Returns a result containing either the new pipeline that was created or an error if the
+    /// insert fails for some reason
     pub fn create(conn: &PgConnection, params: NewPipeline) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(pipeline)
             .values(&params)
             .get_result(conn)
     }
 
+    /// Updates a specified pipeline in the DB
+    /// 
+    /// Updates the pipeline row in the DB using `conn` specified by `id` with the values in 
+    /// `params`
+    /// Returns a result containing either the newly updated pipeline or an error if the update
+    /// fails for some reason
     pub fn update(
         conn: &PgConnection,
         id: Uuid,
