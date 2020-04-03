@@ -1,6 +1,6 @@
 //! Contains structs and functions for doing operations on tests.
-//! 
-//! A test is for running a specific pipeline, with a specific test WDL and eval WDL, with 
+//!
+//! A test is for running a specific pipeline, with a specific test WDL and eval WDL, with
 //! specific inputs set beforehand for those WDLs. Represented in the database by the TEST table.
 
 use crate::models::template::TemplateData;
@@ -15,7 +15,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// Mapping to a test as it exists in the TEST table in the database.
-/// 
+///
 /// An instance of this struct will be returned by any queries for tests.
 #[derive(Queryable, Serialize)]
 pub struct TestData {
@@ -30,7 +30,7 @@ pub struct TestData {
 }
 
 /// Represents all possible parameters for a query of the TEST table
-/// 
+///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),test_id
@@ -52,8 +52,8 @@ pub struct TestQuery {
 }
 
 /// A new test to be inserted into the DB
-/// 
-/// name and template_id are required fields, but description, test_input_defaults, 
+///
+/// name and template_id are required fields, but description, test_input_defaults,
 /// eval_input_defaults, and created_by are not, so can be filled with `None`
 /// test_id and created_at are populated automatically by the DB
 #[derive(Deserialize, Insertable)]
@@ -68,7 +68,7 @@ pub struct NewTest {
 }
 
 /// Represents fields to change when updating a pipeline
-/// 
+///
 /// Only name and description can be modified after the pipeline has been created
 #[derive(Deserialize, AsChangeset)]
 #[table_name = "test"]
@@ -79,19 +79,19 @@ pub struct TestChangeset {
 
 impl TestData {
     /// Queries the DB for a test with the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve the first row with a test_id value of `id`
     /// Returns a result containing either the retrieved test as a TestData instance
-    /// or an error if the query fails for some reason or if no test is found matching the 
+    /// or an error if the query fails for some reason or if no test is found matching the
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         test.filter(test_id.eq(id)).first::<Self>(conn)
     }
 
     /// Queries the DB for test matching the specified query criteria
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve tests matching the crieria in `params`
-    /// Returns a result containing either a vector of the retrieved tests as TestData 
+    /// Returns a result containing either a vector of the retrieved tests as TestData
     /// instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
@@ -109,10 +109,10 @@ impl TestData {
             match templates {
                 Ok(templates_res) => {
                     query = query.filter(template_id.eq(templates_res.template_id));
-                },
+                }
                 Err(diesel::NotFound) => {
                     return Ok(Vec::new());
-                },
+                }
                 Err(e) => {
                     return Err(e);
                 }
@@ -223,7 +223,7 @@ impl TestData {
     }
 
     /// Inserts a new test into the DB
-    /// 
+    ///
     /// Creates a new test row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new test that was created or an error if the
     /// insert fails for some reason
@@ -232,7 +232,7 @@ impl TestData {
     }
 
     /// Updates a specified test in the DB
-    /// 
+    ///
     /// Updates the test row in the DB using `conn` specified by `id` with the values in `params`
     /// Returns a result containing either the newly updated test or an error if the update
     /// fails for some reason

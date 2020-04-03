@@ -1,5 +1,5 @@
 //! Defines REST API mappings for operations on templates
-//! 
+//!
 //! Contains functions for processing requests to create, update, and search templates, along with
 //! their URI mappings
 
@@ -11,12 +11,12 @@ use log::error;
 use uuid::Uuid;
 
 /// Handles requests to /templates/{id} for retrieving template info by template_id
-/// 
+///
 /// This function is called by Actix-Web when a get request is made to the /templates/{id} mapping
-/// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the 
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the
 /// retrieved template, or an error message if there is no matching template or some other
 /// error occurs
-/// 
+///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 #[get("/templates/{id}")]
@@ -52,37 +52,31 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
     })
     .await
     // If there is no error, return a response with the retrieved data
-    .map(|results| {
-        HttpResponse::Ok().json(results)
-    })
+    .map(|results| HttpResponse::Ok().json(results))
     .map_err(|e| {
         error!("{}", e);
         match e {
             // If no template is found, return a 404
-            BlockingError::Error(diesel::NotFound) => {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template found",
-                    status: 404,
-                    detail: "No template found with the specified ID",
-                })
-            },
+            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                title: "No template found",
+                status: 404,
+                detail: "No template found with the specified ID",
+            }),
             // For other errors, return a 500
-            _ => {
-                HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: "Error while attempting to retrieve requested template from DB",
-                })
-            }
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to retrieve requested template from DB",
+            }),
         }
     })
 }
 
 /// Handles requests to /templates for retrieving template info by query parameters
-/// 
+///
 /// This function is called by Actix-Web when a get request is made to the /templates mapping
-/// It deserializes the query params to a TemplateQuery, connects to the db via a connection from 
-/// `pool`, and returns the retrieved templates, or an error message if there is no matching 
+/// It deserializes the query params to a TemplateQuery, connects to the db via a connection from
+/// `pool`, and returns the retrieved templates, or an error message if there is no matching
 /// template or some other error occurs
 ///
 /// # Panics
@@ -130,12 +124,12 @@ async fn find(
 }
 
 /// Handles requests to /templates for creating templates
-/// 
+///
 /// This function is called by Actix-Web when a post request is made to the /templates mapping
 /// It deserializes the request body to a NewTemplate, connects to the db via a connection from
 /// `pool`, creates a template with the specified parameters, and returns the created template, or
 /// an error message if creating the template fails for some reason
-/// 
+///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 #[post("/templates")]
@@ -170,10 +164,10 @@ async fn create(
 }
 
 /// Handles requests to /templates/{id} for updating a template
-/// 
+///
 /// This function is called by Actix-Web when a put request is made to the /templates/{id} mapping
-/// It deserializes the request body to a TemplateChangeset, connects to the db via a connection 
-/// from `pool`, updates the specified template, and returns the updated template or an error 
+/// It deserializes the request body to a TemplateChangeset, connects to the db via a connection
+/// from `pool`, updates the specified template, and returns the updated template or an error
 /// message if some error occurs
 ///
 /// # Panics
@@ -225,7 +219,7 @@ async fn update(
 }
 
 /// Attaches the REST mappings in this file to a service config
-/// 
+///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {

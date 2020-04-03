@@ -1,5 +1,5 @@
 //! Contains structs and functions for doing operations on results.
-//! 
+//!
 //! A result is a definition of a result that can be returned from a test run. Represented in the
 //! database by the RESULT table.
 
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Mapping to a result as it exists in the RESULT table in the database.
-/// 
+///
 /// An instance of this struct will be returned by any queries for results.
 #[derive(Queryable, Serialize)]
 pub struct ResultData {
@@ -26,7 +26,7 @@ pub struct ResultData {
 }
 
 /// Represents all possible parameters for a query of the RESULT table
-/// 
+///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),result_id
@@ -45,7 +45,7 @@ pub struct ResultQuery {
 }
 
 /// A new result to be inserted into the DB
-/// 
+///
 /// name and result_type are required fields, but description and created_by are not
 /// result_id and created_at are populated automatically by the DB
 #[derive(Deserialize, Insertable)]
@@ -58,7 +58,7 @@ pub struct NewResult {
 }
 
 /// Represents fields to change when updating a result
-/// 
+///
 /// Only name and description can be modified after the result has been created
 #[derive(Deserialize, AsChangeset)]
 #[table_name = "result"]
@@ -69,19 +69,19 @@ pub struct ResultChangeset {
 
 impl ResultData {
     /// Queries the DB for a result with the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve the first row with a result_id value of `id`
     /// Returns a result containing either the retrieved result as a ResultData instance
-    /// or an error if the query fails for some reason or if no result is found matching the 
+    /// or an error if the query fails for some reason or if no result is found matching the
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         result.filter(result_id.eq(id)).first::<Self>(conn)
     }
 
     /// Queries the DB for result matching the specified query criteria
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve results matching the crieria in `params`
-    /// Returns a result containing either a vector of the retrieved results as ResultData 
+    /// Returns a result containing either a vector of the retrieved results as ResultData
     /// instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
@@ -178,7 +178,7 @@ impl ResultData {
     }
 
     /// Inserts a new result into the DB
-    /// 
+    ///
     /// Creates a new result row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new result that was created or an error if the
     /// insert fails for some reason
@@ -187,8 +187,8 @@ impl ResultData {
     }
 
     /// Updates a specified result in the DB
-    /// 
-    /// Updates the result row in the DB using `conn` specified by `id` with the values in 
+    ///
+    /// Updates the result row in the DB using `conn` specified by `id` with the values in
     /// `params`
     /// Returns a result containing either the newly updated result or an error if the update
     /// fails for some reason

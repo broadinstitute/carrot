@@ -1,6 +1,6 @@
 //! Contains structs and functions for doing operations on templates.
-//! 
-//! A template represents all versions of a pipeline that share the same execution and evaluation 
+//!
+//! A template represents all versions of a pipeline that share the same execution and evaluation
 //! WDLs (test_wdl and eval_wdl respectively). If a new test needs creating that requires a new
 //! WDL (but not new inputs) for execution or evaluation, a new template is required.  Represented
 //! in the database by the TEMPLATE table.
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Mapping to a template as it exists in the TEMPLATE table in the database.
-/// 
+///
 /// An instance of this struct will be returned by any queries for templates.
 #[derive(Queryable, Serialize)]
 pub struct TemplateData {
@@ -31,7 +31,7 @@ pub struct TemplateData {
 }
 
 /// Represents all possible parameters for a query of the TEMPLATE table
-/// 
+///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),pipeline_id
@@ -53,9 +53,9 @@ pub struct TemplateQuery {
 }
 
 /// A new template to be inserted into the DB
-/// 
-/// name, pipeline_id, test_wdl, and eval_wdl are required fields, but description and created_by 
-/// are not, so can be filled with `None`; template_id and created_at are populated automatically 
+///
+/// name, pipeline_id, test_wdl, and eval_wdl are required fields, but description and created_by
+/// are not, so can be filled with `None`; template_id and created_at are populated automatically
 /// by the DB
 #[derive(Deserialize, Insertable)]
 #[table_name = "template"]
@@ -69,7 +69,7 @@ pub struct NewTemplate {
 }
 
 /// Represents fields to change when updating a template
-/// 
+///
 /// Only name and description can be modified after the template has been created
 #[derive(Deserialize, AsChangeset)]
 #[table_name = "template"]
@@ -80,19 +80,19 @@ pub struct TemplateChangeset {
 
 impl TemplateData {
     /// Queries the DB for a template with the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve the first row with a template_id value of `id`
     /// Returns a result containing either the retrieved template as a TemplateData instance
-    /// or an error if the query fails for some reason or if no template is found matching the 
+    /// or an error if the query fails for some reason or if no template is found matching the
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         template.filter(template_id.eq(id)).first::<Self>(conn)
     }
 
     /// Queries the DB for templates matching the specified query criteria
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve templates matching the crieria in `params`
-    /// Returns a result containing either a vector of the retrieved templates as TemplateData 
+    /// Returns a result containing either a vector of the retrieved templates as TemplateData
     /// instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
@@ -110,10 +110,10 @@ impl TemplateData {
             match pipelines {
                 Ok(pipelines_res) => {
                     query = query.filter(pipeline_id.eq(pipelines_res.pipeline_id));
-                },
+                }
                 Err(diesel::NotFound) => {
                     return Ok(Vec::new());
-                },
+                }
                 Err(e) => {
                     return Err(e);
                 }
@@ -227,7 +227,7 @@ impl TemplateData {
     }
 
     /// Inserts a new template into the DB
-    /// 
+    ///
     /// Creates a new template row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new template that was created or an error if the
     /// insert fails for some reason
@@ -238,8 +238,8 @@ impl TemplateData {
     }
 
     /// Updates a specified template in the DB
-    /// 
-    /// Updates the template row in the DB using `conn` specified by `id` with the values in 
+    ///
+    /// Updates the template row in the DB using `conn` specified by `id` with the values in
     /// `params`
     /// Returns a result containing either the newly updated template or an error if the update
     /// fails for some reason

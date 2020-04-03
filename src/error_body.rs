@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 ///Struct to use for returning error responses from REST endpoints
-/// 
+///
 /// `title` is a brief summary of the error
 /// `status` is the http status code
 /// `detail` is a more detailed explanation of the error

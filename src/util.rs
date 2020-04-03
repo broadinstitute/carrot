@@ -1,5 +1,5 @@
 //! Provides utility functionality for data handling within the project
-//! 
+//!
 //! Should and will probably be moved to a module where it is relevant, in favor of having a
 //! forever-growing util module
 
@@ -10,7 +10,7 @@ pub struct SortClause {
 }
 
 /// Parses the sort string for a query sent to the REST API
-/// 
+///
 /// Expects sort strings to be comma-separated lists of sort keys, optionally enclosed in asc() or
 /// desc().  For example, asc(name),desc(created_at),pipeline_id
 pub fn parse_sort_string(sort_string: String) -> Vec<SortClause> {

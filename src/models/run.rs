@@ -1,5 +1,5 @@
 //! Contains structs and functions for doing operations on runs.
-//! 
+//!
 //! A run represents a specific run of a test.  Represented in the database by the RUN table.
 
 use crate::custom_sql_types::RunStatusEnum;
@@ -14,7 +14,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// Mapping to a run as it exists in the RUN table in the database.
-/// 
+///
 /// An instance of this struct will be returned by any queries for runs.
 #[derive(Queryable, Serialize)]
 pub struct RunData {
@@ -31,7 +31,7 @@ pub struct RunData {
 }
 
 /// Represents all possible parameters for a query of the RUN table
-/// 
+///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),run_id
@@ -52,7 +52,7 @@ pub struct RunQuery {
 
 impl RunData {
     /// Queries the DB for a run with the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve the first row with a run_id value of `id`
     /// Returns a result containing either the retrieved run as a RunData instance or an error if
     /// the query fails for some reason or if no pipeline is found matching the criteria
@@ -62,10 +62,10 @@ impl RunData {
 
     /// Queries the DB for runs matching the specified query criteria and related to the test with
     /// the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve runs matching the crieria in `params` and who
     /// have a value of test_id == `id`
-    /// Returns a result containing either a vector of the retrieved runs as RunData instances 
+    /// Returns a result containing either a vector of the retrieved runs as RunData instances
     /// or an error if the query fails for some reason
     pub fn find_for_test(
         conn: &PgConnection,
@@ -195,10 +195,10 @@ impl RunData {
 
     /// Queries the DB for runs matching the specified query criteria and related to the template with
     /// the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve runs matching the crieria in `params` and who
     /// have a value of test_id in the tests belonging to the specified template
-    /// Returns a result containing either a vector of the retrieved runs as RunData instances 
+    /// Returns a result containing either a vector of the retrieved runs as RunData instances
     /// or an error if the query fails for some reason
     pub fn find_for_template(
         conn: &PgConnection,
@@ -331,13 +331,13 @@ impl RunData {
         query.load::<Self>(conn)
     }
 
-    /// Queries the DB for runs matching the specified query criteria and related to the pipeline 
+    /// Queries the DB for runs matching the specified query criteria and related to the pipeline
     /// with the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve runs matching the crieria in `params` and who
-    /// have a value of test_id in tests belonging to templates belonging to the specified 
+    /// have a value of test_id in tests belonging to templates belonging to the specified
     /// pipeline
-    /// Returns a result containing either a vector of the retrieved runs as RunData instances 
+    /// Returns a result containing either a vector of the retrieved runs as RunData instances
     /// or an error if the query fails for some reason
     pub fn find_for_pipeline(
         conn: &PgConnection,

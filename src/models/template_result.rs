@@ -1,5 +1,5 @@
 //! Contains structs and functions for doing operations on template_result relations.
-//! 
+//!
 //! A template_result a mapping from a result to a template to which it is relevant, along with
 //! associate metadata.  Represented in the database by the TEMPLATE_RESULT table.
 
@@ -11,9 +11,9 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Mapping to a template_result mapping as it exists in the TEMPLATE_RESULT table in the 
+/// Mapping to a template_result mapping as it exists in the TEMPLATE_RESULT table in the
 /// database.
-/// 
+///
 /// An instance of this struct will be returned by any queries for template_results.
 #[derive(Queryable, Serialize)]
 pub struct TemplateResultData {
@@ -25,7 +25,7 @@ pub struct TemplateResultData {
 }
 
 /// Represents all possible parameters for a query of the TEMPLATE_RESULT table
-/// 
+///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(template_id),desc(result_id),result_key
@@ -43,7 +43,7 @@ pub struct TemplateResultQuery {
 }
 
 /// A new template_result mapping to be inserted into the DB
-/// 
+///
 /// template_id, result_id, and result_key are all required fields, but created_by is not
 /// created_at is populated automatically by the DB
 #[derive(Deserialize, Insertable)]
@@ -57,11 +57,11 @@ pub struct NewTemplateResult {
 
 impl TemplateResultData {
     /// Queries the DB for a template_result relationship for the specified ids
-    /// 
-    /// Queries the DB using `conn` to retrieve the first row with a template_id matching 
+    ///
+    /// Queries the DB using `conn` to retrieve the first row with a template_id matching
     /// `query_template_id` and a result_id matching `query_result_id`
-    /// Returns a result containing either the retrieved template_result mapping as a 
-    /// TemplateResultData instance or an error if the query fails for some reason or if no 
+    /// Returns a result containing either the retrieved template_result mapping as a
+    /// TemplateResultData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
     pub fn find_by_template_and_result(
         conn: &PgConnection,
@@ -75,10 +75,10 @@ impl TemplateResultData {
     }
 
     /// Queries the DB for templarte_result mappings matching the specified query criteria
-    /// 
-    /// Queries the DB using `conn` to retrieve template_result mappings matching the crieria in 
+    ///
+    /// Queries the DB using `conn` to retrieve template_result mappings matching the crieria in
     /// `params`
-    /// Returns a result containing either a vector of the retrieved template_result mappings as 
+    /// Returns a result containing either a vector of the retrieved template_result mappings as
     /// TemplateResultData instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
@@ -165,10 +165,10 @@ impl TemplateResultData {
     }
 
     /// Inserts a new template_result mapping into the DB
-    /// 
-    /// Creates a new template_result row in the DB using `conn` with the values specified in 
+    ///
+    /// Creates a new template_result row in the DB using `conn` with the values specified in
     /// `params`
-    /// Returns a result containing either the new template_result mapping that was created or an 
+    /// Returns a result containing either the new template_result mapping that was created or an
     /// error if the insert fails for some reason
     pub fn create(
         conn: &PgConnection,

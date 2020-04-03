@@ -1,5 +1,5 @@
 //! Defines REST API mappings for operations on tests
-//! 
+//!
 //! Contains functions for processing requests to create, update, and search tests, along with
 //! their URI mappings
 
@@ -11,11 +11,11 @@ use log::error;
 use uuid::Uuid;
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
-/// 
+///
 /// This function is called by Actix-Web when a get request is made to the /tests/{id} mapping
-/// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the 
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the
 /// retrieved test, or an error message if there is no matching test or some other error occurs
-/// 
+///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 #[get("/tests/{id}")]
@@ -58,30 +58,26 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         error!("{}", e);
         match e {
             // If no test is found, return a 404
-            BlockingError::Error(diesel::NotFound) => {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template found",
-                    status: 404,
-                    detail: "No template found with the specified ID",
-                })
-            },
+            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                title: "No template found",
+                status: 404,
+                detail: "No template found with the specified ID",
+            }),
             // For other errors, return a 500
-            _ => {
-                HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: "Error while attempting to retrieve requested template from DB",
-                })
-            }
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to retrieve requested template from DB",
+            }),
         }
     })
 }
 
 /// Handles requests to /tests for retrieving test info by query parameters
-/// 
+///
 /// This function is called by Actix-Web when a get request is made to the /tests mapping
-/// It deserializes the query params to a TestQuery, connects to the db via a connection from 
-/// `pool`, and returns the retrieved tests, or an error message if there is no matching 
+/// It deserializes the query params to a TestQuery, connects to the db via a connection from
+/// `pool`, and returns the retrieved tests, or an error message if there is no matching
 /// test or some other error occurs
 ///
 /// # Panics
@@ -129,12 +125,12 @@ async fn find(
 }
 
 /// Handles requests to /tests for creating tests
-/// 
+///
 /// This function is called by Actix-Web when a post request is made to the /tests mapping
 /// It deserializes the request body to a NewTest, connects to the db via a connection from
 /// `pool`, creates a test with the specified parameters, and returns the created test, or
 /// an error message if creating the test fails for some reason
-/// 
+///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 #[post("/tests")]
@@ -169,10 +165,10 @@ async fn create(
 }
 
 /// Handles requests to /test/{id} for updating a test
-/// 
+///
 /// This function is called by Actix-Web when a put request is made to the /tests/{id} mapping
-/// It deserializes the request body to a TestChangeset, connects to the db via a connection 
-/// from `pool`, updates the specified test, and returns the updated test or an error 
+/// It deserializes the request body to a TestChangeset, connects to the db via a connection
+/// from `pool`, updates the specified test, and returns the updated test or an error
 /// message if some error occurs
 ///
 /// # Panics
@@ -224,7 +220,7 @@ async fn update(
 }
 
 /// Attaches the REST mappings in this file to a service config
-/// 
+///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {

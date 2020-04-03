@@ -1,5 +1,5 @@
 //! Defines REST API mappings for operations on pipelines
-//! 
+//!
 //! Contains functions for processing requests to create, update, and search pipelines, along with
 //! their URI mappings
 
@@ -11,12 +11,12 @@ use log::error;
 use uuid::Uuid;
 
 /// Handles requests to /pipelines/{id} for retrieving pipeline info by pipeline_id
-/// 
+///
 /// This function is called by Actix-Web when a get request is made to the /pipelines/{id} mapping
-/// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the 
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the
 /// retrieved pipeline, or an error message if there is no matching pipeline or some other
 /// error occurs
-/// 
+///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 #[get("/pipelines/{id}")]
@@ -44,44 +44,36 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 
         match PipelineData::find_by_id(&conn, id) {
             Ok(pipeline) => Ok(pipeline),
-            Err(e) => {
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     })
     .await
     // If there is no error, return a response with the retrieved data
-    .map(|results| {
-        HttpResponse::Ok().json(results)
-    })
+    .map(|results| HttpResponse::Ok().json(results))
     .map_err(|e| {
         error!("{}", e);
         match e {
             // If no pipeline is found, return a 404
-            BlockingError::Error(diesel::NotFound) => {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No pipeline found",
-                    status: 404,
-                    detail: "No pipeline found with the specified ID",
-                })
-            },
+            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                title: "No pipeline found",
+                status: 404,
+                detail: "No pipeline found with the specified ID",
+            }),
             // For other errors, return a 500
-            _ => {
-                HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: "Error while attempting to retrieve requested pipeline from DB",
-                })
-            }
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to retrieve requested pipeline from DB",
+            }),
         }
     })
 }
 
 /// Handles requests to /pipelines for retrieving pipeline info by query parameters
-/// 
+///
 /// This function is called by Actix-Web when a get request is made to the /pipelines mapping
-/// It deserializes the query params to a PipelineQuery, connects to the db via a connection from 
-/// `pool`, and returns the retrieved pipelines, or an error message if there is no matching 
+/// It deserializes the query params to a PipelineQuery, connects to the db via a connection from
+/// `pool`, and returns the retrieved pipelines, or an error message if there is no matching
 /// pipeline or some other error occurs
 ///
 /// # Panics
@@ -129,12 +121,12 @@ async fn find(
 }
 
 /// Handles requests to /pipelines for creating pipelines
-/// 
+///
 /// This function is called by Actix-Web when a post request is made to the /pipelines mapping
 /// It deserializes the request body to a NewPipeline, connects to the db via a connection from
 /// `pool`, creates a pipeline with the specified parameters, and returns the created pipeline, or
 /// an error message if creating the pipeline fails for some reason
-/// 
+///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 #[post("/pipelines")]
@@ -169,10 +161,10 @@ async fn create(
 }
 
 /// Handles requests to /pipelines/{id} for updating a pipeline
-/// 
+///
 /// This function is called by Actix-Web when a put request is made to the /pipelines/{id} mapping
-/// It deserializes the request body to a PipelineChangeset, connects to the db via a connection 
-/// from `pool`, updates the specified pipeline, and returns the updated pipeline or an error 
+/// It deserializes the request body to a PipelineChangeset, connects to the db via a connection
+/// from `pool`, updates the specified pipeline, and returns the updated pipeline or an error
 /// message if some error occurs
 ///
 /// # Panics
@@ -224,7 +216,7 @@ async fn update(
 }
 
 /// Attaches the REST mappings in this file to a service config
-/// 
+///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {

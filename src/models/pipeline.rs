@@ -1,5 +1,5 @@
 //! Contains structs and functions for doing operations on pipelines.
-//! 
+//!
 //! A pipeline represents a general tool to be run for a specific purpose, such as HaplotypeCaller
 //! or the GATK best practices pipeline.  Represented in the database by the PIPELINE table.
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Mapping to a pipeline as it exists in the PIPELINE table in the database.
-/// 
+///
 /// An instance of this struct will be returned by any queries for pipelines.
 #[derive(Queryable, Serialize)]
 pub struct PipelineData {
@@ -24,7 +24,7 @@ pub struct PipelineData {
 }
 
 /// Represents all possible parameters for a query of the PIPELINE table
-/// 
+///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),pipeline_id
@@ -42,7 +42,7 @@ pub struct PipelineQuery {
 }
 
 /// A new pipeline to be inserted into the DB
-/// 
+///
 /// name is a required field, but description and created_by are not, so can be filled with `None`
 /// pipeline_id and created_at are populated automatically by the DB
 #[derive(Deserialize, Insertable)]
@@ -54,7 +54,7 @@ pub struct NewPipeline {
 }
 
 /// Represents fields to change when updating a pipeline
-/// 
+///
 /// Only name and description can be modified after the pipeline has been created
 #[derive(Deserialize, AsChangeset, Debug)]
 #[table_name = "pipeline"]
@@ -65,19 +65,19 @@ pub struct PipelineChangeset {
 
 impl PipelineData {
     /// Queries the DB for a pipeline with the specified id
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve the first row with a pipeline_id value of `id`
     /// Returns a result containing either the retrieved pipeline as a PipelineData instance
-    /// or an error if the query fails for some reason or if no pipeline is found matching the 
+    /// or an error if the query fails for some reason or if no pipeline is found matching the
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         pipeline.filter(pipeline_id.eq(id)).first::<Self>(conn)
     }
 
     /// Queries the DB for pipelines matching the specified query criteria
-    /// 
+    ///
     /// Queries the DB using `conn` to retrieve pipelines matching the crieria in `params`
-    /// Returns a result containing either a vector of the retrieved pipelines as PipelineData 
+    /// Returns a result containing either a vector of the retrieved pipelines as PipelineData
     /// instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
@@ -164,7 +164,7 @@ impl PipelineData {
     }
 
     /// Inserts a new pipeline into the DB
-    /// 
+    ///
     /// Creates a new pipeline row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new pipeline that was created or an error if the
     /// insert fails for some reason
@@ -175,8 +175,8 @@ impl PipelineData {
     }
 
     /// Updates a specified pipeline in the DB
-    /// 
-    /// Updates the pipeline row in the DB using `conn` specified by `id` with the values in 
+    ///
+    /// Updates the pipeline row in the DB using `conn` specified by `id` with the values in
     /// `params`
     /// Returns a result containing either the newly updated pipeline or an error if the update
     /// fails for some reason
