@@ -1,6 +1,11 @@
+//! Defines the diesel schema for interfacing with the DB
+//! 
+//! Uses diesel's table! macro to define the mappings to the tables in the DB.  The macro 
+//! generates the crate::schema::[table_name]::dsl module for each table, which allows performing
+//! operations on the data in the tables
+
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
 
     pipeline (pipeline_id) {
         pipeline_id -> Uuid,
@@ -13,7 +18,7 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
+    use crate::custom_sql_types::Result_type_enum;
 
     result (result_id) {
         result_id -> Uuid,
@@ -27,7 +32,7 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
+    use crate::custom_sql_types::Run_status_enum;
 
     run (run_id) {
         run_id -> Uuid,
@@ -45,7 +50,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
 
     run_result_file (run_id, result_id) {
         run_id -> Uuid,
@@ -57,7 +61,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
 
     run_result_numeric (run_id, result_id) {
         run_id -> Uuid,
@@ -69,7 +72,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
 
     template (template_id) {
         template_id -> Uuid,
@@ -85,7 +87,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
 
     template_result (template_id, result_id) {
         template_id -> Uuid,
@@ -98,7 +99,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::*;
 
     test (test_id) {
         test_id -> Uuid,
