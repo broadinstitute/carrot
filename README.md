@@ -1,4 +1,4 @@
-### CARROT
+# CARROT
 
 This repository contains the Cromwell Automated Runner for Regression and Automation Testing.  This is a tool for configuring, running, and comparing the results of tests run in the [Cromwell Workflow Engine](https://github.com/broadinstitute/cromwell).
 
