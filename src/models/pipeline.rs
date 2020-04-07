@@ -14,7 +14,7 @@ use uuid::Uuid;
 /// Mapping to a pipeline as it exists in the PIPELINE table in the database.
 ///
 /// An instance of this struct will be returned by any queries for pipelines.
-#[derive(Queryable, Serialize)]
+#[derive(Queryable, Serialize, PartialEq, Debug)]
 pub struct PipelineData {
     pub pipeline_id: Uuid,
     pub name: String,
@@ -108,7 +108,7 @@ impl PipelineData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::parse_sort_string(sort);
+            let sort = util::parse_sort_string(&sort);
             for sort_clause in sort {
                 match &*sort_clause.key {
                     "pipeline_id" => {
@@ -189,4 +189,314 @@ impl PipelineData {
             .set(params)
             .get_result(conn)
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use super::super::unit_test_util::*;
+    use uuid::Uuid;
+
+    fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+    }
+
+    fn insert_test_pipelines(conn: &PgConnection) -> Vec<PipelineData> {
+        let mut pipelines = Vec::new();
+
+        let new_pipeline = NewPipeline {
+            name: String::from("Name1"),
+            description: Some(String::from("Description4")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        pipelines.push(PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"));
+
+        let new_pipeline = NewPipeline {
+            name: String::from("Name2"),
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        pipelines.push(PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"));
+
+        let new_pipeline = NewPipeline {
+            name: String::from("Name4"),
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        pipelines.push(PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"));
+
+        pipelines
+    }
+
+    #[test]
+    fn find_by_id_exists() {
+        let conn = get_test_db_connection();
+
+        let test_pipeline = insert_test_pipeline(&conn);
+
+        let found_pipeline = PipelineData::find_by_id(&conn, test_pipeline.pipeline_id)
+            .expect("Failed to retrieve test pipeline by id.");
+
+        assert_eq!(found_pipeline, test_pipeline);
+
+    }
+
+    #[test]
+    fn find_by_id_not_exists() {
+        let conn = get_test_db_connection();
+
+        let nonexistent_pipeline = PipelineData::find_by_id(&conn, Uuid::new_v4());
+
+        assert!(matches!(nonexistent_pipeline, Err(diesel::result::Error::NotFound)));
+    }
+
+    #[test]
+    fn find_with_pipeline_id() {
+        let conn = get_test_db_connection();
+
+        let test_pipelines = insert_test_pipelines(&conn);
+
+        let test_query = PipelineQuery {
+            pipeline_id: Some(test_pipelines[0].pipeline_id),
+            name: None,
+            description: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 1);
+        assert_eq!(found_pipelines[0], test_pipelines[0]);
+
+    }
+
+    #[test]
+    fn find_with_name() {
+        let conn = get_test_db_connection();
+
+        let test_pipelines = insert_test_pipelines(&conn);
+
+        let test_query = PipelineQuery {
+            pipeline_id: None,
+            name: Some(test_pipelines[0].name.clone()),
+            description: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 1);
+        assert_eq!(found_pipelines[0], test_pipelines[0]);
+    }
+
+    #[test]
+    fn find_with_description() {
+        let conn = get_test_db_connection();
+
+        let test_pipelines = insert_test_pipelines(&conn);
+
+        let test_query = PipelineQuery {
+            pipeline_id: None,
+            name: None,
+            description: Some(test_pipelines[0].description.clone().unwrap()),
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 1);
+        assert_eq!(found_pipelines[0], test_pipelines[0]);
+    }
+
+    #[test]
+    fn find_with_sort_and_limit_and_offset() {
+        let conn = get_test_db_connection();
+
+        let test_pipelines = insert_test_pipelines(&conn);
+
+        let test_query = PipelineQuery {
+            pipeline_id: None,
+            name: None,
+            description: None,
+            created_before: None,
+            created_after: None,
+            created_by: Some(String::from("Test@example.com")),
+            sort: Some(String::from("description,desc(name)")),
+            limit: Some(2),
+            offset: None,
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 2);
+        assert_eq!(found_pipelines[0], test_pipelines[2]);
+        assert_eq!(found_pipelines[1], test_pipelines[1]);
+
+        let test_query = PipelineQuery {
+            pipeline_id: None,
+            name: None,
+            description: None,
+            created_before: None,
+            created_after: None,
+            created_by: Some(String::from("Test@example.com")),
+            sort: Some(String::from("description,desc(name)")),
+            limit: Some(2),
+            offset: Some(2),
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 1);
+        assert_eq!(found_pipelines[0], test_pipelines[0]);
+
+    }
+
+    #[test]
+    fn find_with_created_before_and_created_after() {
+        let conn = get_test_db_connection();
+
+        insert_test_pipelines(&conn);
+
+        let test_query = PipelineQuery {
+            pipeline_id: None,
+            name: None,
+            description: None,
+            created_before: None,
+            created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
+            created_by: Some(String::from("Test@example.com")),
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 0);
+
+        let test_query = PipelineQuery {
+            pipeline_id: None,
+            name: None,
+            description: None,
+            created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
+            created_after: None,
+            created_by: Some(String::from("Test@example.com")),
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_pipelines = PipelineData::find(&conn, test_query)
+            .expect("Failed to find pipelines");
+
+        assert_eq!(found_pipelines.len(), 3);
+    }
+
+    #[test]
+    fn create_success() {
+        let conn = get_test_db_connection();
+
+        let test_pipeline = insert_test_pipeline(&conn);
+
+        assert_eq!(test_pipeline.name, "Kevin's Pipeline");
+        assert_eq!(
+            test_pipeline.description.expect("Created pipeline missing description"),
+            "Kevin made this pipeline for testing"
+        );
+        assert_eq!(
+            test_pipeline.created_by.expect("Created pipeline missing created_by"),
+            "Kevin@example.com"
+        );
+    }
+
+    #[test]
+    fn create_failure_same_name() {
+        let conn = get_test_db_connection();
+
+        let test_pipeline = insert_test_pipeline(&conn);
+
+        let copy_pipeline = NewPipeline {
+            name: test_pipeline.name,
+            description: test_pipeline.description,
+            created_by: test_pipeline.created_by,
+        };
+
+        let new_pipeline = PipelineData::create(&conn, copy_pipeline);
+
+        assert!(
+            matches!(
+                new_pipeline, 
+                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+            )
+        );
+    }
+
+    #[test]
+    fn update_success() {
+        let conn = get_test_db_connection();
+
+        let test_pipeline = insert_test_pipeline(&conn);
+
+        let changes = PipelineChangeset {
+            name: Some(String::from("TestTestTestTest")),
+            description: Some(String::from("TESTTESTTESTTEST"))
+        };
+
+        let updated_pipeline = PipelineData::update(&conn, test_pipeline.pipeline_id, changes).expect("Failed to update pipeline");
+
+        assert_eq!(updated_pipeline.name, String::from("TestTestTestTest"));
+        assert_eq!(updated_pipeline.description.unwrap(), String::from("TESTTESTTESTTEST"));
+    }
+
+    #[test]
+    fn update_failure_same_name() {
+        let conn = get_test_db_connection();
+
+        let test_pipelines = insert_test_pipelines(&conn);
+
+        let changes = PipelineChangeset {
+            name: Some(test_pipelines[0].name.clone()),
+            description: None
+        };
+
+        let updated_pipeline = PipelineData::update(&conn, test_pipelines[1].pipeline_id, changes);
+
+        assert!(
+            matches!(
+                updated_pipeline, 
+                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+            )
+        );
+    }
+
 }
