@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// Mapping to a test as it exists in the TEST table in the database.
 ///
 /// An instance of this struct will be returned by any queries for tests.
-#[derive(Queryable, Serialize)]
+#[derive(Queryable, Serialize, PartialEq, Debug)]
 pub struct TestData {
     pub test_id: Uuid,
     pub template_id: Uuid,
@@ -67,9 +67,9 @@ pub struct NewTest {
     pub created_by: Option<String>,
 }
 
-/// Represents fields to change when updating a pipeline
+/// Represents fields to change when updating a test
 ///
-/// Only name and description can be modified after the pipeline has been created
+/// Only name and description can be modified after the test has been created
 #[derive(Deserialize, AsChangeset)]
 #[table_name = "test"]
 pub struct TestChangeset {
@@ -135,7 +135,7 @@ impl TestData {
             query = query.filter(test_input_defaults.eq(param));
         }
         if let Some(param) = params.eval_input_defaults {
-            query = query.filter(eval_input_defaults.lt(param));
+            query = query.filter(eval_input_defaults.eq(param));
         }
         if let Some(param) = params.created_after {
             query = query.filter(created_at.gt(param));
@@ -245,4 +245,503 @@ impl TestData {
             .set(params)
             .get_result(conn)
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::models::template::NewTemplate;
+    use crate::models::template::TemplateData;
+    use super::*;
+    use super::super::unit_test_util::*;
+    use uuid::Uuid;
+
+    fn insert_test_test(conn: &PgConnection) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
+
+    fn insert_tests_with_template(conn: &PgConnection) -> (TemplateData, Vec<TestData>) {
+        let new_template = insert_test_template(conn);
+        let new_tests = insert_test_tests_with_template_id(conn, new_template.template_id);
+
+        (new_template, new_tests)
+    }
+
+    fn insert_test_template(conn: &PgConnection) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template"),
+            pipeline_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtesttest"),
+            eval_wdl: String::from("evalevaleval"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TemplateData::create(conn, new_template).expect("Failed inserting test template")
+    }
+
+    fn insert_test_tests_with_template_id(conn: &PgConnection, id: Uuid) -> Vec<TestData> {
+        let mut tests = Vec::new();
+
+        let new_test = NewTest {
+            name: String::from("Name1"),
+            template_id: id,
+            description: Some(String::from("Description4")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test3\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test3\"}").unwrap()),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        tests.push(TestData::create(conn, new_test).expect("Failed inserting test test"));
+
+        let new_test = NewTest {
+            name: String::from("Name2"),
+            template_id: id,
+            description: Some(String::from("Description3")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        tests.push(TestData::create(conn, new_test).expect("Failed inserting test test"));
+
+        let new_test = NewTest {
+            name: String::from("Name4"),
+            template_id: id,
+            description: Some(String::from("Description3")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test1\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test1\"}").unwrap()),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        tests.push(TestData::create(conn, new_test).expect("Failed inserting test test"));
+
+        tests
+    }
+
+    #[test]
+    fn find_by_id_exists() {
+        let conn = get_test_db_connection();
+
+        let test_test = insert_test_test(&conn);
+
+        let found_test = TestData::find_by_id(&conn, test_test.test_id)
+            .expect("Failed to retrieve test test by id.");
+
+        assert_eq!(found_test, test_test);
+
+    }
+
+    #[test]
+    fn find_by_id_not_exists() {
+        let conn = get_test_db_connection();
+
+        let nonexistent_test = TestData::find_by_id(&conn, Uuid::new_v4());
+
+        assert!(matches!(nonexistent_test, Err(diesel::result::Error::NotFound)));
+    }
+
+    #[test]
+    fn find_with_test_id() {
+        let conn = get_test_db_connection();
+
+        insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let test_test = insert_test_test(&conn);
+
+        let test_query = TestQuery {
+            test_id: Some(test_test.test_id),
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_test);
+
+    }
+
+    #[test]
+    fn find_with_template_id() {
+        let conn = get_test_db_connection();
+
+        insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let test_test = insert_test_test(&conn);
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: Some(test_test.template_id),
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_test);
+
+    }
+
+    #[test]
+    fn find_with_name() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: Some(test_tests[0].name.clone()),
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_tests[0]);
+    }
+
+    #[test]
+    fn find_with_template_name() {
+        let conn = get_test_db_connection();
+
+        let (test_template, test_tests) = insert_tests_with_template(&conn);
+        insert_test_test(&conn);
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: Some(test_template.name.clone()),
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: Some(String::from("name")),
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 3);
+        assert_eq!(found_tests[0], test_tests[0]);
+        assert_eq!(found_tests[1], test_tests[1]);
+        assert_eq!(found_tests[2], test_tests[2]);
+    }
+
+    #[test]
+    fn find_with_description() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: Some(test_tests[0].description.clone().unwrap()),
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_tests[0]);
+    }
+
+    #[test]
+    fn find_with_test_input_defaults() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: Some(test_tests[2].test_input_defaults.clone().unwrap()),
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_tests[2]);
+    }
+
+    #[test]
+    fn find_with_eval_input_defaults() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: Some(test_tests[1].eval_input_defaults.clone().unwrap()),
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_tests[1]);
+    }
+
+    #[test]
+    fn find_with_sort_and_limit_and_offset() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: Some(String::from("Test@example.com")),
+            sort: Some(String::from("description,desc(name)")),
+            limit: Some(2),
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 2);
+        assert_eq!(found_tests[0], test_tests[2]);
+        assert_eq!(found_tests[1], test_tests[1]);
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: None,
+            created_by: Some(String::from("Test@example.com")),
+            sort: Some(String::from("description,desc(name)")),
+            limit: Some(2),
+            offset: Some(2),
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 1);
+        assert_eq!(found_tests[0], test_tests[0]);
+
+    }
+
+    #[test]
+    fn find_with_created_before_and_created_after() {
+        let conn = get_test_db_connection();
+
+        insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: None,
+            created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
+            created_by: Some(String::from("Test@example.com")),
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 0);
+
+        let test_query = TestQuery {
+            test_id: None,
+            template_id: None,
+            name: None,
+            template_name: None,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
+            created_after: None,
+            created_by: Some(String::from("Test@example.com")),
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_tests = TestData::find(&conn, test_query)
+            .expect("Failed to find tests");
+
+        assert_eq!(found_tests.len(), 3);
+    }
+
+    #[test]
+    fn create_success() {
+        let conn = get_test_db_connection();
+
+        let test_test = insert_test_test(&conn);
+
+        assert_eq!(test_test.name, "Kevin's Test");
+        assert_eq!(
+            test_test.description.expect("Created test missing description"),
+            "Kevin made this test for testing"
+        );
+        assert_eq!(test_test.test_input_defaults.unwrap(), (serde_json::from_str("{\"test\":\"test\"}") as serde_json::Result<Value>).unwrap());
+        assert_eq!(test_test.eval_input_defaults.unwrap(), (serde_json::from_str("{\"eval\":\"test\"}") as serde_json::Result<Value>).unwrap());
+        assert_eq!(
+            test_test.created_by.expect("Created test missing created_by"),
+            "Kevin@example.com"
+        );
+    }
+
+    #[test]
+    fn create_failure_same_name() {
+        let conn = get_test_db_connection();
+
+        let test_test = insert_test_test(&conn);
+
+        let copy_test = NewTest {
+            name: test_test.name,
+            template_id: test_test.template_id,
+            description: test_test.description,
+            test_input_defaults: test_test.test_input_defaults,
+            eval_input_defaults: test_test.eval_input_defaults,
+            created_by: test_test.created_by,
+        };
+
+        let new_test = TestData::create(&conn, copy_test);
+
+        assert!(
+            matches!(
+                new_test, 
+                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+            )
+        );
+    }
+
+    #[test]
+    fn update_success() {
+        let conn = get_test_db_connection();
+
+        let test_test = insert_test_test(&conn);
+
+        let changes = TestChangeset {
+            name: Some(String::from("TestTestTestTest")),
+            description: Some(String::from("TESTTESTTESTTEST"))
+        };
+
+        let updated_test = TestData::update(&conn, test_test.test_id, changes).expect("Failed to update test");
+
+        assert_eq!(updated_test.name, String::from("TestTestTestTest"));
+        assert_eq!(updated_test.description.unwrap(), String::from("TESTTESTTESTTEST"));
+    }
+
+    #[test]
+    fn update_failure_same_name() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let changes = TestChangeset {
+            name: Some(test_tests[0].name.clone()),
+            description: None
+        };
+
+        let updated_test = TestData::update(&conn, test_tests[1].test_id, changes);
+
+        assert!(
+            matches!(
+                updated_test, 
+                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+            )
+        );
+    }
+
 }

@@ -3,12 +3,39 @@
 //! Contains functions for processing requests to search runs, along with
 //! their URI mappings
 
+use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::run::{RunData, RunQuery};
 use actix_web::{error::BlockingError, get, web, HttpRequest, HttpResponse, Responder};
+use chrono::NaiveDateTime;
 use log::error;
+use serde::Deserialize;
+use serde_json::Value;
 use uuid::Uuid;
+
+/// Represents the part of a run query that is received as a request body
+///
+/// The mappings for querying runs has pipeline_id, teplate_id, or test_id as path params
+/// and the other parameters are expected as part of the request body.  A RunQuery
+/// cannot be deserialized from the request body, so this is used instead, and then a
+/// RunQuery can be built from the instance of this and the id from the path
+#[derive(Deserialize)]
+pub struct RunQueryIncomplete {
+    pub name: Option<String>,
+    pub status: Option<RunStatusEnum>,
+    pub test_input: Option<Value>,
+    pub eval_input: Option<Value>,
+    pub cromwell_job_id: Option<String>,
+    pub created_before: Option<NaiveDateTime>,
+    pub created_after: Option<NaiveDateTime>,
+    pub created_by: Option<String>,
+    pub finished_before: Option<NaiveDateTime>,
+    pub finished_after: Option<NaiveDateTime>,
+    pub sort: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
 
 /// Handles requests to /runs/{id} for retrieving run info by run_id
 ///
@@ -84,7 +111,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 #[get("/tests/{id}/runs")]
 async fn find_for_test(
     id: web::Path<String>,
-    web::Query(query): web::Query<RunQuery>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     // Parse ID into Uuid
@@ -101,11 +128,31 @@ async fn find_for_test(
         }
     };
 
+    // Create RunQuery based on id and query
+    let query = RunQuery {
+        pipeline_id: None,
+        template_id: None,
+        test_id: Some(id),
+        name: query.name,
+        status: query.status,
+        test_input: query.test_input,
+        eval_input: query.eval_input,
+        cromwell_job_id: query.cromwell_job_id,
+        created_before: query.created_before,
+        created_after: query.created_after,
+        created_by: query.created_by,
+        finished_before: query.finished_before,
+        finished_after: query.finished_after,
+        sort: query.sort,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
     // Query DB for runs in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_for_test(&conn, id, query) {
+        match RunData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -152,7 +199,7 @@ async fn find_for_test(
 #[get("/templates/{id}/runs")]
 async fn find_for_template(
     id: web::Path<String>,
-    web::Query(query): web::Query<RunQuery>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     //Parse ID into Uuid
@@ -169,11 +216,31 @@ async fn find_for_template(
         }
     };
 
+    // Create RunQuery based on id and query
+    let query = RunQuery {
+        pipeline_id: None,
+        template_id: Some(id),
+        test_id: None,
+        name: query.name,
+        status: query.status,
+        test_input: query.test_input,
+        eval_input: query.eval_input,
+        cromwell_job_id: query.cromwell_job_id,
+        created_before: query.created_before,
+        created_after: query.created_after,
+        created_by: query.created_by,
+        finished_before: query.finished_before,
+        finished_after: query.finished_after,
+        sort: query.sort,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
     //Query DB for runs in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_for_template(&conn, id, query) {
+        match RunData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -220,10 +287,10 @@ async fn find_for_template(
 #[get("/pipelines/{id}/runs")]
 async fn find_for_pipeline(
     id: web::Path<String>,
-    web::Query(query): web::Query<RunQuery>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
-    //Parse ID into Uuid
+    // Parse ID into Uuid
     let id = match Uuid::parse_str(&*id) {
         Ok(id) => id,
         Err(e) => {
@@ -237,11 +304,31 @@ async fn find_for_pipeline(
         }
     };
 
-    //Query DB for runs in new thread
+    // Create RunQuery based on id and query
+    let query = RunQuery {
+        pipeline_id: Some(id),
+        template_id: None,
+        test_id: None,
+        name: query.name,
+        status: query.status,
+        test_input: query.test_input,
+        eval_input: query.eval_input,
+        cromwell_job_id: query.cromwell_job_id,
+        created_before: query.created_before,
+        created_after: query.created_after,
+        created_by: query.created_by,
+        finished_before: query.finished_before,
+        finished_after: query.finished_after,
+        sort: query.sort,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
+    // Query DB for runs in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_for_pipeline(&conn, id, query) {
+        match RunData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
