@@ -14,7 +14,7 @@ use uuid::Uuid;
 /// Mapping to a pipeline as it exists in the PIPELINE table in the database.
 ///
 /// An instance of this struct will be returned by any queries for pipelines.
-#[derive(Queryable, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Serialize, Deserialize, PartialEq, Debug)]
 pub struct PipelineData {
     pub pipeline_id: Uuid,
     pub name: String,
@@ -28,7 +28,7 @@ pub struct PipelineData {
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),pipeline_id
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PipelineQuery {
     pub pipeline_id: Option<Uuid>,
     pub name: Option<String>,
@@ -45,7 +45,7 @@ pub struct PipelineQuery {
 ///
 /// name is a required field, but description and created_by are not, so can be filled with `None`
 /// pipeline_id and created_at are populated automatically by the DB
-#[derive(Deserialize, Insertable)]
+#[derive(Deserialize, Insertable, Serialize)]
 #[table_name = "pipeline"]
 pub struct NewPipeline {
     pub name: String,
@@ -56,7 +56,7 @@ pub struct NewPipeline {
 /// Represents fields to change when updating a pipeline
 ///
 /// Only name and description can be modified after the pipeline has been created
-#[derive(Deserialize, AsChangeset, Debug)]
+#[derive(Deserialize, Serialize, AsChangeset, Debug)]
 #[table_name = "pipeline"]
 pub struct PipelineChangeset {
     pub name: Option<String>,
