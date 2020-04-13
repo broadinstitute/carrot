@@ -1,6 +1,6 @@
 //! Defines a struct to use for error messages return by the rest mapping
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 ///Struct to use for returning error responses from REST endpoints
 ///

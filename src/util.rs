@@ -21,12 +21,22 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
         let clause = clause.trim();
         if clause.starts_with("asc(") {
             sort_clauses.push(SortClause {
-                key: String::from(clause.trim_start_matches("asc(").trim_end_matches(")").trim()),
+                key: String::from(
+                    clause
+                        .trim_start_matches("asc(")
+                        .trim_end_matches(")")
+                        .trim(),
+                ),
                 ascending: true,
             });
         } else if clause.starts_with("desc(") {
             sort_clauses.push(SortClause {
-                key: String::from(clause.trim_start_matches("desc(").trim_end_matches(")").trim()),
+                key: String::from(
+                    clause
+                        .trim_start_matches("desc(")
+                        .trim_end_matches(")")
+                        .trim(),
+                ),
                 ascending: false,
             });
         } else if !clause.is_empty() {
@@ -39,7 +49,6 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
 
     sort_clauses
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -141,6 +150,4 @@ mod tests {
             }
         );
     }
-
-
 }

@@ -194,8 +194,8 @@ impl PipelineData {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use super::super::unit_test_util::*;
+    use super::*;
     use uuid::Uuid;
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
@@ -217,7 +217,9 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        pipelines.push(PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"));
+        pipelines.push(
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"),
+        );
 
         let new_pipeline = NewPipeline {
             name: String::from("Name2"),
@@ -225,7 +227,9 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        pipelines.push(PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"));
+        pipelines.push(
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"),
+        );
 
         let new_pipeline = NewPipeline {
             name: String::from("Name4"),
@@ -233,7 +237,9 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        pipelines.push(PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"));
+        pipelines.push(
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline"),
+        );
 
         pipelines
     }
@@ -248,7 +254,6 @@ mod tests {
             .expect("Failed to retrieve test pipeline by id.");
 
         assert_eq!(found_pipeline, test_pipeline);
-
     }
 
     #[test]
@@ -257,7 +262,10 @@ mod tests {
 
         let nonexistent_pipeline = PipelineData::find_by_id(&conn, Uuid::new_v4());
 
-        assert!(matches!(nonexistent_pipeline, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            nonexistent_pipeline,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 
     #[test]
@@ -278,12 +286,11 @@ mod tests {
             offset: None,
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 1);
         assert_eq!(found_pipelines[0], test_pipelines[0]);
-
     }
 
     #[test]
@@ -304,8 +311,8 @@ mod tests {
             offset: None,
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 1);
         assert_eq!(found_pipelines[0], test_pipelines[0]);
@@ -329,8 +336,8 @@ mod tests {
             offset: None,
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 1);
         assert_eq!(found_pipelines[0], test_pipelines[0]);
@@ -354,8 +361,8 @@ mod tests {
             offset: None,
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 2);
         assert_eq!(found_pipelines[0], test_pipelines[2]);
@@ -373,12 +380,11 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 1);
         assert_eq!(found_pipelines[0], test_pipelines[0]);
-
     }
 
     #[test]
@@ -399,8 +405,8 @@ mod tests {
             offset: None,
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 0);
 
@@ -416,8 +422,8 @@ mod tests {
             offset: None,
         };
 
-        let found_pipelines = PipelineData::find(&conn, test_query)
-            .expect("Failed to find pipelines");
+        let found_pipelines =
+            PipelineData::find(&conn, test_query).expect("Failed to find pipelines");
 
         assert_eq!(found_pipelines.len(), 3);
     }
@@ -430,11 +436,15 @@ mod tests {
 
         assert_eq!(test_pipeline.name, "Kevin's Pipeline");
         assert_eq!(
-            test_pipeline.description.expect("Created pipeline missing description"),
+            test_pipeline
+                .description
+                .expect("Created pipeline missing description"),
             "Kevin made this pipeline for testing"
         );
         assert_eq!(
-            test_pipeline.created_by.expect("Created pipeline missing created_by"),
+            test_pipeline
+                .created_by
+                .expect("Created pipeline missing created_by"),
             "Kevin@example.com"
         );
     }
@@ -453,12 +463,15 @@ mod tests {
 
         let new_pipeline = PipelineData::create(&conn, copy_pipeline);
 
-        assert!(
-            matches!(
-                new_pipeline, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            new_pipeline,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
 
     #[test]
@@ -469,13 +482,17 @@ mod tests {
 
         let changes = PipelineChangeset {
             name: Some(String::from("TestTestTestTest")),
-            description: Some(String::from("TESTTESTTESTTEST"))
+            description: Some(String::from("TESTTESTTESTTEST")),
         };
 
-        let updated_pipeline = PipelineData::update(&conn, test_pipeline.pipeline_id, changes).expect("Failed to update pipeline");
+        let updated_pipeline = PipelineData::update(&conn, test_pipeline.pipeline_id, changes)
+            .expect("Failed to update pipeline");
 
         assert_eq!(updated_pipeline.name, String::from("TestTestTestTest"));
-        assert_eq!(updated_pipeline.description.unwrap(), String::from("TESTTESTTESTTEST"));
+        assert_eq!(
+            updated_pipeline.description.unwrap(),
+            String::from("TESTTESTTESTTEST")
+        );
     }
 
     #[test]
@@ -486,17 +503,19 @@ mod tests {
 
         let changes = PipelineChangeset {
             name: Some(test_pipelines[0].name.clone()),
-            description: None
+            description: None,
         };
 
         let updated_pipeline = PipelineData::update(&conn, test_pipelines[1].pipeline_id, changes);
 
-        assert!(
-            matches!(
-                updated_pipeline, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            updated_pipeline,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
-
 }

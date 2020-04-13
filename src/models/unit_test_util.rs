@@ -1,7 +1,7 @@
 //! Contains utility functions required by unit tests within the models module
 
-use diesel::Connection;
 use diesel::pg::PgConnection;
+use diesel::Connection;
 use dotenv;
 use std::env;
 
@@ -13,7 +13,8 @@ pub fn get_test_db_connection() -> PgConnection {
     // Connect
     let conn = PgConnection::establish(&db_url).expect("Failed to connect to database");
     // Start a test transaction, so test changes will not be committed
-    conn.begin_test_transaction().expect("Failed to create test transaction");
+    conn.begin_test_transaction()
+        .expect("Failed to create test transaction");
 
     conn
 }

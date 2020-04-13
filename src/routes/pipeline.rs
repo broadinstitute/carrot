@@ -19,7 +19,10 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> Result<HttpResponse, actix_web::Error> {
+async fn find_by_id(
+    req: HttpRequest,
+    pool: web::Data<db::DbPool>,
+) -> Result<HttpResponse, actix_web::Error> {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
@@ -82,7 +85,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> Result<Htt
 async fn find(
     web::Query(query): web::Query<PipelineQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error>{
+) -> Result<HttpResponse, actix_web::Error> {
     // Query DB for pipelines in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -134,7 +137,7 @@ async fn find(
 async fn create(
     web::Json(new_pipeline): web::Json<NewPipeline>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error>{
+) -> Result<HttpResponse, actix_web::Error> {
     // Insert in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -223,22 +226,24 @@ async fn update(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::resource("/pipelines/{id}")
-        .route(web::get().to(find_by_id))
-        .route(web::put().to(update))
+    cfg.service(
+        web::resource("/pipelines/{id}")
+            .route(web::get().to(find_by_id))
+            .route(web::put().to(update)),
     );
-    cfg.service(web::resource("/pipelines")
-        .route(web::get().to(find))
-        .route(web::post().to(create))
+    cfg.service(
+        web::resource("/pipelines")
+            .route(web::get().to(find))
+            .route(web::post().to(create)),
     );
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use super::super::unit_test_util::*;
-    use actix_web::{App, http, test};
+    use super::*;
+    use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
 
@@ -258,13 +263,11 @@ mod tests {
 
         let pipeline = create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get().uri(&format!("/pipelines/{}", pipeline.pipeline_id)).to_request();
+        let req = test::TestRequest::get()
+            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -273,7 +276,6 @@ mod tests {
         let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_pipeline, pipeline);
-
     }
 
     #[actix_rt::test]
@@ -282,13 +284,11 @@ mod tests {
 
         create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get().uri(&format!("/pipelines/{}", Uuid::new_v4())).to_request();
+        let req = test::TestRequest::get()
+            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
@@ -307,13 +307,11 @@ mod tests {
 
         create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get().uri("/pipelines/123456789").to_request();
+        let req = test::TestRequest::get()
+            .uri("/pipelines/123456789")
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
@@ -332,13 +330,11 @@ mod tests {
 
         let pipeline = create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get().uri("/pipelines?name=Kevin%27s%20Pipeline").to_request();
+        let req = test::TestRequest::get()
+            .uri("/pipelines?name=Kevin%27s%20Pipeline")
+            .to_request();
         println!("{:?}", req);
         let resp = test::call_service(&mut app, req).await;
 
@@ -349,7 +345,6 @@ mod tests {
 
         assert_eq!(test_pipelines.len(), 1);
         assert_eq!(test_pipelines[0], pipeline);
-
     }
 
     #[actix_rt::test]
@@ -358,13 +353,12 @@ mod tests {
 
         create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get().uri("/pipelines?name=Gibberish").param("name","Gibberish").to_request();
+        let req = test::TestRequest::get()
+            .uri("/pipelines?name=Gibberish")
+            .param("name", "Gibberish")
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
@@ -374,26 +368,27 @@ mod tests {
 
         assert_eq!(error_body.title, "No pipelines found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(error_body.detail, "No pipelines found with the specified parameters");
-
+        assert_eq!(
+            error_body.detail,
+            "No pipelines found with the specified parameters"
+        );
     }
 
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_pipeline =  NewPipeline {
+        let new_pipeline = NewPipeline {
             name: String::from("Kevin's test"),
             description: Some(String::from("Kevin's test description")),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let req = test::TestRequest::post().uri("/pipelines").set_json(&new_pipeline).to_request();
+        let req = test::TestRequest::post()
+            .uri("/pipelines")
+            .set_json(&new_pipeline)
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -403,11 +398,15 @@ mod tests {
 
         assert_eq!(test_pipeline.name, new_pipeline.name);
         assert_eq!(
-            test_pipeline.description.expect("Created pipeline missing description"),
+            test_pipeline
+                .description
+                .expect("Created pipeline missing description"),
             new_pipeline.description.unwrap()
         );
         assert_eq!(
-            test_pipeline.created_by.expect("Created pipeline missing created_by"),
+            test_pipeline
+                .created_by
+                .expect("Created pipeline missing created_by"),
             new_pipeline.created_by.unwrap()
         );
     }
@@ -418,19 +417,18 @@ mod tests {
 
         let pipeline = create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_pipeline =  NewPipeline {
+        let new_pipeline = NewPipeline {
             name: pipeline.name.clone(),
             description: Some(String::from("Kevin's test description")),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let req = test::TestRequest::post().uri("/pipelines").set_json(&new_pipeline).to_request();
+        let req = test::TestRequest::post()
+            .uri("/pipelines")
+            .set_json(&new_pipeline)
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
@@ -441,7 +439,10 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(error_body.detail, "Error while attempting to insert new pipeline");
+        assert_eq!(
+            error_body.detail,
+            "Error while attempting to insert new pipeline"
+        );
     }
 
     #[actix_rt::test]
@@ -450,18 +451,17 @@ mod tests {
 
         let pipeline = create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let pipeline_change =  PipelineChangeset {
+        let pipeline_change = PipelineChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
         };
 
-        let req = test::TestRequest::put().uri(&format!("/pipelines/{}", pipeline.pipeline_id)).set_json(&pipeline_change).to_request();
+        let req = test::TestRequest::put()
+            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .set_json(&pipeline_change)
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -471,7 +471,9 @@ mod tests {
 
         assert_eq!(test_pipeline.name, pipeline_change.name.unwrap());
         assert_eq!(
-            test_pipeline.description.expect("Created pipeline missing description"),
+            test_pipeline
+                .description
+                .expect("Created pipeline missing description"),
             pipeline_change.description.unwrap()
         );
     }
@@ -482,18 +484,17 @@ mod tests {
 
         create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let pipeline_change =  PipelineChangeset {
+        let pipeline_change = PipelineChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
         };
 
-        let req = test::TestRequest::put().uri("/pipelines/123456789").set_json(&pipeline_change).to_request();
+        let req = test::TestRequest::put()
+            .uri("/pipelines/123456789")
+            .set_json(&pipeline_change)
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
@@ -513,18 +514,17 @@ mod tests {
 
         create_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes),
-        ).await;
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let pipeline_change =  PipelineChangeset {
+        let pipeline_change = PipelineChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
         };
 
-        let req = test::TestRequest::put().uri(&format!("/pipelines/{}", Uuid::new_v4())).set_json(&pipeline_change).to_request();
+        let req = test::TestRequest::put()
+            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
+            .set_json(&pipeline_change)
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
@@ -535,7 +535,9 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(error_body.detail, "Error while attempting to update pipeline");
+        assert_eq!(
+            error_body.detail,
+            "Error while attempting to update pipeline"
+        );
     }
-
 }

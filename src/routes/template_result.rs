@@ -6,9 +6,9 @@
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::template_result::{NewTemplateResult, TemplateResultData, TemplateResultQuery};
-use actix_web::{error::BlockingError, get, post, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents the part of a new template_result mapping that is received as a request body
@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// and result_key and created_by are expected as part of the request body.  A NewTemplateResult
 /// cannot be deserialized from the request body, so this is used instead, and then a
 /// NewTemplateResult can be built from the instance of this and the ids from the path
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct NewTemplateResultIncomplete {
     pub result_key: String,
     pub created_by: Option<String>,
@@ -34,7 +34,6 @@ struct NewTemplateResultIncomplete {
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/templates/{id}/results/{result_id}")]
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
@@ -115,7 +114,6 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/templates/{id}/results")]
 async fn find(
     id: web::Path<String>,
     web::Query(mut query): web::Query<TemplateResultQuery>,
@@ -155,9 +153,9 @@ async fn find(
         if results.len() < 1 {
             // If no mapping is found, return a 404
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No mapping found",
+                title: "No template_result mapping found",
                 status: 404,
-                detail: "No mapping found with the specified parameters",
+                detail: "No template_result mapping found with the specified parameters",
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -187,7 +185,6 @@ async fn find(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[post("/templates/{id}/results/{result_id}")]
 async fn create(
     req: HttpRequest,
     web::Json(new_test): web::Json<NewTemplateResultIncomplete>,
@@ -264,7 +261,245 @@ async fn create(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(find_by_id);
-    cfg.service(find);
-    cfg.service(create);
+    cfg.service(
+        web::resource("/templates/{id}/results/{result_id}")
+            .route(web::get().to(find_by_id))
+            .route(web::post().to(create)),
+    );
+    cfg.service(web::resource("/templates/{id}/results").route(web::get().to(find)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::unit_test_util::*;
+    use super::*;
+    use actix_web::{http, test, App};
+    use diesel::PgConnection;
+    use uuid::Uuid;
+
+    fn create_test_template_result(conn: &PgConnection) -> TemplateResultData {
+        let new_template_result = NewTemplateResult {
+            template_id: Uuid::new_v4(),
+            result_id: Uuid::new_v4(),
+            result_key: String::from("TestKey"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template_result")
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_success() {
+        let pool = get_test_db_pool();
+
+        let new_template_result = create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/results/{}",
+                new_template_result.template_id, new_template_result.result_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_template_result: TemplateResultData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_template_result, new_template_result);
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/results/{}",
+                Uuid::new_v4(),
+                Uuid::new_v4()
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No template_result mapping found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No template_result mapping found with the specified ID"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/templates/123456789/results/12345678910")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn find_success() {
+        let pool = get_test_db_pool();
+
+        let new_template_result = create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/results?result_key=TestKey",
+                new_template_result.template_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_template_results: Vec<TemplateResultData> =
+            serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_template_results[0], new_template_result);
+    }
+
+    #[actix_rt::test]
+    async fn find_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/results?result_key=test",
+                Uuid::new_v4()
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No template_result mapping found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No template_result mapping found with the specified parameters"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn find_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/templates/123456789/results")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn create_success() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_template_result = NewTemplateResultIncomplete {
+            result_key: String::from("test"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!(
+                "/templates/{}/results/{}",
+                Uuid::new_v4(),
+                Uuid::new_v4()
+            ))
+            .set_json(&new_template_result)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_template_result: TemplateResultData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(
+            test_template_result.result_key,
+            new_template_result.result_key
+        );
+        assert_eq!(
+            test_template_result
+                .created_by
+                .expect("Created template_result missing created_by"),
+            new_template_result.created_by.unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_template_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/templates/123456789/results/12345678910")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
 }

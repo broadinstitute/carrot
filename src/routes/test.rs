@@ -6,7 +6,7 @@
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery};
-use actix_web::{error::BlockingError, get, post, put, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;
 
@@ -18,7 +18,6 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/tests/{id}")]
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
@@ -59,15 +58,15 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         match e {
             // If no test is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No template found",
+                title: "No test found",
                 status: 404,
-                detail: "No template found with the specified ID",
+                detail: "No test found with the specified ID",
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error",
                 status: 500,
-                detail: "Error while attempting to retrieve requested template from DB",
+                detail: "Error while attempting to retrieve requested test from DB",
             }),
         }
     })
@@ -82,7 +81,6 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/tests")]
 async fn find(
     web::Query(query): web::Query<TestQuery>,
     pool: web::Data<db::DbPool>,
@@ -133,7 +131,6 @@ async fn find(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[post("/tests")]
 async fn create(
     web::Json(new_test): web::Json<NewTest>,
     pool: web::Data<db::DbPool>,
@@ -173,7 +170,6 @@ async fn create(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[put("/test/{id}")]
 async fn update(
     id: web::Path<String>,
     web::Json(test_changes): web::Json<TestChangeset>,
@@ -224,8 +220,334 @@ async fn update(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(find_by_id);
-    cfg.service(find);
-    cfg.service(create);
-    cfg.service(update);
+    cfg.service(
+        web::resource("/tests/{id}")
+            .route(web::get().to(find_by_id))
+            .route(web::put().to(update)),
+    );
+    cfg.service(
+        web::resource("/tests")
+            .route(web::get().to(find))
+            .route(web::post().to(create)),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::unit_test_util::*;
+    use super::*;
+    use actix_web::{http, test, App};
+    use diesel::PgConnection;
+    use uuid::Uuid;
+
+    fn create_test_test(conn: &PgConnection) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_success() {
+        let pool = get_test_db_pool();
+
+        let new_test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}", new_test.test_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_test: TestData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_test, new_test);
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No test found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No test found with the specified ID");
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/tests/123456789")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn find_success() {
+        let pool = get_test_db_pool();
+
+        let new_test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/tests?name=Kevin%27s%20Test")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_tests: Vec<TestData> = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_tests.len(), 1);
+        assert_eq!(test_tests[0], new_test);
+    }
+
+    #[actix_rt::test]
+    async fn find_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/tests?name=Gibberish")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No test found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No tests found with the specified parameters"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_success() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_test = NewTest {
+            name: String::from("Kevin's test"),
+            template_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin's test description")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/tests")
+            .set_json(&new_test)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_test: TestData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_test.name, new_test.name);
+        assert_eq!(test_test.template_id, new_test.template_id);
+        assert_eq!(
+            test_test
+                .description
+                .expect("Created test missing description"),
+            new_test.description.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .test_input_defaults
+                .expect("Created test missing test_input_defaults"),
+            new_test.test_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .eval_input_defaults
+                .expect("Created test missing eval_input_defaults"),
+            new_test.eval_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .created_by
+                .expect("Created test missing created_by"),
+            new_test.created_by.unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_failure() {
+        let pool = get_test_db_pool();
+
+        let test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_test = NewTest {
+            name: test.name.clone(),
+            template_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin's test description")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/tests")
+            .set_json(&new_test)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Server error");
+        assert_eq!(error_body.status, 500);
+        assert_eq!(
+            error_body.detail,
+            "Error while attempting to insert new test"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn update_success() {
+        let pool = get_test_db_pool();
+
+        let test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let test_change = TestChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/tests/{}", test.test_id))
+            .set_json(&test_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_test: TestData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_test.name, test_change.name.unwrap());
+        assert_eq!(
+            test_test
+                .description
+                .expect("Created test missing description"),
+            test_change.description.unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn update_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let test_change = TestChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri("/tests/123456789")
+            .set_json(&test_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn update_failure() {
+        let pool = get_test_db_pool();
+
+        create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let test_change = TestChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/tests/{}", Uuid::new_v4()))
+            .set_json(&test_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Server error");
+        assert_eq!(error_body.status, 500);
+        assert_eq!(error_body.detail, "Error while attempting to update test");
+    }
 }

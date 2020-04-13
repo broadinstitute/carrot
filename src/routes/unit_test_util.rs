@@ -1,4 +1,4 @@
-//! Contains utility functions required by unit tests within the models module
+//! Contains utility functions required by unit tests within the routes module
 
 use crate::db;
 use diesel::Connection;
@@ -13,7 +13,10 @@ pub fn get_test_db_pool() -> db::DbPool {
     // Connect
     let conn = db::get_pool(db_url, 1);
     // Start a test transaction, so test changes will not be committed
-    conn.get().unwrap().begin_test_transaction().expect("Failed to create test transaction");
+    conn.get()
+        .unwrap()
+        .begin_test_transaction()
+        .expect("Failed to create test transaction");
 
     conn
 }

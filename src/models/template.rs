@@ -18,7 +18,7 @@ use uuid::Uuid;
 /// Mapping to a template as it exists in the TEMPLATE table in the database.
 ///
 /// An instance of this struct will be returned by any queries for templates.
-#[derive(Queryable, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
 pub struct TemplateData {
     pub template_id: Uuid,
     pub pipeline_id: Uuid,
@@ -57,7 +57,7 @@ pub struct TemplateQuery {
 /// name, pipeline_id, test_wdl, and eval_wdl are required fields, but description and created_by
 /// are not, so can be filled with `None`; template_id and created_at are populated automatically
 /// by the DB
-#[derive(Deserialize, Insertable)]
+#[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "template"]
 pub struct NewTemplate {
     pub name: String,
@@ -71,7 +71,7 @@ pub struct NewTemplate {
 /// Represents fields to change when updating a template
 ///
 /// Only name and description can be modified after the template has been created
-#[derive(Deserialize, AsChangeset)]
+#[derive(Deserialize, Serialize, AsChangeset)]
 #[table_name = "template"]
 pub struct TemplateChangeset {
     pub name: Option<String>,
@@ -257,10 +257,10 @@ impl TemplateData {
 #[cfg(test)]
 mod tests {
 
+    use super::super::unit_test_util::*;
+    use super::*;
     use crate::models::pipeline::NewPipeline;
     use crate::models::pipeline::PipelineData;
-    use super::*;
-    use super::super::unit_test_util::*;
     use uuid::Uuid;
 
     fn insert_test_template(conn: &PgConnection) -> TemplateData {
@@ -305,7 +305,9 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        templates.push(TemplateData::create(conn, new_template).expect("Failed inserting test template"));
+        templates.push(
+            TemplateData::create(conn, new_template).expect("Failed inserting test template"),
+        );
 
         let new_template = NewTemplate {
             name: String::from("Name2"),
@@ -316,7 +318,9 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        templates.push(TemplateData::create(conn, new_template).expect("Failed inserting test template"));
+        templates.push(
+            TemplateData::create(conn, new_template).expect("Failed inserting test template"),
+        );
 
         let new_template = NewTemplate {
             name: String::from("Name4"),
@@ -327,7 +331,9 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        templates.push(TemplateData::create(conn, new_template).expect("Failed inserting test template"));
+        templates.push(
+            TemplateData::create(conn, new_template).expect("Failed inserting test template"),
+        );
 
         templates
     }
@@ -342,7 +348,6 @@ mod tests {
             .expect("Failed to retrieve test template by id.");
 
         assert_eq!(found_template, test_template);
-
     }
 
     #[test]
@@ -351,7 +356,10 @@ mod tests {
 
         let nonexistent_template = TemplateData::find_by_id(&conn, Uuid::new_v4());
 
-        assert!(matches!(nonexistent_template, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            nonexistent_template,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 
     #[test]
@@ -377,12 +385,11 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_template);
-
     }
 
     #[test]
@@ -408,12 +415,11 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_template);
-
     }
 
     #[test]
@@ -438,8 +444,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_templates[0]);
@@ -468,8 +474,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 3);
         assert_eq!(found_templates[0], test_templates[0]);
@@ -499,8 +505,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_templates[0]);
@@ -528,8 +534,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_templates[1]);
@@ -557,8 +563,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_templates[1]);
@@ -586,8 +592,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 2);
         assert_eq!(found_templates[0], test_templates[2]);
@@ -609,12 +615,11 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 1);
         assert_eq!(found_templates[0], test_templates[0]);
-
     }
 
     #[test]
@@ -639,8 +644,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 0);
 
@@ -660,8 +665,8 @@ mod tests {
             offset: None,
         };
 
-        let found_templates = TemplateData::find(&conn, test_query)
-            .expect("Failed to find templates");
+        let found_templates =
+            TemplateData::find(&conn, test_query).expect("Failed to find templates");
 
         assert_eq!(found_templates.len(), 3);
     }
@@ -674,13 +679,17 @@ mod tests {
 
         assert_eq!(test_template.name, "Kevin's Template");
         assert_eq!(
-            test_template.description.expect("Created template missing description"),
+            test_template
+                .description
+                .expect("Created template missing description"),
             "Kevin made this template for testing"
         );
-        assert_eq!(test_template.test_wdl,"testtest");
-        assert_eq!(test_template.eval_wdl,"evaltest");
+        assert_eq!(test_template.test_wdl, "testtest");
+        assert_eq!(test_template.eval_wdl, "evaltest");
         assert_eq!(
-            test_template.created_by.expect("Created template missing created_by"),
+            test_template
+                .created_by
+                .expect("Created template missing created_by"),
             "Kevin@example.com"
         );
     }
@@ -702,12 +711,15 @@ mod tests {
 
         let new_template = TemplateData::create(&conn, copy_template);
 
-        assert!(
-            matches!(
-                new_template, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            new_template,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
 
     #[test]
@@ -718,13 +730,17 @@ mod tests {
 
         let changes = TemplateChangeset {
             name: Some(String::from("TestTestTestTest")),
-            description: Some(String::from("TESTTESTTESTTEST"))
+            description: Some(String::from("TESTTESTTESTTEST")),
         };
 
-        let updated_template = TemplateData::update(&conn, test_template.template_id, changes).expect("Failed to update template");
+        let updated_template = TemplateData::update(&conn, test_template.template_id, changes)
+            .expect("Failed to update template");
 
         assert_eq!(updated_template.name, String::from("TestTestTestTest"));
-        assert_eq!(updated_template.description.unwrap(), String::from("TESTTESTTESTTEST"));
+        assert_eq!(
+            updated_template.description.unwrap(),
+            String::from("TESTTESTTESTTEST")
+        );
     }
 
     #[test]
@@ -735,17 +751,19 @@ mod tests {
 
         let changes = TemplateChangeset {
             name: Some(test_templates[0].name.clone()),
-            description: None
+            description: None,
         };
 
         let updated_template = TemplateData::update(&conn, test_templates[1].template_id, changes);
 
-        assert!(
-            matches!(
-                updated_template, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            updated_template,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
-
 }

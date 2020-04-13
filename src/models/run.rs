@@ -4,7 +4,6 @@
 
 use crate::custom_sql_types::RunStatusEnum;
 use crate::schema::run::dsl::*;
-use crate::schema::run;
 use crate::schema::template;
 use crate::schema::test;
 use crate::util;
@@ -14,10 +13,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::schema::run;
+
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
 /// An instance of this struct will be returned by any queries for runs.
-#[derive(Queryable, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
 pub struct RunData {
     pub run_id: Uuid,
     pub test_id: Uuid,
@@ -63,6 +65,7 @@ pub struct RunQuery {
 /// run_id and created_at are populated automatically by the DB
 #[derive(Deserialize, Insertable)]
 #[table_name = "run"]
+#[cfg(test)]
 pub struct NewRun {
     pub test_id: Uuid,
     pub name: String,
@@ -247,7 +250,7 @@ impl RunData {
     /// Creates a new run row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new run that was created or an error if the
     /// insert fails for some reason
-    /// 
+    ///
     /// Annotated for tests right now because it's not being used in the main program, but will be
     /// eventually
     #[cfg(test)]
@@ -256,16 +259,15 @@ impl RunData {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
 
+    use super::super::unit_test_util::*;
+    use super::*;
     use crate::models::template::NewTemplate;
     use crate::models::template::TemplateData;
     use crate::models::test::NewTest;
     use crate::models::test::TestData;
-    use super::*;
-    use super::super::unit_test_util::*;
     use chrono::offset::Utc;
     use uuid::Uuid;
 
@@ -284,7 +286,9 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_runs_with_test_and_template(conn: &PgConnection) -> (TemplateData, TestData, Vec<RunData>) {
+    fn insert_runs_with_test_and_template(
+        conn: &PgConnection,
+    ) -> (TemplateData, TestData, Vec<RunData>) {
         let new_template = insert_test_template(conn);
         let new_test = insert_test_test_with_template_id(conn, new_template.template_id);
         let new_runs = insert_test_runs_with_test_id(conn, new_test.test_id);
@@ -373,7 +377,6 @@ mod tests {
             .expect("Failed to retrieve test run by id.");
 
         assert_eq!(found_run, test_run);
-
     }
 
     #[test]
@@ -382,7 +385,10 @@ mod tests {
 
         let nonexistent_run = RunData::find_by_id(&conn, Uuid::new_v4());
 
-        assert!(matches!(nonexistent_run, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            nonexistent_run,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 
     #[test]
@@ -410,14 +416,12 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 3);
         assert_eq!(found_runs[0], test_runs[0]);
         assert_eq!(found_runs[1], test_runs[1]);
         assert_eq!(found_runs[2], test_runs[2]);
-
     }
 
     #[test]
@@ -446,14 +450,12 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 3);
         assert_eq!(found_runs[0], test_runs[0]);
         assert_eq!(found_runs[1], test_runs[1]);
         assert_eq!(found_runs[2], test_runs[2]);
-
     }
 
     #[test]
@@ -482,8 +484,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_run);
@@ -514,8 +515,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_runs[1]);
@@ -546,8 +546,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_runs[1]);
@@ -579,9 +578,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
-
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_run);
@@ -612,9 +609,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
-
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_runs[0]);
@@ -646,8 +641,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_run);
@@ -679,8 +673,7 @@ mod tests {
             offset: Some(0),
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 2);
         assert_eq!(found_runs[0], test_runs[2]);
@@ -705,12 +698,10 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 1);
         assert_eq!(found_runs[0], test_runs[0]);
-
     }
 
     #[test]
@@ -738,8 +729,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 0);
 
@@ -762,8 +752,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 3);
     }
@@ -793,8 +782,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 0);
 
@@ -817,8 +805,7 @@ mod tests {
             offset: None,
         };
 
-        let found_runs = RunData::find(&conn, test_query)
-            .expect("Failed to find runs");
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 2);
     }

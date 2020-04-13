@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// Mapping to a test as it exists in the TEST table in the database.
 ///
 /// An instance of this struct will be returned by any queries for tests.
-#[derive(Queryable, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
 pub struct TestData {
     pub test_id: Uuid,
     pub template_id: Uuid,
@@ -56,7 +56,7 @@ pub struct TestQuery {
 /// name and template_id are required fields, but description, test_input_defaults,
 /// eval_input_defaults, and created_by are not, so can be filled with `None`
 /// test_id and created_at are populated automatically by the DB
-#[derive(Deserialize, Insertable)]
+#[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "test"]
 pub struct NewTest {
     pub name: String,
@@ -70,7 +70,7 @@ pub struct NewTest {
 /// Represents fields to change when updating a test
 ///
 /// Only name and description can be modified after the test has been created
-#[derive(Deserialize, AsChangeset)]
+#[derive(Deserialize, Serialize, AsChangeset)]
 #[table_name = "test"]
 pub struct TestChangeset {
     pub name: Option<String>,
@@ -250,10 +250,10 @@ impl TestData {
 #[cfg(test)]
 mod tests {
 
+    use super::super::unit_test_util::*;
+    use super::*;
     use crate::models::template::NewTemplate;
     use crate::models::template::TemplateData;
-    use super::*;
-    use super::super::unit_test_util::*;
     use uuid::Uuid;
 
     fn insert_test_test(conn: &PgConnection) -> TestData {
@@ -338,7 +338,6 @@ mod tests {
             .expect("Failed to retrieve test test by id.");
 
         assert_eq!(found_test, test_test);
-
     }
 
     #[test]
@@ -347,7 +346,10 @@ mod tests {
 
         let nonexistent_test = TestData::find_by_id(&conn, Uuid::new_v4());
 
-        assert!(matches!(nonexistent_test, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            nonexistent_test,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 
     #[test]
@@ -373,12 +375,10 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_test);
-
     }
 
     #[test]
@@ -404,12 +404,10 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_test);
-
     }
 
     #[test]
@@ -434,8 +432,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_tests[0]);
@@ -464,8 +461,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 3);
         assert_eq!(found_tests[0], test_tests[0]);
@@ -495,8 +491,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_tests[0]);
@@ -524,8 +519,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_tests[2]);
@@ -553,8 +547,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_tests[1]);
@@ -582,8 +575,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 2);
         assert_eq!(found_tests[0], test_tests[2]);
@@ -605,12 +597,10 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 1);
         assert_eq!(found_tests[0], test_tests[0]);
-
     }
 
     #[test]
@@ -635,8 +625,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 0);
 
@@ -656,8 +645,7 @@ mod tests {
             offset: None,
         };
 
-        let found_tests = TestData::find(&conn, test_query)
-            .expect("Failed to find tests");
+        let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 3);
     }
@@ -670,13 +658,23 @@ mod tests {
 
         assert_eq!(test_test.name, "Kevin's Test");
         assert_eq!(
-            test_test.description.expect("Created test missing description"),
+            test_test
+                .description
+                .expect("Created test missing description"),
             "Kevin made this test for testing"
         );
-        assert_eq!(test_test.test_input_defaults.unwrap(), (serde_json::from_str("{\"test\":\"test\"}") as serde_json::Result<Value>).unwrap());
-        assert_eq!(test_test.eval_input_defaults.unwrap(), (serde_json::from_str("{\"eval\":\"test\"}") as serde_json::Result<Value>).unwrap());
         assert_eq!(
-            test_test.created_by.expect("Created test missing created_by"),
+            test_test.test_input_defaults.unwrap(),
+            (serde_json::from_str("{\"test\":\"test\"}") as serde_json::Result<Value>).unwrap()
+        );
+        assert_eq!(
+            test_test.eval_input_defaults.unwrap(),
+            (serde_json::from_str("{\"eval\":\"test\"}") as serde_json::Result<Value>).unwrap()
+        );
+        assert_eq!(
+            test_test
+                .created_by
+                .expect("Created test missing created_by"),
             "Kevin@example.com"
         );
     }
@@ -698,12 +696,15 @@ mod tests {
 
         let new_test = TestData::create(&conn, copy_test);
 
-        assert!(
-            matches!(
-                new_test, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            new_test,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
 
     #[test]
@@ -714,13 +715,17 @@ mod tests {
 
         let changes = TestChangeset {
             name: Some(String::from("TestTestTestTest")),
-            description: Some(String::from("TESTTESTTESTTEST"))
+            description: Some(String::from("TESTTESTTESTTEST")),
         };
 
-        let updated_test = TestData::update(&conn, test_test.test_id, changes).expect("Failed to update test");
+        let updated_test =
+            TestData::update(&conn, test_test.test_id, changes).expect("Failed to update test");
 
         assert_eq!(updated_test.name, String::from("TestTestTestTest"));
-        assert_eq!(updated_test.description.unwrap(), String::from("TESTTESTTESTTEST"));
+        assert_eq!(
+            updated_test.description.unwrap(),
+            String::from("TESTTESTTESTTEST")
+        );
     }
 
     #[test]
@@ -731,17 +736,19 @@ mod tests {
 
         let changes = TestChangeset {
             name: Some(test_tests[0].name.clone()),
-            description: None
+            description: None,
         };
 
         let updated_test = TestData::update(&conn, test_tests[1].test_id, changes);
 
-        assert!(
-            matches!(
-                updated_test, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            updated_test,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
-
 }

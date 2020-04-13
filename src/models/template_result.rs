@@ -15,7 +15,7 @@ use uuid::Uuid;
 /// database.
 ///
 /// An instance of this struct will be returned by any queries for template_results.
-#[derive(Queryable, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
 pub struct TemplateResultData {
     pub template_id: Uuid,
     pub result_id: Uuid,
@@ -46,7 +46,7 @@ pub struct TemplateResultQuery {
 ///
 /// template_id, result_id, and result_key are all required fields, but created_by is not
 /// created_at is populated automatically by the DB
-#[derive(Deserialize, Insertable)]
+#[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "template_result"]
 pub struct NewTemplateResult {
     pub template_id: Uuid,
@@ -183,8 +183,8 @@ impl TemplateResultData {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use super::super::unit_test_util::*;
+    use super::*;
     use uuid::Uuid;
 
     fn insert_test_template_result(conn: &PgConnection) -> TemplateResultData {
@@ -195,7 +195,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        TemplateResultData::create(conn, new_template_result).expect("Failed inserting test template_result")
+        TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template_result")
     }
 
     fn insert_test_template_results(conn: &PgConnection) -> Vec<TemplateResultData> {
@@ -208,7 +209,10 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        template_results.push(TemplateResultData::create(conn, new_template_result).expect("Failed inserting test template_result"));
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
 
         let new_template_result = NewTemplateResult {
             template_id: Uuid::new_v4(),
@@ -217,7 +221,10 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        template_results.push(TemplateResultData::create(conn, new_template_result).expect("Failed inserting test template_result"));
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
 
         let new_template_result = NewTemplateResult {
             template_id: Uuid::new_v4(),
@@ -226,7 +233,10 @@ mod tests {
             created_by: None,
         };
 
-        template_results.push(TemplateResultData::create(conn, new_template_result).expect("Failed inserting test template_result"));
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
 
         template_results
     }
@@ -237,20 +247,27 @@ mod tests {
 
         let test_template_result = insert_test_template_result(&conn);
 
-        let found_template_result = TemplateResultData::find_by_template_and_result(&conn, test_template_result.template_id, test_template_result.result_id)
-            .expect("Failed to retrieve test template_result by id.");
+        let found_template_result = TemplateResultData::find_by_template_and_result(
+            &conn,
+            test_template_result.template_id,
+            test_template_result.result_id,
+        )
+        .expect("Failed to retrieve test template_result by id.");
 
         assert_eq!(found_template_result, test_template_result);
-
     }
 
     #[test]
     fn find_by_id_not_exists() {
         let conn = get_test_db_connection();
 
-        let nonexistent_template_result = TemplateResultData::find_by_template_and_result(&conn, Uuid::new_v4(), Uuid::new_v4());
+        let nonexistent_template_result =
+            TemplateResultData::find_by_template_and_result(&conn, Uuid::new_v4(), Uuid::new_v4());
 
-        assert!(matches!(nonexistent_template_result, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            nonexistent_template_result,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 
     #[test]
@@ -271,12 +288,11 @@ mod tests {
             offset: None,
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_results[0]);
-
     }
 
     #[test]
@@ -297,12 +313,11 @@ mod tests {
             offset: None,
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_results[1]);
-
     }
 
     #[test]
@@ -323,8 +338,8 @@ mod tests {
             offset: None,
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_results[2]);
@@ -348,8 +363,8 @@ mod tests {
             offset: Some(0),
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_results[1]);
@@ -366,12 +381,11 @@ mod tests {
             offset: Some(1),
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_results[0]);
-
     }
 
     #[test]
@@ -392,8 +406,8 @@ mod tests {
             offset: None,
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 0);
 
@@ -409,8 +423,8 @@ mod tests {
             offset: None,
         };
 
-        let found_template_results = TemplateResultData::find(&conn, test_query)
-            .expect("Failed to find template_results");
+        let found_template_results =
+            TemplateResultData::find(&conn, test_query).expect("Failed to find template_results");
 
         assert_eq!(found_template_results.len(), 3);
     }
@@ -422,7 +436,10 @@ mod tests {
         let test_template_result = insert_test_template_result(&conn);
 
         assert_eq!(test_template_result.result_key, "TestKey");
-        assert_eq!(test_template_result.created_by, Some(String::from("Kevin@example.com")));
+        assert_eq!(
+            test_template_result.created_by,
+            Some(String::from("Kevin@example.com"))
+        );
     }
 
     #[test]
@@ -440,12 +457,14 @@ mod tests {
 
         let new_template_result = TemplateResultData::create(&conn, copy_template_result);
 
-        assert!(
-            matches!(
-                new_template_result, 
-                Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation,_))
+        assert!(matches!(
+            new_template_result,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
             )
-        );
+        ));
     }
-
 }
