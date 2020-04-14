@@ -1,6 +1,6 @@
 //! Defines the diesel schema for interfacing with the DB
-//! 
-//! Uses diesel's table! macro to define the mappings to the tables in the DB.  The macro 
+//!
+//! Uses diesel's table! macro to define the mappings to the tables in the DB.  The macro
 //! generates the crate::schema::[table_name]::dsl module for each table, which allows performing
 //! operations on the data in the tables
 

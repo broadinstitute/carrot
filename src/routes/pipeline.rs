@@ -6,7 +6,7 @@
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::pipeline::{NewPipeline, PipelineChangeset, PipelineData, PipelineQuery};
-use actix_web::{error::BlockingError, get, post, put, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use uuid::Uuid;
 
@@ -19,8 +19,10 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/pipelines/{id}")]
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(
+    req: HttpRequest,
+    pool: web::Data<db::DbPool>,
+) -> Result<HttpResponse, actix_web::Error> {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
@@ -39,7 +41,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
     };
 
     // Query DB for pipeline in new thread
-    web::block(move || {
+    let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::find_by_id(&conn, id) {
@@ -66,7 +68,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "Error while attempting to retrieve requested pipeline from DB",
             }),
         }
-    })
+    })?;
+
+    Ok(res)
 }
 
 /// Handles requests to /pipelines for retrieving pipeline info by query parameters
@@ -78,13 +82,12 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/pipelines")]
 async fn find(
     web::Query(query): web::Query<PipelineQuery>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> Result<HttpResponse, actix_web::Error> {
     // Query DB for pipelines in new thread
-    web::block(move || {
+    let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::find(&conn, query) {
@@ -117,7 +120,9 @@ async fn find(
             status: 500,
             detail: "Error while attempting to retrieve requested pipeline(s) from DB",
         })
-    })
+    })?;
+
+    Ok(res)
 }
 
 /// Handles requests to /pipelines for creating pipelines
@@ -129,13 +134,12 @@ async fn find(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[post("/pipelines")]
 async fn create(
     web::Json(new_pipeline): web::Json<NewPipeline>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> Result<HttpResponse, actix_web::Error> {
     // Insert in new thread
-    web::block(move || {
+    let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::create(&conn, new_pipeline) {
@@ -157,7 +161,8 @@ async fn create(
             status: 500,
             detail: "Error while attempting to insert new pipeline",
         })
-    })
+    })?;
+    Ok(res)
 }
 
 /// Handles requests to /pipelines/{id} for updating a pipeline
@@ -169,12 +174,11 @@ async fn create(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[put("/pipelines/{id}")]
 async fn update(
     id: web::Path<String>,
     web::Json(pipeline_changes): web::Json<PipelineChangeset>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> Result<HttpResponse, actix_web::Error> {
     // Parse ID into Uuid
     let id = match Uuid::parse_str(&*id) {
         Ok(id) => id,
@@ -190,7 +194,7 @@ async fn update(
     };
 
     // Update in new thread
-    web::block(move || {
+    let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::update(&conn, id, pipeline_changes) {
@@ -212,7 +216,9 @@ async fn update(
             status: 500,
             detail: "Error while attempting to update pipeline",
         })
-    })
+    })?;
+
+    Ok(res)
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -220,8 +226,318 @@ async fn update(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(find_by_id);
-    cfg.service(find);
-    cfg.service(create);
-    cfg.service(update);
+    cfg.service(
+        web::resource("/pipelines/{id}")
+            .route(web::get().to(find_by_id))
+            .route(web::put().to(update)),
+    );
+    cfg.service(
+        web::resource("/pipelines")
+            .route(web::get().to(find))
+            .route(web::post().to(create)),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::super::unit_test_util::*;
+    use super::*;
+    use actix_web::{http, test, App};
+    use diesel::PgConnection;
+    use uuid::Uuid;
+
+    fn create_test_pipeline(conn: &PgConnection) -> PipelineData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_success() {
+        let pool = get_test_db_pool();
+
+        let pipeline = create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_pipeline, pipeline);
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No pipeline found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No pipeline found with the specified ID");
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/pipelines/123456789")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn find_success() {
+        let pool = get_test_db_pool();
+
+        let pipeline = create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/pipelines?name=Kevin%27s%20Pipeline")
+            .to_request();
+        println!("{:?}", req);
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_pipelines: Vec<PipelineData> = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_pipelines.len(), 1);
+        assert_eq!(test_pipelines[0], pipeline);
+    }
+
+    #[actix_rt::test]
+    async fn find_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/pipelines?name=Gibberish")
+            .param("name", "Gibberish")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No pipelines found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No pipelines found with the specified parameters"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_success() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's test"),
+            description: Some(String::from("Kevin's test description")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/pipelines")
+            .set_json(&new_pipeline)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_pipeline.name, new_pipeline.name);
+        assert_eq!(
+            test_pipeline
+                .description
+                .expect("Created pipeline missing description"),
+            new_pipeline.description.unwrap()
+        );
+        assert_eq!(
+            test_pipeline
+                .created_by
+                .expect("Created pipeline missing created_by"),
+            new_pipeline.created_by.unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_failure() {
+        let pool = get_test_db_pool();
+
+        let pipeline = create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_pipeline = NewPipeline {
+            name: pipeline.name.clone(),
+            description: Some(String::from("Kevin's test description")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/pipelines")
+            .set_json(&new_pipeline)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Server error");
+        assert_eq!(error_body.status, 500);
+        assert_eq!(
+            error_body.detail,
+            "Error while attempting to insert new pipeline"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn update_success() {
+        let pool = get_test_db_pool();
+
+        let pipeline = create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let pipeline_change = PipelineChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .set_json(&pipeline_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_pipeline.name, pipeline_change.name.unwrap());
+        assert_eq!(
+            test_pipeline
+                .description
+                .expect("Created pipeline missing description"),
+            pipeline_change.description.unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn update_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let pipeline_change = PipelineChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri("/pipelines/123456789")
+            .set_json(&pipeline_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn update_failure() {
+        let pool = get_test_db_pool();
+
+        create_test_pipeline(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let pipeline_change = PipelineChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
+            .set_json(&pipeline_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Server error");
+        assert_eq!(error_body.status, 500);
+        assert_eq!(
+            error_body.detail,
+            "Error while attempting to update pipeline"
+        );
+    }
 }

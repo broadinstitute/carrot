@@ -3,12 +3,39 @@
 //! Contains functions for processing requests to search runs, along with
 //! their URI mappings
 
+use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::run::{RunData, RunQuery};
-use actix_web::{error::BlockingError, get, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use chrono::NaiveDateTime;
 use log::error;
+use serde::Deserialize;
+use serde_json::Value;
 use uuid::Uuid;
+
+/// Represents the part of a run query that is received as a request body
+///
+/// The mappings for querying runs has pipeline_id, teplate_id, or test_id as path params
+/// and the other parameters are expected as part of the request body.  A RunQuery
+/// cannot be deserialized from the request body, so this is used instead, and then a
+/// RunQuery can be built from the instance of this and the id from the path
+#[derive(Deserialize)]
+pub struct RunQueryIncomplete {
+    pub name: Option<String>,
+    pub status: Option<RunStatusEnum>,
+    pub test_input: Option<Value>,
+    pub eval_input: Option<Value>,
+    pub cromwell_job_id: Option<String>,
+    pub created_before: Option<NaiveDateTime>,
+    pub created_after: Option<NaiveDateTime>,
+    pub created_by: Option<String>,
+    pub finished_before: Option<NaiveDateTime>,
+    pub finished_after: Option<NaiveDateTime>,
+    pub sort: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
 
 /// Handles requests to /runs/{id} for retrieving run info by run_id
 ///
@@ -19,7 +46,6 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/runs/{id}")]
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
@@ -81,10 +107,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/tests/{id}/runs")]
 async fn find_for_test(
     id: web::Path<String>,
-    web::Query(query): web::Query<RunQuery>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     // Parse ID into Uuid
@@ -101,11 +126,31 @@ async fn find_for_test(
         }
     };
 
+    // Create RunQuery based on id and query
+    let query = RunQuery {
+        pipeline_id: None,
+        template_id: None,
+        test_id: Some(id),
+        name: query.name,
+        status: query.status,
+        test_input: query.test_input,
+        eval_input: query.eval_input,
+        cromwell_job_id: query.cromwell_job_id,
+        created_before: query.created_before,
+        created_after: query.created_after,
+        created_by: query.created_by,
+        finished_before: query.finished_before,
+        finished_after: query.finished_after,
+        sort: query.sort,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
     // Query DB for runs in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_for_test(&conn, id, query) {
+        match RunData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -149,10 +194,9 @@ async fn find_for_test(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/templates/{id}/runs")]
 async fn find_for_template(
     id: web::Path<String>,
-    web::Query(query): web::Query<RunQuery>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     //Parse ID into Uuid
@@ -169,11 +213,31 @@ async fn find_for_template(
         }
     };
 
+    // Create RunQuery based on id and query
+    let query = RunQuery {
+        pipeline_id: None,
+        template_id: Some(id),
+        test_id: None,
+        name: query.name,
+        status: query.status,
+        test_input: query.test_input,
+        eval_input: query.eval_input,
+        cromwell_job_id: query.cromwell_job_id,
+        created_before: query.created_before,
+        created_after: query.created_after,
+        created_by: query.created_by,
+        finished_before: query.finished_before,
+        finished_after: query.finished_after,
+        sort: query.sort,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
     //Query DB for runs in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_for_template(&conn, id, query) {
+        match RunData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -217,13 +281,12 @@ async fn find_for_template(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-#[get("/pipelines/{id}/runs")]
 async fn find_for_pipeline(
     id: web::Path<String>,
-    web::Query(query): web::Query<RunQuery>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
-    //Parse ID into Uuid
+    // Parse ID into Uuid
     let id = match Uuid::parse_str(&*id) {
         Ok(id) => id,
         Err(e) => {
@@ -237,11 +300,31 @@ async fn find_for_pipeline(
         }
     };
 
-    //Query DB for runs in new thread
+    // Create RunQuery based on id and query
+    let query = RunQuery {
+        pipeline_id: Some(id),
+        template_id: None,
+        test_id: None,
+        name: query.name,
+        status: query.status,
+        test_input: query.test_input,
+        eval_input: query.eval_input,
+        cromwell_job_id: query.cromwell_job_id,
+        created_before: query.created_before,
+        created_after: query.created_after,
+        created_by: query.created_by,
+        finished_before: query.finished_before,
+        finished_after: query.finished_after,
+        sort: query.sort,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
+    // Query DB for runs in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_for_pipeline(&conn, id, query) {
+        match RunData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -279,8 +362,351 @@ async fn find_for_pipeline(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(find_by_id);
-    cfg.service(find_for_test);
-    cfg.service(find_for_template);
-    cfg.service(find_for_pipeline);
+    cfg.service(web::resource("/tests/{id}/runs").route(web::get().to(find_for_test)));
+    cfg.service(web::resource("/runs/{id}").route(web::get().to(find_by_id)));
+    cfg.service(web::resource("/templates/{id}/runs").route(web::get().to(find_for_template)));
+    cfg.service(web::resource("/pipelines/{id}/runs").route(web::get().to(find_for_pipeline)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::unit_test_util::*;
+    use super::*;
+    use crate::models::run::NewRun;
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
+    use actix_web::{http, test, App};
+    use diesel::PgConnection;
+    use uuid::Uuid;
+
+    fn create_test_run(conn: &PgConnection) -> RunData {
+        create_test_run_with_test_id(conn, Uuid::new_v4())
+    }
+
+    fn create_run_with_test_and_template(conn: &PgConnection) -> (TemplateData, TestData, RunData) {
+        let new_template = create_test_template(conn);
+        let new_test = create_test_test_with_template_id(conn, new_template.template_id);
+        let new_run = create_test_run_with_test_id(conn, new_test.test_id);
+
+        (new_template, new_test, new_run)
+    }
+
+    fn create_test_template(conn: &PgConnection) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: Uuid::new_v4(),
+            description: None,
+            test_wdl: String::from(""),
+            eval_wdl: String::from(""),
+            created_by: None,
+        };
+
+        TemplateData::create(&conn, new_template).expect("Failed to insert test")
+    }
+
+    fn create_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: id,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_by: None,
+        };
+
+        TestData::create(&conn, new_test).expect("Failed to insert test")
+    }
+
+    fn create_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: id,
+            status: RunStatusEnum::Created,
+            test_input: serde_json::from_str("{\"test\":\"test\"}").unwrap(),
+            eval_input: serde_json::from_str("{\"eval\":\"test\"}").unwrap(),
+            cromwell_job_id: Some(String::from("123456789")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_success() {
+        let pool = get_test_db_pool();
+
+        let new_run = create_test_run(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/runs/{}", new_run.run_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_run: RunData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_run, new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_run(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/runs/{}", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No run found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No run found with the specified ID");
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_run(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get().uri("/runs/123456789").to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_success() {
+        let pool = get_test_db_pool();
+
+        let new_run = create_test_run(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs", new_run.test_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<RunData> = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_test_run(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No run found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No runs found with the specified parameters"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_test_run(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/tests/123456789/runs")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn find_for_template_success() {
+        let pool = get_test_db_pool();
+
+        let (_, new_test, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/templates/{}/runs", new_test.template_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<RunData> = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_for_template_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/templates/{}/runs", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No run found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No runs found with the specified parameters"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn find_for_template_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/templates/123456789/runs")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn find_for_pipeline_success() {
+        let pool = get_test_db_pool();
+
+        let (new_template, _, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/pipelines/{}/runs", new_template.pipeline_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<RunData> = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_for_pipeline_failure_not_found() {
+        let pool = get_test_db_pool();
+
+        create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/pipelines/{}/runs", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No run found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(
+            error_body.detail,
+            "No runs found with the specified parameters"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn find_for_pipeline_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/pipelines/123456789/runs")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
 }
