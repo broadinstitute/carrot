@@ -1,0 +1,15 @@
+language: rust
+rust:
+  - 1.42.0
+dist: bionic
+services:
+  - postgresql
+cache: cargo
+env:
+  - DB=test_framework_db
+  - USER=test_framework_user
+  - PASS=test
+  - DATABASE_URL="postgres://${USER}:${PASS}@localhost:5432/${DB}"
+before_script:
+  - psql -c "create database ${DB};" -U postgres
+  - psql -c "create user ${USER} with password \'${PASS}\'"
