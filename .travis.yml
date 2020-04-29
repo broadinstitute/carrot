@@ -12,5 +12,6 @@ env:
    - PASS=test
    - DATABASE_URL="postgres://${USER}:${PASS}@localhost:5432/${DB}"
 before_script:
-  - psql -c "create database ${DB};" -U postgres
-  - psql -c "create user ${USER} with password \'${PASS}\'"
+  - psql -c 'create database travis_ci_test;' -U postgres
+#  - psql -c "create database ${DB};" -U postgres
+#  - psql -c "create user ${USER} with password \'${PASS}\'"
