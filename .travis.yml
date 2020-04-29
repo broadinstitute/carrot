@@ -14,7 +14,11 @@ addons:
 cache: cargo
 env:
   global:
-   - DATABASE_URL="postgres://postgres:@localhost:5432/test_framework_db"
+   - DB_USER="test_framework_user"
+   - DB_PASS="test"
+   - DB_NAME="test_framework_db"
+   - DATABASE_URL="postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}"
    - PGPORT=5432
 before_script: 
- - sudo -u postgres psql -c 'create database test_framework_db;'
+ - sudo -u postgres psql -c 'create database ${DB_NAME};'
+ - sudo -u postgres psql -c "create user ${DB_USER} with password '${DB_PASS}'"
