@@ -1,9 +1,10 @@
 language: rust
 rust:
   - 1.42.0
+os: linux
 dist: bionic
 services:
-  - postgresql
+ - docker
 cache: cargo
 env:
   global:
@@ -11,7 +12,5 @@ env:
    - USER=test_framework_user
    - PASS=test
    - DATABASE_URL="postgres://${USER}:${PASS}@localhost:5432/${DB}"
-before_script:
-  - psql -c 'create database travis_ci_test;' -U postgres
-#  - psql -c "create database ${DB};" -U postgres
-#  - psql -c "create user ${USER} with password \'${PASS}\'"
+before_script: 
+ - docker-compose -f scripts/docker/test/docker-compose.yml .
