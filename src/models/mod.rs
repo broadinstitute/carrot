@@ -7,6 +7,3 @@ pub mod run;
 pub mod template;
 pub mod template_result;
 pub mod test;
-
-#[cfg(test)]
-mod unit_test_util;

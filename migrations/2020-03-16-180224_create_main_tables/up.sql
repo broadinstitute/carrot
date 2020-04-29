@@ -1,3 +1,5 @@
+create extension if not exists "uuid-ossp";
+
 create table pipeline(
 	pipeline_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	name text not null unique,

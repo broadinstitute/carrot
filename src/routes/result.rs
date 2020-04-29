@@ -233,7 +233,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::unit_test_util::*;
+    use crate::unit_test_util::*;
     use super::*;
     use crate::custom_sql_types::ResultTypeEnum;
     use actix_web::{http, test, App};

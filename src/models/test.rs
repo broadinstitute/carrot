@@ -250,7 +250,7 @@ impl TestData {
 #[cfg(test)]
 mod tests {
 
-    use super::super::unit_test_util::*;
+    use crate::unit_test_util::*;
     use super::*;
     use crate::models::template::NewTemplate;
     use crate::models::template::TemplateData;
