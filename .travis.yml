@@ -18,4 +18,4 @@ env:
     - PGPORT=5432
 before_script:
   - sudo -u postgres psql -c 'create database test_framework_db;'
-  - sudo -u postgres psql -c "create user test_framework_user with password 'test';"
+  - sudo -u postgres psql -c "create user test_framework_user with password 'test' superuser;"
