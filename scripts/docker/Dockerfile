@@ -4,8 +4,8 @@ COPY ./ .
 RUN cargo install --path .
 
 FROM debian:buster-slim
-RUN apt-get update; \
-    apt-get -y install libpq-dev;
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install libpq-dev ca-certificates
 COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
-EXPOSE 8080
+EXPOSE 80
 CMD ["carrot"]

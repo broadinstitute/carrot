@@ -21,7 +21,6 @@ pub fn initialize_db_schema(conn: &PgConnection) {
     });
 }
 
-
 pub fn get_test_db_connection() -> PgConnection {
     // Load environment config so we can get DB connection string
     load_env_config();

@@ -1,4 +1,4 @@
-version: '3.1'
+version: '2'
 
 services:
 
@@ -8,13 +8,13 @@ services:
       context: ../../
       dockerfile: scripts/docker/Dockerfile
     ports:
-      - "8080:8080"
+      - "8080:80"
     environment:
       - DATABASE_URL=postgres://test_framework_user:test@postgres:5432/test_framework_db
       - DB_THREADS=4
       - RUST_LOG=carrot=info,actix=info
-      - HOST=127.0.0.1
-      - PORT=8080
+      - HOST=0.0.0.0
+      - PORT=80
     depends_on:
       - postgres
 

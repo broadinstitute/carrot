@@ -250,10 +250,10 @@ impl TestData {
 #[cfg(test)]
 mod tests {
 
-    use crate::unit_test_util::*;
     use super::*;
     use crate::models::template::NewTemplate;
     use crate::models::template::TemplateData;
+    use crate::unit_test_util::*;
     use uuid::Uuid;
 
     fn insert_test_test(conn: &PgConnection) -> TestData {

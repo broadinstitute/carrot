@@ -257,10 +257,10 @@ impl TemplateData {
 #[cfg(test)]
 mod tests {
 
-    use crate::unit_test_util::*;
     use super::*;
     use crate::models::pipeline::NewPipeline;
     use crate::models::pipeline::PipelineData;
+    use crate::unit_test_util::*;
     use uuid::Uuid;
 
     fn insert_test_template(conn: &PgConnection) -> TemplateData {

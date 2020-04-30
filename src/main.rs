@@ -19,7 +19,7 @@ extern crate diesel_migrations;
 
 use actix_web::{middleware::Logger, App, HttpServer};
 use dotenv;
-use log::{info, error};
+use log::{error, info};
 use std::env;
 
 embed_migrations!("migrations");
@@ -46,7 +46,8 @@ async fn main() -> std::io::Result<()> {
     let pool = db::get_pool(db_url, db_threads);
 
     info!("Running DB schema migrations, if necessary");
-    let migrations_result = embedded_migrations::run_with_output(&pool.get().unwrap(), &mut std::io::stdout());
+    let migrations_result =
+        embedded_migrations::run_with_output(&pool.get().unwrap(), &mut std::io::stdout());
     if let Err(e) = migrations_result {
         error!("Database schema migrations failed with error: {}", e);
         panic!();
