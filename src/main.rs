@@ -12,7 +12,7 @@ mod util;
 #[macro_use]
 extern crate diesel;
 
-use actix_web::{middleware::Logger, App, HttpServer};
+use actix_web::{middleware::Logger, web, App, HttpServer};
 use dotenv;
 use log::info;
 use std::env;
@@ -43,7 +43,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(Logger::default()) // Use default logger as configured in .env file
             .data(pool.clone()) // Give app access to clone of DB pool so other threads can use it
-            .configure(app::config) // Route mappings are configured in app module
+            .service(web::scope("/api/v1/").configure(app::config)) //Get route mappings for v1 api from app module
     })
     .bind(format!("{}:{}", host, port))?
     .run()
