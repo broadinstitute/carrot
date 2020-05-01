@@ -262,12 +262,12 @@ impl RunData {
 #[cfg(test)]
 mod tests {
 
-    use super::super::unit_test_util::*;
     use super::*;
     use crate::models::template::NewTemplate;
     use crate::models::template::TemplateData;
     use crate::models::test::NewTest;
     use crate::models::test::TestData;
+    use crate::unit_test_util::*;
     use chrono::offset::Utc;
     use uuid::Uuid;
 

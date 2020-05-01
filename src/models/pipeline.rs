@@ -194,8 +194,8 @@ impl PipelineData {
 #[cfg(test)]
 mod tests {
 
-    use super::super::unit_test_util::*;
     use super::*;
+    use crate::unit_test_util::*;
     use uuid::Uuid;
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {

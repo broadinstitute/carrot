@@ -20,6 +20,10 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
         * Once the Diesel CLI is installed and the PostgreSQL database is running, the Diesel CLI migration tool can be used to create all of the required tables and types in the database with the command `diesel migration run`
     * Once Rust is installed, the project can be built using the `cargo build` command in the project directory.
         * Building for release can be done using `cargo build --release`
+* A Dockerfile is provided in the `/scripts/docker` directory that can be used to run CARROT in a Docker container
+    * The image can be built by running `docker build -f scripts/docker/Dockerfile .` from the project root.
+    * For development purposes, the `docker-compose.yml` file can be used to run CARROT with a PostreSQL server in another container as well.  This can be done using `docker-compose up` within that directory.
+    * To run unit tests in Docker, use `docker-compose up --abort-on-container-exit --exit-code-from carrot-test` within the `/scripts/docker/test` directory.
 
 ## <a name="style">Style</a>
 

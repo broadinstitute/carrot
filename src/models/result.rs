@@ -206,8 +206,8 @@ impl ResultData {
 #[cfg(test)]
 mod tests {
 
-    use super::super::unit_test_util::*;
     use super::*;
+    use crate::unit_test_util::*;
     use uuid::Uuid;
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {

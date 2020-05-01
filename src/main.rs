@@ -8,21 +8,28 @@ mod routes;
 mod schema;
 mod util;
 
+#[cfg(test)]
+mod unit_test_util;
+
 // An older syntax that is still required for importing and using diesel macros in the project
 #[macro_use]
 extern crate diesel;
+#[macro_use]
+extern crate diesel_migrations;
 
 use actix_web::{middleware::Logger, App, HttpServer};
 use dotenv;
-use log::info;
+use log::{error, info};
 use std::env;
+
+embed_migrations!("migrations");
 
 // Indicate to actix that this is the main function to be run
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     // Load environment variables from env file
     dotenv::from_filename(".env").ok();
-    // Initlializes logger with config from .env file
+    // Initializes logger with config from .env file
     env_logger::init();
 
     // Load env variables and terminate if any cannot be found
@@ -37,6 +44,14 @@ async fn main() -> std::io::Result<()> {
 
     info!("Starting DB Connection Pool");
     let pool = db::get_pool(db_url, db_threads);
+
+    info!("Running DB schema migrations, if necessary");
+    let migrations_result =
+        embedded_migrations::run_with_output(&pool.get().unwrap(), &mut std::io::stdout());
+    if let Err(e) = migrations_result {
+        error!("Database schema migrations failed with error: {}", e);
+        panic!();
+    }
 
     info!("Starting server");
     HttpServer::new(move || {

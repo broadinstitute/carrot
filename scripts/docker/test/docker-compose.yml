@@ -1,0 +1,20 @@
+version: '2'
+
+services:
+
+  carrot-test:
+    image: carrot-test
+    build:
+      context: ../../../
+      dockerfile: scripts/docker/test/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://test_framework_user:test@postgres:5432/test_framework_db
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:12.1
+    environment:
+      - POSTGRES_USER=test_framework_user
+      - POSTGRES_PASSWORD=test
+      - POSTGRES_DB=test_framework_db
