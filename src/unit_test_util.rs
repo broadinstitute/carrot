@@ -1,6 +1,7 @@
 //! Contains utility functions required by unit tests within the models module
 
 use crate::db;
+use crate::clients;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use dotenv;
@@ -53,6 +54,15 @@ pub fn get_test_db_pool() -> db::DbPool {
         .expect("Failed to create test transaction");
 
     conn
+}
+
+pub fn get_cromwell_client() -> clients::cromwell_client::CromwellClient {
+    // Load environment config so we can get cromwell url
+    load_env_config();
+    // Load cromwell url
+    let cromwell_address = env::var("CROMWELL_ADDRESS").expect("CROMWELL_ADDRESS environment variable not set");
+    // Return client
+    clients::cromwell_client::CromwellClient::new(String::from(&cromwell_address))
 }
 
 pub fn load_env_config() {

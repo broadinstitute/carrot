@@ -11,6 +11,8 @@ edition = "2018"
 actix-web = "2.0.0"
 actix-rt = "1.0.0"
 actix-service = "1.0.5"
+actix-codec = "0.2.0"
+actix-multipart-rfc7578 = "0.3.0-rc" # For sending files in requests
 # Environment variables
 dotenv = "0.15.0"
 # Logging
