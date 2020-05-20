@@ -9,14 +9,17 @@ use crate::error_body::ErrorBody;
 use crate::models::run::{RunData, RunQuery};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use chrono::NaiveDateTime;
+use json_patch::merge;
 use log::error;
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
+use crate::models::test::TestData;
+use crate::models::template::TemplateData;
 
 /// Represents the part of a run query that is received as a request body
 ///
-/// The mappings for querying runs has pipeline_id, teplate_id, or test_id as path params
+/// The mapping for querying runs has pipeline_id, template_id, or test_id as path params
 /// and the other parameters are expected as part of the request body.  A RunQuery
 /// cannot be deserialized from the request body, so this is used instead, and then a
 /// RunQuery can be built from the instance of this and the id from the path
@@ -35,6 +38,18 @@ pub struct RunQueryIncomplete {
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+/// Represents the part of a new run that is received as a request body
+///
+/// The mapping for starting a run expects the test_id as a path param and the name, test_input,
+/// eval_input, and created by as part of the request body.  The cromwell_job_id and status are
+/// filled when the job is submitted to Cromwell
+pub struct NewRunIncomplete {
+    pub name: Option<String>,
+    pub test_input: Option<Value>,
+    pub eval_input: Option<Value>,
+    pub created_by: Option<String>,
 }
 
 /// Handles requests to /runs/{id} for retrieving run info by run_id
@@ -355,6 +370,99 @@ async fn find_for_pipeline(
             detail: "Error while attempting to retrieve requested run(s) from DB",
         })
     })
+}
+
+async fn run_for_test(
+    id: web::Path<String>,
+    web::Json(run_inputs): web::Json<NewRunIncomplete>,
+    pool: web::Data<db::DbPool>,
+) -> impl Responder {
+    // Parse test id into UUID
+    let test_id = match Uuid::parse_str(&*id) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                title: "ID formatted incorrectly",
+                status: 400,
+                detail: "ID must be formatted as a Uuid",
+            }));
+        }
+    };
+    // Retrieve test for id
+    let test = web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+        TestData::find_by_id(&conn, test_id)
+    }).await;
+    // Get test data or return error
+    let test = match test {
+        Ok(test_data) => test_data,
+        Err(e) => {
+            error!("{}", e);
+            return match e {
+                // If no test is found, return a 404
+                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                    title: "No test found",
+                    status: 404,
+                    detail: "No test found with the specified ID",
+                }),
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: "Error while attempting to retrieve test data",
+                }),
+            };
+        }
+    };
+
+    // Merge input JSONs
+    let mut test_json = json!("{}");
+    if let Some(defaults) = test.test_input_defaults {
+        merge(&mut test_json, &defaults);
+    }
+    if let Some(inputs) = run_inputs.test_input {
+        merge(&mut test_json, &inputs);
+    }
+    let mut eval_json = json!("{}");
+    if let Some(defaults) = test.eval_input_defaults {
+        merge(&mut eval_json, &defaults);
+    }
+    if let Some(inputs) = run_inputs.eval_input {
+        merge(&mut eval_json, &inputs);
+    }
+
+    // Retrieve template to get WDLs
+    let template_id = test.template_id.clone();
+    let template = web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+        TemplateData::find_by_id(&conn, template_id)
+    }).await;
+    // Get template data or return error
+    let template = match template {
+        Ok(template_data) => template_data,
+        Err(e) => {
+            error!("{}", e);
+            return match e {
+                // If no test is found, return a 404
+                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                    title: "No template found",
+                    status: 404,
+                    detail: "No template found for the specified test",
+                }),
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: "Error while attempting to retrieve template data",
+                }),
+            };
+        }
+    };
+
+
+
 }
 
 /// Attaches the REST mappings in this file to a service config

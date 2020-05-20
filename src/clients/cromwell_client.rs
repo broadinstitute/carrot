@@ -9,39 +9,50 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use actix_web::error::PayloadError;
 use std::str::Utf8Error;
+use std::error::Error;
 use std::fmt;
 
 /// Configuration struct for sending requests to a Cromwell server
 ///
-///
+/// Includes an actix client for making http requests and the address of the server to send to
+/// requests to
 #[derive(Clone)]
 pub struct CromwellClient {
     client: Client,
     cromwell_address: String,
 }
 
+/// Parameters for submitting a job to cromwell
+///
+/// Encapsulates all the parameters for submitting to Cromwell for starting a job
+/// For more information on specific parameters, visit the
+/// [Cromwell API documentation](https://cromwell.readthedocs.io/en/stable/api/RESTAPI/)
 pub struct JobData {
-    labels: Option<PathBuf>,
-    workflow_dependencies: Option<PathBuf>,
-    workflow_inputs: Option<PathBuf>,
-    workflow_inputs2: Option<PathBuf>,
-    workflow_inputs3: Option<PathBuf>,
-    workflow_inputs4: Option<PathBuf>,
-    workflow_inputs5: Option<PathBuf>,
-    workflow_on_hold: Option<bool>,
-    workflow_options: Option<PathBuf>,
-    workflow_root: Option<String>,
-    workflow_source: Option<PathBuf>,
-    workflow_type: Option<WorkflowTypeEnum>,
-    workflow_type_version: Option<WorkflowTypeVersionEnum>,
-    workflow_url: Option<String>,
+    pub labels: Option<PathBuf>,
+    pub workflow_dependencies: Option<PathBuf>,
+    pub workflow_inputs: Option<PathBuf>,
+    pub workflow_inputs2: Option<PathBuf>,
+    pub workflow_inputs3: Option<PathBuf>,
+    pub workflow_inputs4: Option<PathBuf>,
+    pub workflow_inputs5: Option<PathBuf>,
+    pub workflow_on_hold: Option<bool>,
+    pub workflow_options: Option<PathBuf>,
+    pub workflow_root: Option<String>,
+    pub workflow_source: Option<PathBuf>,
+    pub workflow_type: Option<WorkflowTypeEnum>,
+    pub workflow_type_version: Option<WorkflowTypeVersionEnum>,
+    pub workflow_url: Option<String>,
 }
 
+/// Enum for submitting workflow type to Cromwell
+///
+/// CWL is not actually currently supported
 pub enum WorkflowTypeEnum {
     WDL,
     CWL
 }
 
+/// Mapping workflow types to the values the Cromwell API expects
 impl fmt::Display for WorkflowTypeEnum {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -51,12 +62,16 @@ impl fmt::Display for WorkflowTypeEnum {
     }
 }
 
+/// Enum for workflow type versions
+///
+/// DraftDash2 and OnePointZero are for WDL, VOnePointZero is for CWL
 pub enum WorkflowTypeVersionEnum {
     DraftDash2,
     OnePointZero,
     VOnePointZero,
 }
 
+/// Mapping workflow type versions to the values the Cromwell API expects
 impl fmt::Display for WorkflowTypeVersionEnum {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -67,12 +82,16 @@ impl fmt::Display for WorkflowTypeVersionEnum {
     }
 }
 
+/// Expected return value from Cromwell for starting a job
+///
+/// Includes the id for the job in Cromwell and its status
 #[derive(Debug, Deserialize)]
 pub struct WorkflowIdAndStatus {
-    id: String,
-    status: String,
+    pub id: String,
+    pub status: String,
 }
 
+/// Enum of possible errors from submitting a job to Cromwell
 #[derive(Debug)]
 pub enum StartJobError {
     Json(serde_json::error::Error),
@@ -82,6 +101,9 @@ pub enum StartJobError {
     Utf8(Utf8Error)
 }
 
+impl Error for StartJobError {}
+
+// Implementing From for each of the error types so they map more easily
 impl From<serde_json::error::Error> for StartJobError{
     fn from(e: serde_json::error::Error) -> StartJobError {
         StartJobError::Json(e)
@@ -110,6 +132,7 @@ impl From<Utf8Error> for StartJobError{
 
 impl CromwellClient {
 
+    /// Creates a new CromwellClient with he specified address
     pub fn new(cromwell_address: String) -> Self {
         CromwellClient{
             client: Client::default(),
@@ -117,6 +140,16 @@ impl CromwellClient {
         }
     }
 
+    /// Submits a job to Cromwell for processing
+    ///
+    /// Submits a request to the Cromwell /ap1/workflows/v1 mapping, with the form values
+    /// specified in job_data.  Returns either the id and status from the response from Cromwell
+    /// or one of the following errors wrapped in a StartJobError:
+    /// Io if there is an issue reading files when creating the form data
+    /// Request if there is an issue sending the request
+    /// Payload if there is an issue getting the response body
+    /// Utf8 if there is an issue converting the response body to Utf8
+    /// Json if there is an issue parsing the response body to a WorkflowIdAndStatus struct
     pub async fn start_job(&self, job_data: JobData) -> Result<WorkflowIdAndStatus, StartJobError> {
 
         // Create a multipart form and fill in fields from job_data
@@ -131,15 +164,17 @@ impl CromwellClient {
             .send_body(multipart::Body::from(form))
             .await;
 
+        // Get response
         let mut response = match response {
             Ok(res) => res,
             Err(e) => return Err(StartJobError::Request(e))
         };
 
+        // Get response body and convert it into bytes
         let response_body = response.body().await?;
-
         let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
 
+        // Parse response body into WorkflowIdAndStatus
         match serde_json::from_str(body_utf8) {
             Ok(id_and_status) => Ok(id_and_status),
             Err(e) => Err(e.into())
@@ -147,6 +182,10 @@ impl CromwellClient {
 
     }
 
+    /// Assembles data specified into job_data into a Form object for making an http request
+    ///
+    /// Returns either a completed form to be used for submitting the job or an io error if there
+    /// is an issue reading a file
     fn assemble_form_data<'a>(job_data: JobData) -> Result<multipart::Form<'a>, std::io::Error> {
         let mut form = multipart::Form::default();
 
