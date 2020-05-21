@@ -20,17 +20,17 @@ impl fmt::Display for Call {
             .into_iter()
             .map(|input| input.to_string())
             .collect::<Vec<String>>()
-            .join(",\n    ");
+            .join(",\n      ");
 
         match &self.alias {
             Some(val) => write!(
                 f,
-                "call {} as {} {{\n  input:\n    {}\n}}",
+                "call {} as {} {{\n    input:\n      {}\n  }}",
                 self.name, val, inputs_string
             ),
             None => write!(
                 f,
-                "call {} {{\n  input:\n    {}\n}}",
+                "call {} {{\n    input:\n      {}\n  }}",
                 self.name, inputs_string
             ),
         }
@@ -44,11 +44,11 @@ mod tests {
 
     #[test]
     fn test_to_string_with_alias() {
-        let expected_str = String::from("call test_call as alias {\n  \
-            input:\n    \
-            test = 1,\n    \
-            test2 = 2,\n    \
-            test3 = Kevin\n}"
+        let expected_str = String::from("call test_call as alias {\n    \
+            input:\n      \
+            test = 1,\n      \
+            test2 = 2,\n      \
+            test3 = Kevin\n  }"
         );
 
         let test_inputs = vec![

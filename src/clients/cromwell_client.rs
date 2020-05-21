@@ -101,6 +101,18 @@ pub enum StartJobError {
     Utf8(Utf8Error)
 }
 
+impl fmt::Display for StartJobError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            StartJobError::Json(e) => write!(f, "StartJobError Json {}", e),
+            StartJobError::Io(e) => write!(f, "StartJobError Io {}", e),
+            StartJobError::Request(e) => write!(f, "StartJobError Request {}", e),
+            StartJobError::Payload(e) => write!(f, "StartJobError Payload {}", e),
+            StartJobError::Utf8(e) => write!(f, "StartJobError Utf8 {}", e),
+        }
+    }
+}
+
 impl Error for StartJobError {}
 
 // Implementing From for each of the error types so they map more easily

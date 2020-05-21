@@ -461,7 +461,19 @@ async fn run_for_test(
         }
     };
 
+    // TODO: Retrieve WDLs from their cloud locations
 
+    // TODO: Parse WDLS into Workflow objects from the WDL crate
+
+    // TODO: Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
+
+    // TODO: Send job request to cromwell
+
+    // TODO: Write to Run table in DB
+
+    // TODO: Start checking status of run
+
+    // TODO: Return run to user
 
 }
 
