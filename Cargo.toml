@@ -8,11 +8,13 @@ edition = "2018"
 
 [dependencies]
 # Web framework
-actix-web = "2.0.0"
+actix-web = { version = "2.0.0", features=["openssl"] }
 actix-rt = "1.0.0"
 actix-service = "1.0.5"
 actix-codec = "0.2.0"
 actix-multipart-rfc7578 = "0.3.0-rc" # For sending files in requests
+# For SSL requests
+openssl = "0.10"
 # Environment variables
 dotenv = "0.15.0"
 # Logging
@@ -33,5 +35,7 @@ chrono = { version = "0.4", features = ["serde"]}
 json-patch = "*"
 # For processing WDLs
 wdl = { path = "wdl" }
+# For loading static configuration info
+lazy_static = "1.4.0"
 
 

@@ -1,6 +1,6 @@
 // Declare all modules that are children of main
 mod app;
-mod clients;
+mod requests;
 mod custom_sql_types;
 mod db;
 mod error_body;
@@ -8,20 +8,23 @@ mod models;
 mod routes;
 mod schema;
 mod util;
+mod wdl;
 
 #[cfg(test)]
 mod unit_test_util;
 
-// An older syntax that is still required for importing and using diesel macros in the project
 #[macro_use]
 extern crate diesel;
 #[macro_use]
 extern crate diesel_migrations;
+#[macro_use]
+extern crate lazy_static;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use dotenv;
 use log::{error, info};
 use std::env;
+use actix_web::client::Client;
 
 embed_migrations!("migrations");
 
@@ -36,7 +39,6 @@ async fn main() -> std::io::Result<()> {
     // Load env variables and terminate if any cannot be found
     let host = env::var("HOST").expect("HOST environment variable not set");
     let port = env::var("PORT").expect("PORT environment variable not set");
-    let cromwell_address = env::var("CROMWELL_ADDRESS").expect("CROMWELL_ADDRESS environment variable not set");
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
     let db_threads = env::var("DB_THREADS").expect("DB_THREADS environment variable not set");
     // Parse db_threads variable into an integer and terminate if unsuccessful
@@ -60,7 +62,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(Logger::default()) // Use default logger as configured in .env file
             .data(pool.clone()) // Give app access to clone of DB pool so other threads can use it
-            .data(clients::cromwell_client::CromwellClient::new(String::from(&cromwell_address))) // Allow worker threads to get client for making REST calls
+            .data(Client::default()) // Allow worker threads to get client for making REST calls
             .service(web::scope("/api/v1/").configure(app::config)) //Get route mappings for v1 api from app module
     })
     .bind(format!("{}:{}", host, port))?

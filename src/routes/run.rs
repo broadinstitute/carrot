@@ -7,15 +7,16 @@ use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::run::{RunData, RunQuery};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder, client::Client};
 use chrono::NaiveDateTime;
 use json_patch::merge;
 use log::error;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use uuid::Uuid;
 use crate::models::test::TestData;
 use crate::models::template::TemplateData;
+use crate::requests::test_resource_requests;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -372,10 +373,12 @@ async fn find_for_pipeline(
     })
 }
 
+/*
 async fn run_for_test(
     id: web::Path<String>,
     web::Json(run_inputs): web::Json<NewRunIncomplete>,
     pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
 ) -> impl Responder {
     // Parse test id into UUID
     let test_id = match Uuid::parse_str(&*id) {
@@ -383,11 +386,11 @@ async fn run_for_test(
         Err(e) => {
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+            return HttpResponse::BadRequest().json(ErrorBody {
                 title: "ID formatted incorrectly",
                 status: 400,
                 detail: "ID must be formatted as a Uuid",
-            }));
+            });
         }
     };
     // Retrieve test for id
@@ -462,6 +465,29 @@ async fn run_for_test(
     };
 
     // TODO: Retrieve WDLs from their cloud locations
+    let test_wdl = match test_resource_requests::get_resource_as_string(&client.as_ref().client, &template.test_wdl).await {
+        Ok(wdl) => wdl,
+        Err(e) => {
+            error!("{}", e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: &format!("Error while attempting to retrieve test WDL from {}", template.test_wdl),
+            });
+        }
+    };
+
+    let eval_wdl = match test_resource_requests::get_resource_as_string(&client.as_ref().client, &template.eval_wdl).await {
+        Ok(wdl) => wdl,
+        Err(e) => {
+            error!("{}", e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: &format!("Error while attempting to retrieve eval WDL from {}", template.eval_wdl),
+            });
+        }
+    };
 
     // TODO: Parse WDLS into Workflow objects from the WDL crate
 
@@ -475,7 +501,7 @@ async fn run_for_test(
 
     // TODO: Return run to user
 
-}
+}*/
 
 /// Attaches the REST mappings in this file to a service config
 ///
