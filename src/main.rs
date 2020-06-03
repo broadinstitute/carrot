@@ -19,6 +19,8 @@ extern crate diesel;
 extern crate diesel_migrations;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate regex;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use dotenv;

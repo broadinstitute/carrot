@@ -1,2 +1,2 @@
-pub mod parser;
+pub mod combiner;
 mod womtool_util;

@@ -4,6 +4,7 @@
 
 use crate::custom_sql_types::RunStatusEnum;
 use crate::schema::run::dsl::*;
+use crate::schema::run;
 use crate::schema::template;
 use crate::schema::test;
 use crate::util;
@@ -13,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-#[cfg(test)]
-use crate::schema::run;
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -65,7 +64,6 @@ pub struct RunQuery {
 /// run_id and created_at are populated automatically by the DB
 #[derive(Deserialize, Insertable)]
 #[table_name = "run"]
-#[cfg(test)]
 pub struct NewRun {
     pub test_id: Uuid,
     pub name: String,
@@ -74,6 +72,17 @@ pub struct NewRun {
     pub eval_input: Value,
     pub cromwell_job_id: Option<String>,
     pub created_by: Option<String>,
+    pub finished_at: Option<NaiveDateTime>,
+}
+
+/// Represents fields to change when updating a run
+///
+/// Only name, status, and finished_at can be modified after the run has been created
+#[derive(Deserialize, Serialize, AsChangeset, Debug)]
+#[table_name = "run"]
+pub struct RunChangeset {
+    pub name: Option<String>,
+    pub status: Option<RunStatusEnum>,
     pub finished_at: Option<NaiveDateTime>,
 }
 
@@ -253,9 +262,24 @@ impl RunData {
     ///
     /// Annotated for tests right now because it's not being used in the main program, but will be
     /// eventually
-    #[cfg(test)]
     pub fn create(conn: &PgConnection, params: NewRun) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(run).values(&params).get_result(conn)
+    }
+
+    /// Updates a specified run in the DB
+    ///
+    /// Updates the run row in the DB using `conn` specified by `id` with the values in
+    /// `params`
+    /// Returns a result containing either the newly updated run or an error if the update
+    /// fails for some reason
+    pub fn update(
+        conn: &PgConnection,
+        id: Uuid,
+        params: RunChangeset,
+    ) -> Result<Self, diesel::result::Error> {
+        diesel::update(run.filter(run_id.eq(id)))
+            .set(params)
+            .get_result(conn)
     }
 }
 
@@ -808,5 +832,56 @@ mod tests {
         let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 2);
+    }
+
+    #[test]
+    fn update_success() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run(&conn);
+
+        let changes = RunChangeset {
+            name: Some(String::from("TestTestTestTest")),
+            status: Some(RunStatusEnum::Failed),
+            finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap())
+        };
+
+        let updated_run = RunData::update(&conn, test_run.run_id, changes)
+            .expect("Failed to update run");
+
+        assert_eq!(updated_run.name, String::from("TestTestTestTest"));
+        assert_eq!(
+            updated_run.status,
+            RunStatusEnum::Failed
+        );
+        assert_eq!(
+            updated_run.finished_at.unwrap(),
+            "2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()
+        );
+    }
+
+    #[test]
+    fn update_failure_same_name() {
+        let conn = get_test_db_connection();
+
+        let test_runs = insert_test_runs_with_test_id(&conn, Uuid::new_v4());
+
+        let changes = RunChangeset {
+            name: Some(test_runs[0].name.clone()),
+            status: None,
+            finished_at: None
+        };
+
+        let updated_run = RunData::update(&conn, test_runs[1].run_id, changes);
+
+        assert!(matches!(
+            updated_run,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
+            )
+        ));
     }
 }

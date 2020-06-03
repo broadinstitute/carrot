@@ -29,13 +29,16 @@ r2d2 = "0.8.8"
 # Serializing/Deserializing data
 serde = "1.0.104"
 serde_json = "1.0.48"
+serde_urlencoded = "0.6.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"]}
 # For merging JSONs
 json-patch = "*"
-# For processing WDLs
-wdl = { path = "wdl" }
 # For loading static configuration info
 lazy_static = "1.4.0"
+# For creating temporary files for processing WDLs
+tempfile = "3.1.0"
+# For some string parsing/matching
+regex = "1"
 
 

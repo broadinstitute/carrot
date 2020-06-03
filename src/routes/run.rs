@@ -6,7 +6,7 @@
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::run::{RunData, RunQuery};
+use crate::models::run::{RunData, RunQuery, NewRun};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder, client::Client};
 use chrono::NaiveDateTime;
 use json_patch::merge;
@@ -17,6 +17,9 @@ use uuid::Uuid;
 use crate::models::test::TestData;
 use crate::models::template::TemplateData;
 use crate::requests::test_resource_requests;
+use crate::requests::cromwell_requests;
+use crate::wdl::combiner;
+use tempfile::NamedTempFile;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -373,7 +376,7 @@ async fn find_for_pipeline(
     })
 }
 
-/*
+
 async fn run_for_test(
     id: web::Path<String>,
     web::Json(run_inputs): web::Json<NewRunIncomplete>,
@@ -464,7 +467,7 @@ async fn run_for_test(
         }
     };
 
-    // TODO: Retrieve WDLs from their cloud locations
+    // Retrieve WDLs from their cloud locations
     let test_wdl = match test_resource_requests::get_resource_as_string(&client.as_ref().client, &template.test_wdl).await {
         Ok(wdl) => wdl,
         Err(e) => {
@@ -489,19 +492,133 @@ async fn run_for_test(
         }
     };
 
-    // TODO: Parse WDLS into Workflow objects from the WDL crate
 
-    // TODO: Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
+    // Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
+    let combined_wdl = match combiner::combine_wdls(&test_wdl, &template.test_wdl, &eval_wdl, &template.eval_wdl) {
+        Ok(wdl) => wdl,
+        Err(e) => {
+            error!(e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
+            });
+        }
+    };
 
-    // TODO: Send job request to cromwell
+    // Write combined wdl and jsons to temp files so they can be submitted to cromwell
+    let mut wdl_file = match NamedTempFile::new() {
+        Ok(file) => {
+            write!(file, combined_wdl);
+            file
+        },
+        Err(e) => {
+            error!(e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to create temp file for submitting WDL to cromwell",
+            });
+        }
+    };
+    let mut test_json_file = match NamedTempFile::new() {
+        Ok(file) => {
+            write!(file, test_json.to_string());
+            file
+        },
+        Err(e) => {
+            error!(e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to create temp file for submitting test params to cromwell",
+            });
+        }
+    };
+    let mut eval_json_file = match NamedTempFile::new() {
+        Ok(file) => {
+            write!(file, eval_json.to_string());
+            file
+        },
+        Err(e) => {
+            error!(e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to create temp file for submitting test params to cromwell",
+            });
+        }
+    };
 
-    // TODO: Write to Run table in DB
+    // Send job request to cromwell
+    let cromwell_params = cromwell_requests::StartJobParams {
+        labels: None,
+        workflow_dependencies: None,
+        workflow_inputs: Some(PathBuf::from(test_json_file.path())),
+        workflow_inputs2: Some(PathBuf::from(eval_json_file.path())),
+        workflow_inputs3: None,
+        workflow_inputs4: None,
+        workflow_inputs5: None,
+        workflow_on_hold: None,
+        workflow_options: None,
+        workflow_root: None,
+        workflow_source: Some(PathBuf::from(wdl_file.path())),
+        workflow_type: None,
+        workflow_type_version: None,
+        workflow_url: None,
+    };
+    let start_job_response = match cromwell_requests::start_job(&client, cromwell_params).await {
+        Ok(id_and_status) => id_and_status,
+        Err(e) => {
+            error!(e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: &format!("Submitting job to Cromwell failed with error: {}", e),
+            });
+        }
+    };
+
+    // Write to Run table in DB
+    let run = match web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        let new_run = NewRun {
+            test_id: test_id,
+            name: format!("{}run{}", test.name, chrono::NaiveDateTime::new()),
+            status: RunStatusEnum::Created,
+            test_input: test_json,
+            eval_input: eval_json,
+            cromwell_job_id: Some(start_job_response.id),
+            created_by: None,
+            finished_at: None,
+        };
+
+        match RunData::create(&conn, new_run) {
+            Ok(run) => Ok(run),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await {
+        Ok(run) => run,
+        Err(e) => {
+            error!(e);
+            return HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to insert run record into DB",
+            });
+        }
+    };
 
     // TODO: Start checking status of run
 
     // TODO: Return run to user
 
-}*/
+}
 
 /// Attaches the REST mappings in this file to a service config
 ///
