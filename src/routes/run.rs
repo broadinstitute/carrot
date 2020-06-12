@@ -8,8 +8,7 @@ use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::run::{RunData, RunQuery, NewRun};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder, client::Client};
-use chrono::NaiveDateTime;
-use json_patch::merge;
+use chrono::{NaiveDateTime, Utc};
 use log::error;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -20,6 +19,9 @@ use crate::requests::test_resource_requests;
 use crate::requests::cromwell_requests;
 use crate::wdl::combiner;
 use tempfile::NamedTempFile;
+use std::io::Write;
+use std::path::PathBuf;
+use crate::requests::cromwell_requests::WorkflowTypeEnum;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -49,6 +51,7 @@ pub struct RunQueryIncomplete {
 /// The mapping for starting a run expects the test_id as a path param and the name, test_input,
 /// eval_input, and created by as part of the request body.  The cromwell_job_id and status are
 /// filled when the job is submitted to Cromwell
+#[derive(Deserialize)]
 pub struct NewRunIncomplete {
     pub name: Option<String>,
     pub test_input: Option<Value>,
@@ -376,7 +379,15 @@ async fn find_for_pipeline(
     })
 }
 
-
+/// Handles requests to /tests/{id}/runs for starting a run for a test
+///
+/// This function is called by Actix-Web when a post request is made to the /tests/{id}/runs mapping
+/// It deserializes the request body to a NewRunIncomplete, retrieves the WDLs and json defaults from
+/// the template and test tables, generates a WDL for running the test and evaluation in succession,
+/// submits the job to cromwell, and inserts the run record into the DB.
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
 async fn run_for_test(
     id: web::Path<String>,
     web::Json(run_inputs): web::Json<NewRunIncomplete>,
@@ -396,13 +407,9 @@ async fn run_for_test(
             });
         }
     };
-    // Retrieve test for id
-    let test = web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
-        TestData::find_by_id(&conn, test_id)
-    }).await;
-    // Get test data or return error
-    let test = match test {
+    // Retrieve test for id or return error
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+    let test = match web::block(move || TestData::find_by_id(&conn, test_id)).await {
         Ok(test_data) => test_data,
         Err(e) => {
             error!("{}", e);
@@ -425,28 +432,24 @@ async fn run_for_test(
 
     // Merge input JSONs
     let mut test_json = json!("{}");
-    if let Some(defaults) = test.test_input_defaults {
-        merge(&mut test_json, &defaults);
+    if let Some(defaults) = &test.test_input_defaults {
+        json_patch::merge(&mut test_json, defaults);
     }
-    if let Some(inputs) = run_inputs.test_input {
-        merge(&mut test_json, &inputs);
+    if let Some(inputs) = &run_inputs.test_input {
+        json_patch::merge(&mut test_json, inputs);
     }
     let mut eval_json = json!("{}");
-    if let Some(defaults) = test.eval_input_defaults {
-        merge(&mut eval_json, &defaults);
+    if let Some(defaults) = &test.eval_input_defaults {
+        json_patch::merge(&mut eval_json, defaults);
     }
-    if let Some(inputs) = run_inputs.eval_input {
-        merge(&mut eval_json, &inputs);
+    if let Some(inputs) = &run_inputs.eval_input {
+        json_patch::merge(&mut eval_json, inputs);
     }
 
-    // Retrieve template to get WDLs
+    // Retrieve template to get WDLs or return error
     let template_id = test.template_id.clone();
-    let template = web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
-        TemplateData::find_by_id(&conn, template_id)
-    }).await;
-    // Get template data or return error
-    let template = match template {
+    let conn = pool.clone().get().expect("Failed to get DB connection from pool");
+    let template = match web::block(move || TemplateData::find_by_id(&conn, template_id)).await {
         Ok(template_data) => template_data,
         Err(e) => {
             error!("{}", e);
@@ -468,7 +471,7 @@ async fn run_for_test(
     };
 
     // Retrieve WDLs from their cloud locations
-    let test_wdl = match test_resource_requests::get_resource_as_string(&client.as_ref().client, &template.test_wdl).await {
+    let test_wdl = match test_resource_requests::get_resource_as_string(&client, &template.test_wdl).await {
         Ok(wdl) => wdl,
         Err(e) => {
             error!("{}", e);
@@ -480,7 +483,7 @@ async fn run_for_test(
         }
     };
 
-    let eval_wdl = match test_resource_requests::get_resource_as_string(&client.as_ref().client, &template.eval_wdl).await {
+    let eval_wdl = match test_resource_requests::get_resource_as_string(&client, &template.eval_wdl).await {
         Ok(wdl) => wdl,
         Err(e) => {
             error!("{}", e);
@@ -494,10 +497,10 @@ async fn run_for_test(
 
 
     // Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
-    let combined_wdl = match combiner::combine_wdls(&test_wdl, &template.test_wdl, &eval_wdl, &template.eval_wdl) {
+    let combined_wdl = match combiner::combine_wdls(&test_wdl, &template.test_wdl, &eval_wdl, &template.eval_wdl, &test.name) {
         Ok(wdl) => wdl,
         Err(e) => {
-            error!(e);
+            error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error",
                 status: 500,
@@ -507,13 +510,20 @@ async fn run_for_test(
     };
 
     // Write combined wdl and jsons to temp files so they can be submitted to cromwell
-    let mut wdl_file = match NamedTempFile::new() {
-        Ok(file) => {
-            write!(file, combined_wdl);
+    let wdl_file = match NamedTempFile::new() {
+        Ok(mut file) => {
+            if let Err(e) = write!(file, "{}", combined_wdl) {
+                error!("{}", e);
+                return HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: "Encountered error while attempting to create temp file for submitting WDL to cromwell",
+                });
+            }
             file
         },
         Err(e) => {
-            error!(e);
+            error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error",
                 status: 500,
@@ -521,27 +531,22 @@ async fn run_for_test(
             });
         }
     };
-    let mut test_json_file = match NamedTempFile::new() {
-        Ok(file) => {
-            write!(file, test_json.to_string());
+    let json_file = match NamedTempFile::new() {
+        Ok(mut file) => {
+            let mut json_to_submit = test_json.clone();
+            json_patch::merge(& mut json_to_submit, &eval_json);
+            if let Err(e) = write!(file, "{}", json_to_submit.to_string()) {
+                error!("{}", e);
+                return HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: "Encountered error while attempting to create temp file for submitting test params to cromwell",
+                });
+            }
             file
         },
         Err(e) => {
-            error!(e);
-            return HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: "Encountered error while attempting to create temp file for submitting test params to cromwell",
-            });
-        }
-    };
-    let mut eval_json_file = match NamedTempFile::new() {
-        Ok(file) => {
-            write!(file, eval_json.to_string());
-            file
-        },
-        Err(e) => {
-            error!(e);
+            error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error",
                 status: 500,
@@ -554,23 +559,23 @@ async fn run_for_test(
     let cromwell_params = cromwell_requests::StartJobParams {
         labels: None,
         workflow_dependencies: None,
-        workflow_inputs: Some(PathBuf::from(test_json_file.path())),
-        workflow_inputs2: Some(PathBuf::from(eval_json_file.path())),
-        workflow_inputs3: None,
-        workflow_inputs4: None,
-        workflow_inputs5: None,
+        workflow_inputs: Some(PathBuf::from(json_file.path())),
+        workflow_inputs_2: None,
+        workflow_inputs_3: None,
+        workflow_inputs_4: None,
+        workflow_inputs_5: None,
         workflow_on_hold: None,
         workflow_options: None,
         workflow_root: None,
         workflow_source: Some(PathBuf::from(wdl_file.path())),
-        workflow_type: None,
+        workflow_type: Some(WorkflowTypeEnum::WDL),
         workflow_type_version: None,
         workflow_url: None,
     };
     let start_job_response = match cromwell_requests::start_job(&client, cromwell_params).await {
         Ok(id_and_status) => id_and_status,
         Err(e) => {
-            error!(e);
+            error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error",
                 status: 500,
@@ -580,17 +585,23 @@ async fn run_for_test(
     };
 
     // Write to Run table in DB
-    let run = match web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
+    let pool_for_new_thread = pool.clone();
+    let run = match web::block( move|| {
+        let conn = pool_for_new_thread.get().expect("Failed to get DB connection from pool");
+
+        let run_name =  match &run_inputs.name {
+            Some(name) => String::from(name),
+            None => format!("{}run{}", test.name, Utc::now())
+        };
 
         let new_run = NewRun {
             test_id: test_id,
-            name: format!("{}run{}", test.name, chrono::NaiveDateTime::new()),
-            status: RunStatusEnum::Created,
+            name: run_name,
+            status: RunStatusEnum::Submitted,
             test_input: test_json,
             eval_input: eval_json,
             cromwell_job_id: Some(start_job_response.id),
-            created_by: None,
+            created_by: run_inputs.created_by,
             finished_at: None,
         };
 
@@ -605,7 +616,7 @@ async fn run_for_test(
     .await {
         Ok(run) => run,
         Err(e) => {
-            error!(e);
+            error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error",
                 status: 500,
@@ -616,7 +627,8 @@ async fn run_for_test(
 
     // TODO: Start checking status of run
 
-    // TODO: Return run to user
+    // Return run to user
+    HttpResponse::Ok().json(run)
 
 }
 
@@ -625,7 +637,11 @@ async fn run_for_test(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::resource("/tests/{id}/runs").route(web::get().to(find_for_test)));
+    cfg.service(
+        web::resource("/tests/{id}/runs")
+        .route(web::get().to(find_for_test))
+        .route(web::post().to(run_for_test))
+    );
     cfg.service(web::resource("/runs/{id}").route(web::get().to(find_by_id)));
     cfg.service(web::resource("/templates/{id}/runs").route(web::get().to(find_for_template)));
     cfg.service(web::resource("/pipelines/{id}/runs").route(web::get().to(find_for_pipeline)));
@@ -684,7 +700,7 @@ mod tests {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
-            status: RunStatusEnum::Created,
+            status: RunStatusEnum::Submitted,
             test_input: serde_json::from_str("{\"test\":\"test\"}").unwrap(),
             eval_input: serde_json::from_str("{\"eval\":\"test\"}").unwrap(),
             cromwell_job_id: Some(String::from("123456789")),

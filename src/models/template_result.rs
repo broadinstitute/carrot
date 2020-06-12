@@ -5,6 +5,8 @@
 
 use crate::schema::template_result;
 use crate::schema::template_result::dsl::*;
+use crate::schema::template;
+use crate::schema::test;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -74,9 +76,27 @@ impl TemplateResultData {
             .first::<Self>(conn)
     }
 
-    /// Queries the DB for templarte_result mappings matching the specified query criteria
+    /// Queries the DB for template_result relationships associated with the template from which
+    /// the test indicated by `test_id` was created
     ///
-    /// Queries the DB using `conn` to retrieve template_result mappings matching the crieria in
+    /// Queries the DB using `conn` to retrieve template_result mappings with a `template_id`
+    /// equal to the id for the template for the test record with `test_id`
+    /// Returns a result containing either a vector of the retrieved template_result mappings as
+    /// TemplateResultData instances or an error if the query fails for some reason
+    pub fn find_for_test(conn: &PgConnection, test_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
+        let template_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(test_id))
+            .select(test::dsl::template_id);
+
+        template_result
+            .filter(template_id.eq_any(template_subquery))
+            .load::<Self>(conn)
+
+    }
+
+    /// Queries the DB for template_result mappings matching the specified query criteria
+    ///
+    /// Queries the DB using `conn` to retrieve template_result mappings matching the criteria in
     /// `params`
     /// Returns a result containing either a vector of the retrieved template_result mappings as
     /// TemplateResultData instances or an error if the query fails for some reason
@@ -185,6 +205,7 @@ mod tests {
 
     use super::*;
     use crate::unit_test_util::*;
+    use crate::models::test::{TestData, NewTest};
     use uuid::Uuid;
 
     fn insert_test_template_result(conn: &PgConnection) -> TemplateResultData {
@@ -241,6 +262,19 @@ mod tests {
         template_results
     }
 
+    fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: id,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_by: None,
+        };
+
+        TestData::create(&conn, new_test).expect("Failed to insert test")
+    }
+
     #[test]
     fn find_by_template_and_result_exists() {
         let conn = get_test_db_connection();
@@ -269,6 +303,24 @@ mod tests {
             Err(diesel::result::Error::NotFound)
         ));
     }
+
+    #[test]
+    fn find_for_test_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template_result = insert_test_template_result(&conn);
+
+        let test_test = insert_test_test_with_template_id(&conn, test_template_result.template_id);
+
+        let found_template_results = TemplateResultData::find_for_test(
+            &conn,
+            test_test.test_id
+        ).expect("Failed to retrieve test template_result by test_id.");
+
+        assert_eq!(found_template_results.len(), 1);
+        assert_eq!(found_template_results[0], test_template_result);
+    }
+
 
     #[test]
     fn find_with_template_id() {

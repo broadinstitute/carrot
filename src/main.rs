@@ -4,6 +4,7 @@ mod requests;
 mod custom_sql_types;
 mod db;
 mod error_body;
+mod manager;
 mod models;
 mod routes;
 mod schema;
@@ -19,7 +20,6 @@ extern crate diesel;
 extern crate diesel_migrations;
 #[macro_use]
 extern crate lazy_static;
-#[macro_use]
 extern crate regex;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};

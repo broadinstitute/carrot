@@ -1,6 +1,6 @@
-create type run_status_enum as enum('created', 'running', 'completed', 'failed');
+create type run_status_enum as enum('submitted', 'running', 'succeeded', 'failed', 'aborted');
 
-create type result_type_enum as enum('numeric', 'file');
+create type result_type_enum as enum('numeric', 'file', 'text');
 
 create table run(
     run_id uuid primary key DEFAULT uuid_generate_v4(),
@@ -24,18 +24,10 @@ create table result(
     created_by text
 );
 
-create table run_result_file(
+create table run_result(
     run_id uuid not null,
     result_id uuid not null,
-    uri text not null,
-    created_at timestamptz not null default current_timestamp,
-    primary key (run_id, result_id)
-);
-
-create table run_result_numeric(
-    run_id uuid not null,
-    result_id uuid not null,
-    value double precision not null,
+    value text not null,
     created_at timestamptz not null default current_timestamp,
     primary key (run_id, result_id)
 );

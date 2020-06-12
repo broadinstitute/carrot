@@ -1,16 +1,10 @@
 //! Module providing functionality for generating a WDL that calls a test WDL followed by an eval
 //! WDL
 
-use crate::wdl::womtool_util;
-use log::error;
+use log::debug;
 use regex::Regex;
 use std::fmt;
 use std::error::Error;
-use std::future::Future;
-use std::io::{self, Write};
-use tempfile::NamedTempFile;
-use std::fs::File;
-use serde_json::Value;
 use std::collections::HashMap;
 
 
@@ -76,8 +70,9 @@ pub fn combine_wdls(
     test_wdl_location: &str,
     eval_wdl: &str,
     eval_wdl_location: &str,
+    combined_name: &str
 ) -> Result<String, CombineWdlError> {
-    combine_wdls_with_sort_option(test_wdl, test_wdl_location, eval_wdl, eval_wdl_location, false)
+    combine_wdls_with_sort_option(test_wdl, test_wdl_location, eval_wdl, eval_wdl_location, combined_name, false)
 }
 
 /// Returns a WDL that calls `test_wdl` and `eval_wdl` as sub workflows
@@ -92,6 +87,7 @@ fn combine_wdls_with_sort_option(
     test_wdl_location: &str,
     eval_wdl: &str,
     eval_wdl_location: &str,
+    combined_name: &str,
     sort: bool,
 ) -> Result<String, CombineWdlError> {
     // Extract input variables from test_wdl and eval_wdl
@@ -110,7 +106,7 @@ fn combine_wdls_with_sort_option(
     let combined_wdl = format!(
         "import \"{}\" as test\n\
          import \"{}\" as eval\n\n\
-         workflow merged_workflow {{\n\
+         workflow {} {{\n\
          {}\n    \
          call test.{} as call_test {{\n        \
          input:\n{}\n    \
@@ -123,6 +119,7 @@ fn combine_wdls_with_sort_option(
          }}",
         test_wdl_location,
         eval_wdl_location,
+        combined_name.replace(" ", "_"),
         workflow_input_string,
         test_name,
         test_input_string,
@@ -130,6 +127,8 @@ fn combine_wdls_with_sort_option(
         eval_input_string,
         workflow_output_string
     );
+
+    debug!("Generated combined_wdl: {}", combined_wdl);
 
     Ok(combined_wdl)
 }
@@ -273,7 +272,7 @@ fn extract_workflow_outputs(input_wdl: &str) -> Result<HashMap<String,WorkflowOu
             return Err(CombineWdlError::WdlParse(format!("Type and name could not be parsed from output {}", declaration)));
         }
         // Get the type
-        let mut output_type = String::from(*split_dec.get(1).unwrap());
+        let output_type = String::from(*split_dec.get(1).unwrap());
         // Get the name
         let name = String::from(*split_dec.get(0).unwrap());
         // Get the name with the in_ prefix stripped
@@ -322,7 +321,7 @@ mod tests {
         let test_wdl = read_to_string(Path::new(test_wdl_location)).unwrap();
         let eval_wdl = read_to_string(Path::new(eval_wdl_location)).unwrap();
         // Combine
-        let combined_wdl = combine_wdls_with_sort_option(&test_wdl, test_wdl_location, &eval_wdl, eval_wdl_location, true).unwrap();
+        let combined_wdl = combine_wdls_with_sort_option(&test_wdl, test_wdl_location, &eval_wdl, eval_wdl_location, "merged_workflow", true).unwrap();
         // Load the expected output and compare
         let expected_combined_wdl = read_to_string(Path::new("testdata/wdl/combiner/combined_wdl.wdl")).unwrap();
         assert_eq!(combined_wdl, expected_combined_wdl);
@@ -335,7 +334,7 @@ mod tests {
         let test_wdl = read_to_string(Path::new(test_wdl_location)).unwrap();
         let eval_wdl = read_to_string(Path::new(eval_wdl_location)).unwrap();
         // Combine
-        let combined_wdl = combine_wdls_with_sort_option(&test_wdl, test_wdl_location, &eval_wdl, eval_wdl_location, true);
+        let combined_wdl = combine_wdls_with_sort_option(&test_wdl, test_wdl_location, &eval_wdl, eval_wdl_location, "merged_workflow", true);
         // Check if expected error was produced
         assert_eq!(Err(CombineWdlError::WdlParse(String::from("Could not find workflow name in Test WDL"))), combined_wdl);
     }

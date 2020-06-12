@@ -15,6 +15,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 
+
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
 /// An instance of this struct will be returned by any queries for runs.
@@ -57,7 +58,7 @@ pub struct RunQuery {
     pub offset: Option<i64>,
 }
 
-/// A new result to be inserted into the DB
+/// A new run to be inserted into the DB
 ///
 /// test_id, name, status, test_input, and eval_input are required fields, but description,
 /// cromwell_job_id, finished_at, and created_by are not, so can be filled with `None`
@@ -254,6 +255,15 @@ impl RunData {
         query.load::<Self>(conn)
     }
 
+    /// Queries the DB for runs that haven't finished yet
+    ///
+    /// Returns result containing either a vector of the retrieved runs (which have a null value
+    /// in the `finished_at` column) or a diesel error if retrieving the runs fails for some
+    /// reason
+    pub fn find_unfinished(conn: &PgConnection) -> Result<Vec<Self>, diesel::result::Error> {
+        run.filter(finished_at.is_null()).load::<Self>(conn)
+    }
+
     /// Inserts a new run into the DB
     ///
     /// Creates a new run row in the DB using `conn` with the values specified in `params`
@@ -299,7 +309,7 @@ mod tests {
         let new_run = NewRun {
             test_id: Uuid::new_v4(),
             name: String::from("Kevin's test run"),
-            status: RunStatusEnum::Completed,
+            status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
             cromwell_job_id: Some(String::from("123456789")),
@@ -352,7 +362,7 @@ mod tests {
         let new_run = NewRun {
             test_id: id,
             name: String::from("name1"),
-            status: RunStatusEnum::Completed,
+            status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
             cromwell_job_id: Some(String::from("1234567890")),
@@ -365,7 +375,7 @@ mod tests {
         let new_run = NewRun {
             test_id: id,
             name: String::from("name2"),
-            status: RunStatusEnum::Created,
+            status: RunStatusEnum::Submitted,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
             cromwell_job_id: None,
@@ -378,7 +388,7 @@ mod tests {
         let new_run = NewRun {
             test_id: id,
             name: String::from("name3"),
-            status: RunStatusEnum::Completed,
+            status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
             cromwell_job_id: Some(String::from("1234567890")),
@@ -556,7 +566,7 @@ mod tests {
             template_id: None,
             test_id: None,
             name: None,
-            status: Some(RunStatusEnum::Created),
+            status: Some(RunStatusEnum::Submitted),
             test_input: None,
             eval_input: None,
             cromwell_job_id: None,
@@ -832,6 +842,18 @@ mod tests {
         let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
 
         assert_eq!(found_runs.len(), 2);
+    }
+
+    #[test]
+    fn find_unfinished_success() {
+        let conn = get_test_db_connection();
+
+        let test_runs = insert_test_runs_with_test_id(&conn, Uuid::new_v4());
+
+        let found_runs = RunData::find_unfinished(&conn).unwrap();
+
+        assert_eq!(found_runs.len(), 1);
+        assert_eq!(test_runs[1], found_runs[0]);
     }
 
     #[test]

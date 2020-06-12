@@ -51,21 +51,10 @@ table! {
 table! {
     use diesel::sql_types::*;
 
-    run_result_file (run_id, result_id) {
+    run_result (run_id, result_id) {
         run_id -> Uuid,
         result_id -> Uuid,
-        uri -> Text,
-        created_at -> Timestamptz,
-    }
-}
-
-table! {
-    use diesel::sql_types::*;
-
-    run_result_numeric (run_id, result_id) {
-        run_id -> Uuid,
-        result_id -> Uuid,
-        value -> Float8,
+        value -> Text,
         created_at -> Timestamptz,
     }
 }
@@ -116,8 +105,7 @@ allow_tables_to_appear_in_same_query!(
     pipeline,
     result,
     run,
-    run_result_file,
-    run_result_numeric,
+    run_result,
     template,
     template_result,
     test,

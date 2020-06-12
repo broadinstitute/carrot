@@ -13,7 +13,7 @@ use std::error::Error;
 use std::fmt;
 use dotenv;
 use std::env;
-use chrono::NaiveDateTime;
+use log::debug;
 
 
 lazy_static! {
@@ -31,21 +31,33 @@ lazy_static! {
 /// For more information on specific parameters, visit the
 /// [Cromwell API documentation](https://cromwell.readthedocs.io/en/stable/api/RESTAPI/)
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StartJobParams {
     pub labels: Option<PathBuf>,
+    #[serde(rename = "workflowDependencies")]
     pub workflow_dependencies: Option<PathBuf>,
+    #[serde(rename = "workflowInputs")]
     pub workflow_inputs: Option<PathBuf>,
-    pub workflow_inputs2: Option<PathBuf>,
-    pub workflow_inputs3: Option<PathBuf>,
-    pub workflow_inputs4: Option<PathBuf>,
-    pub workflow_inputs5: Option<PathBuf>,
+    #[serde(rename = "workflowInputs_2")]
+    pub workflow_inputs_2: Option<PathBuf>,
+    #[serde(rename = "workflowInputs_3")]
+    pub workflow_inputs_3: Option<PathBuf>,
+    #[serde(rename = "workflowInputs_4")]
+    pub workflow_inputs_4: Option<PathBuf>,
+    #[serde(rename = "workflowInputs_5")]
+    pub workflow_inputs_5: Option<PathBuf>,
+    #[serde(rename = "workflowOnHold")]
     pub workflow_on_hold: Option<bool>,
+    #[serde(rename = "workflowOptions")]
     pub workflow_options: Option<PathBuf>,
+    #[serde(rename = "workflowRoot")]
     pub workflow_root: Option<String>,
+    #[serde(rename = "workflowSource")]
     pub workflow_source: Option<PathBuf>,
+    #[serde(rename = "workflowType")]
     pub workflow_type: Option<WorkflowTypeEnum>,
+    #[serde(rename = "workflowTypeVersion")]
     pub workflow_type_version: Option<WorkflowTypeVersionEnum>,
+    #[serde(rename = "workflowUrl")]
     pub workflow_url: Option<String>,
 }
 
@@ -53,6 +65,7 @@ pub struct StartJobParams {
 ///
 /// Note: CWL is not actually currently supported
 #[derive(Serialize)]
+#[allow(dead_code)] // Because we're not using all variations currently
 pub enum WorkflowTypeEnum {
     WDL,
     CWL
@@ -72,6 +85,7 @@ impl fmt::Display for WorkflowTypeEnum {
 ///
 /// DraftDash2 and OnePointZero are for WDL, VOnePointZero is for CWL
 #[derive(Serialize)]
+#[allow(dead_code)] // Because we're not using all variations currently
 pub enum WorkflowTypeVersionEnum {
     DraftDash2,
     OnePointZero,
@@ -106,18 +120,20 @@ pub enum CromwellRequestError {
     Request(SendRequestError),
     Payload(PayloadError),
     Utf8(Utf8Error),
-    Params(serde_urlencoded::ser::Error)
+    Params(serde_urlencoded::ser::Error),
+    Failed(String)
 }
 
 impl fmt::Display for CromwellRequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CromwellRequestError::Json(e) => write!(f, "StartJobError Json {}", e),
-            CromwellRequestError::Io(e) => write!(f, "StartJobError Io {}", e),
-            CromwellRequestError::Request(e) => write!(f, "StartJobError Request {}", e),
-            CromwellRequestError::Payload(e) => write!(f, "StartJobError Payload {}", e),
-            CromwellRequestError::Utf8(e) => write!(f, "StartJobError Utf8 {}", e),
-            CromwellRequestError::Params(e) => write!(f, "StartJobError Params {}", e),
+            CromwellRequestError::Json(e) => write!(f, "CromwellRequestError Json {}", e),
+            CromwellRequestError::Io(e) => write!(f, "CromwellRequestError Io {}", e),
+            CromwellRequestError::Request(e) => write!(f, "CromwellRequestError Request {}", e),
+            CromwellRequestError::Payload(e) => write!(f, "CromwellRequestError Payload {}", e),
+            CromwellRequestError::Utf8(e) => write!(f, "CromwellRequestError Utf8 {}", e),
+            CromwellRequestError::Params(e) => write!(f, "CromwellRequestError Params {}", e),
+            CromwellRequestError::Failed(e) => write!(f, "CromwellRequestError Failed {}", e),
         }
     }
 }
@@ -173,6 +189,7 @@ pub struct MetadataParams {
 
 /// Enum of possible values to submit for metadataSource param for metadata Cromwell api requests
 #[derive(Serialize)]
+#[allow(dead_code)] // Because we're not using all variations currently
 pub enum MetadataSourceEnum {
     Unarchived,
     Archived
@@ -222,6 +239,13 @@ pub async fn start_job(client: &Client, job_data: StartJobParams) -> Result<Work
     let response_body = response.body().await?;
     let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
 
+    debug!("{}", body_utf8);
+
+    // If it didn't return a success status code, that's an error
+    if !response.status().is_success() {
+        return Err(CromwellRequestError::Failed(format!("Cromwell request returned status:{} body:{}", response.status(), body_utf8)));
+    }
+
     // Parse response body into WorkflowIdAndStatus
     match serde_json::from_str(body_utf8) {
         Ok(id_and_status) => Ok(id_and_status),
@@ -256,6 +280,11 @@ pub async fn check_status(client: &Client, job_id: &str) -> Result<WorkflowIdAnd
     let response_body = response.body().await?;
     let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
 
+    // If it didn't return a success status code, that's an error
+    if !response.status().is_success() {
+        return Err(CromwellRequestError::Failed(format!("Cromwell request returned status:{} body:{}", response.status(), body_utf8)));
+    }
+
     // Parse response body into WorkflowIdAndStatus
     match serde_json::from_str(body_utf8) {
         Ok(id_and_status) => Ok(id_and_status),
@@ -273,7 +302,7 @@ pub async fn check_status(client: &Client, job_id: &str) -> Result<WorkflowIdAnd
 /// Payload if there is an issue getting the response body
 /// Utf8 if there is an issue converting the response body to Utf8
 /// Params if there is an issue parsing `params`
-async fn get_metadata(client: &Client, job_id: &str, params: &MetadataParams) -> Result<Value, CromwellRequestError> {
+pub async fn get_metadata(client: &Client, job_id: &str, params: &MetadataParams) -> Result<Value, CromwellRequestError> {
     let query_data = assemble_query_data(params);
     // Make request
     let request =
@@ -295,10 +324,15 @@ async fn get_metadata(client: &Client, job_id: &str, params: &MetadataParams) ->
     let response_body = response.body().await?;
     let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
 
+    // If it didn't return a success status code, that's an error
+    if !response.status().is_success() {
+        return Err(CromwellRequestError::Failed(format!("Cromwell request returned status:{} body:{}", response.status(), body_utf8)));
+    }
+
     // Parse response body into Json
     match serde_json::from_str(body_utf8) {
-        Ok(id_and_status) => Ok(id_and_status),
-        Err(e) => Err(e.into())
+        Ok(value) => Ok(value),
+        Err(e) => return Err(e.into())
     }
 }
 
@@ -325,23 +359,23 @@ fn assemble_form_data<'a>(job_data: StartJobParams) -> Result<multipart::Form<'a
             return Err(e)
         }
     }
-    if let Some(value) = job_data.workflow_inputs2 {
-        if let Err(e) = form.add_file("workflowInputs2", value) {
+    if let Some(value) = job_data.workflow_inputs_2 {
+        if let Err(e) = form.add_file("workflowInputs_2", value) {
             return Err(e)
         }
     }
-    if let Some(value) = job_data.workflow_inputs3 {
-        if let Err(e) = form.add_file("workflowInputs3", value) {
+    if let Some(value) = job_data.workflow_inputs_3 {
+        if let Err(e) = form.add_file("workflowInputs_3", value) {
             return Err(e)
         }
     }
-    if let Some(value) = job_data.workflow_inputs4 {
-        if let Err(e) = form.add_file("workflowInputs4", value) {
+    if let Some(value) = job_data.workflow_inputs_4 {
+        if let Err(e) = form.add_file("workflowInputs_4", value) {
             return Err(e)
         }
     }
-    if let Some(value) = job_data.workflow_inputs5 {
-        if let Err(e) = form.add_file("workflowInputs5", value) {
+    if let Some(value) = job_data.workflow_inputs_5 {
+        if let Err(e) = form.add_file("workflowInputs_5", value) {
             return Err(e)
         }
     }
@@ -417,10 +451,10 @@ mod tests {
             labels: None,
             workflow_dependencies: None,
             workflow_inputs: None,
-            workflow_inputs2: None,
-            workflow_inputs3: None,
-            workflow_inputs4: None,
-            workflow_inputs5: None,
+            workflow_inputs_2: None,
+            workflow_inputs_3: None,
+            workflow_inputs_4: None,
+            workflow_inputs_5: None,
             workflow_on_hold: None,
             workflow_options: None,
             workflow_root: None,
@@ -445,10 +479,10 @@ mod tests {
             labels: None,
             workflow_dependencies: None,
             workflow_inputs: None,
-            workflow_inputs2: None,
-            workflow_inputs3: None,
-            workflow_inputs4: None,
-            workflow_inputs5: None,
+            workflow_inputs_2: None,
+            workflow_inputs_3: None,
+            workflow_inputs_4: None,
+            workflow_inputs_5: None,
             workflow_on_hold: None,
             workflow_options: None,
             workflow_root: None,
