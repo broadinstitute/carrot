@@ -21,18 +21,27 @@ extern crate diesel_migrations;
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
+extern crate ctrlc;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use dotenv;
 use log::{error, info};
 use std::env;
+use std::sync::{mpsc, Arc};
+use std::thread;
+use actix_rt::System;
 use actix_web::client::Client;
+use futures::executor::block_on;
+use crate::db::DbPool;
+use actix_web::web::block;
+use std::sync::atomic::{AtomicBool, Ordering};
+use actix_web::dev::Server;
+
 
 embed_migrations!("migrations");
 
-// Indicate to actix that this is the main function to be run
-#[actix_rt::main]
-async fn main() -> std::io::Result<()> {
+fn main() {
+
     // Load environment variables from env file
     dotenv::from_filename(".env").ok();
     // Initializes logger with config from .env file
@@ -48,6 +57,15 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("DB_THREADS environment variable must be an integer");
 
+    // Create atomic variable for tracking whether user has hit Ctrl-C
+    let user_term = Arc::new(AtomicBool::new(true));
+    let user_term_clone = user_term.clone();
+    // Configure CTRL-C response to mark that it's time to terminate
+    ctrlc::set_handler(move || {
+        // Set user_term bool so main thread knows it's time to stop
+        user_term_clone.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
+
     info!("Starting DB Connection Pool");
     let pool = db::get_pool(db_url, db_threads);
 
@@ -59,15 +77,34 @@ async fn main() -> std::io::Result<()> {
         panic!();
     }
 
-    info!("Starting server");
-    HttpServer::new(move || {
-        App::new()
-            .wrap(Logger::default()) // Use default logger as configured in .env file
-            .data(pool.clone()) // Give app access to clone of DB pool so other threads can use it
-            .data(Client::default()) // Allow worker threads to get client for making REST calls
-            .service(web::scope("/api/v1/").configure(app::config)) //Get route mappings for v1 api from app module
-    })
-    .bind(format!("{}:{}", host, port))?
-    .run()
-    .await
+    // Create channel for sending terminate signal to manager thread
+    let (manager_send, manager_receive) = mpsc::channel();
+    info!("Starting status manager thread");
+    let manager_pool = pool.clone();
+    let manager_thread = thread::spawn(move || {
+        if let Err(e) = manager::status_manager::manage(manager_pool, Client::default(), manager_receive){
+            panic!(e);
+        }
+    });
+
+    // Create channel for getting app server controller from app thread
+    let (app_send, app_receive) = mpsc::channel();
+
+    info!("Starting app server");
+    thread::spawn(move || {
+        app::run_app(app_send, pool, host, port).expect("Failed to start app server");
+    });
+
+    // Receive app server controller
+    let app_srv_controller = app_receive.recv().expect("Failed to receive app server controller in main thread");
+
+    // Wait for Ctrl-C to terminate
+    while user_term.load(Ordering::SeqCst){}
+    // Once we've received a Ctrl-C send message to receiver to terminate
+    manager_send.send(()).expect("Failed to send terminate message to manager thread");
+    // Then tell app server to stop
+    let app_server_stop_future = app_srv_controller.stop(true);
+    // Then wait for both to finish
+    block_on(app_server_stop_future);
+    manager_thread.join().expect("Failed to join to manager thread");
 }

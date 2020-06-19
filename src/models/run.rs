@@ -7,13 +7,14 @@ use crate::schema::run::dsl::*;
 use crate::schema::run;
 use crate::schema::template;
 use crate::schema::test;
+use crate::schema::run_id_with_results;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-
+use crate::models::run_result::RunResultData;
 
 
 /// Mapping to a run as it exists in the RUN table in the database.
@@ -31,6 +32,25 @@ pub struct RunData {
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
+}
+
+/// Mapping to a run as it exists in the RUN table in the database, joined on the
+/// RUN_ID_WITH_RESULTS view with assembles data from the run_result table into a json
+///
+/// An instance of this struct will be returned by any queries for runs with results.
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
+pub struct RunWithResultData {
+    pub run_id: Uuid,
+    pub test_id: Uuid,
+    pub name: String,
+    pub status: RunStatusEnum,
+    pub test_input: Value,
+    pub eval_input: Value,
+    pub cromwell_job_id: Option<String>,
+    pub created_at: NaiveDateTime,
+    pub created_by: Option<String>,
+    pub finished_at: Option<NaiveDateTime>,
+    pub results: Option<Value>,
 }
 
 /// Represents all possible parameters for a query of the RUN table
@@ -293,6 +313,182 @@ impl RunData {
     }
 }
 
+impl RunWithResultData {
+    /// Queries the DB for a run with the specified id
+    ///
+    /// Queries the DB using `conn` to retrieve the first row with a run_id value of `id`
+    /// Returns a result containing either the retrieved run as a RunData instance or an error if
+    /// the query fails for some reason or if no pipeline is found matching the criteria
+    pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
+        run::table
+            .left_join(run_id_with_results::table)
+            .filter(run_id.eq(id))
+            .select((run_id, test_id, name, status, test_input, eval_input, cromwell_job_id,
+                    created_at, created_by, finished_at, run_id_with_results::results.nullable()))
+            .first::<Self>(conn)
+    }
+
+    /// Queries the DB for runs matching the specified query criteria
+    ///
+    /// Queries the DB using `conn` to retrieve runs matching the crieria in `params`
+    /// Returns result containing either a vector of the retrieved runs as RunData
+    /// instances or an error if the query fails for some reason
+    pub fn find(conn: &PgConnection, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {
+        // Put the query into a box (pointer) so it can be built dynamically and filter by test_id
+        let mut query = run.into_boxed().left_join(run_id_with_results::table);
+
+        // Adding filters for template_id and pipeline_id requires subqueries
+        if let Some(param) = params.pipeline_id {
+            // Subquery for getting all test_ids for test belonging the to templates belonging to the
+            // specified pipeline
+            let pipeline_subquery = template::dsl::template
+                .filter(template::dsl::pipeline_id.eq(param))
+                .select(template::dsl::template_id);
+            let template_subquery = test::dsl::test
+                .filter(test::dsl::template_id.eq_any(pipeline_subquery))
+                .select(test::dsl::test_id);
+            // Filter by the results of the template subquery
+            query = query.filter(test_id.eq_any(template_subquery));
+        }
+        if let Some(param) = params.template_id {
+            // Subquery for getting all test_ids for test belonging the to specified template
+            let template_subquery = test::dsl::test
+                .filter(test::dsl::template_id.eq(param))
+                .select(test::dsl::test_id);
+            // Filter by the results of the template subquery
+            query = query.filter(test_id.eq_any(template_subquery));
+        }
+
+        // Add filters for each of the other params if they have values
+        if let Some(param) = params.test_id {
+            query = query.filter(test_id.eq(param));
+        }
+        if let Some(param) = params.name {
+            query = query.filter(name.eq(param));
+        }
+        if let Some(param) = params.status {
+            query = query.filter(status.eq(param));
+        }
+        if let Some(param) = params.test_input {
+            query = query.filter(test_input.eq(param));
+        }
+        if let Some(param) = params.eval_input {
+            query = query.filter(eval_input.eq(param));
+        }
+        if let Some(param) = params.cromwell_job_id {
+            query = query.filter(cromwell_job_id.eq(param));
+        }
+        if let Some(param) = params.created_before {
+            query = query.filter(created_at.lt(param));
+        }
+        if let Some(param) = params.created_after {
+            query = query.filter(created_at.gt(param));
+        }
+        if let Some(param) = params.created_by {
+            query = query.filter(created_by.eq(param));
+        }
+        if let Some(param) = params.finished_before {
+            query = query.filter(finished_at.lt(param));
+        }
+        if let Some(param) = params.finished_after {
+            query = query.filter(finished_at.gt(param));
+        }
+
+        // If there is a sort param, parse it and add to the order by clause accordingly
+        if let Some(sort) = params.sort {
+            let sort = util::parse_sort_string(&sort);
+            for sort_clause in sort {
+                match &sort_clause.key[..] {
+                    "run_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(run_id.asc());
+                        } else {
+                            query = query.then_order_by(run_id.desc());
+                        }
+                    }
+                    "test_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_id.asc());
+                        } else {
+                            query = query.then_order_by(test_id.desc());
+                        }
+                    }
+                    "name" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(name.asc());
+                        } else {
+                            query = query.then_order_by(name.desc());
+                        }
+                    }
+                    "status" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(status.asc());
+                        } else {
+                            query = query.then_order_by(status.desc());
+                        }
+                    }
+                    "test_input" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_input.asc());
+                        } else {
+                            query = query.then_order_by(test_input.desc());
+                        }
+                    }
+                    "eval_input" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_input.asc());
+                        } else {
+                            query = query.then_order_by(eval_input.desc());
+                        }
+                    }
+                    "cromwell_job_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(cromwell_job_id.asc());
+                        } else {
+                            query = query.then_order_by(cromwell_job_id.desc());
+                        }
+                    }
+                    "created_at" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(created_at.asc());
+                        } else {
+                            query = query.then_order_by(created_at.desc());
+                        }
+                    }
+                    "finished_at" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(finished_at.asc());
+                        } else {
+                            query = query.then_order_by(finished_at.desc());
+                        }
+                    }
+                    "created_by" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(created_by.asc());
+                        } else {
+                            query = query.then_order_by(created_by.desc());
+                        }
+                    }
+                    // Don't add to the order by clause of the sort key isn't recognized
+                    &_ => {}
+                }
+            }
+        }
+
+        if let Some(param) = params.limit {
+            query = query.limit(param);
+        }
+        if let Some(param) = params.offset {
+            query = query.offset(param);
+        }
+
+        // Perform the query
+        query.select((run_id, test_id, name, status, test_input, eval_input, cromwell_job_id,
+                      created_at, created_by, finished_at, run_id_with_results::results.nullable()))
+            .load::<Self>(conn)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -304,6 +500,109 @@ mod tests {
     use crate::unit_test_util::*;
     use chrono::offset::Utc;
     use uuid::Uuid;
+    use crate::models::result::{NewResult, ResultData};
+    use crate::custom_sql_types::ResultTypeEnum;
+    use crate::models::run_result::NewRunResult;
+    use rand::prelude::*;
+    use rand::distributions::Alphanumeric;
+    use serde_json::json;
+
+    fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
+        let test_run = insert_test_run(&conn);
+
+        let test_results = insert_test_results_with_run_id(&conn, &test_run.run_id);
+
+        RunWithResultData {
+            run_id: test_run.run_id,
+            test_id: test_run.test_id,
+            name: test_run.name,
+            status: test_run.status,
+            test_input: test_run.test_input,
+            eval_input: test_run.eval_input,
+            cromwell_job_id: test_run.cromwell_job_id,
+            created_at: test_run.created_at,
+            created_by: test_run.created_by,
+            finished_at: test_run.finished_at,
+            results: Some(test_results),
+        }
+    }
+
+    fn insert_test_runs_with_results(conn: &PgConnection) -> Vec<RunWithResultData> {
+        let mut test_runs_with_results : Vec<RunWithResultData> = Vec::new();
+
+        let test_runs = insert_test_runs_with_test_id(&conn, Uuid::new_v4());
+
+        for test_run in test_runs {
+            let test_results = insert_test_results_with_run_id(&conn, &test_run.run_id);
+
+            test_runs_with_results.push(RunWithResultData {
+                run_id: test_run.run_id,
+                test_id: test_run.test_id,
+                name: test_run.name,
+                status: test_run.status,
+                test_input: test_run.test_input,
+                eval_input: test_run.eval_input,
+                cromwell_job_id: test_run.cromwell_job_id,
+                created_at: test_run.created_at,
+                created_by: test_run.created_by,
+                finished_at: test_run.finished_at,
+                results: Some(test_results),
+            });
+        }
+
+        test_runs_with_results
+
+    }
+
+    fn insert_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
+
+        let new_result = NewResult {
+            name: String::from("Name1"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Description4")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let rand_result: u64 = rand::random();
+
+        let new_run_result = NewRunResult {
+            run_id: id.clone(),
+            result_id: new_result.result_id.clone(),
+            value: rand_result.to_string(),
+        };
+
+        let new_run_result = RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_result2 = NewResult {
+            name: String::from("Name2"),
+            result_type: ResultTypeEnum::File,
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result2 = ResultData::create(conn, new_result2).expect("Failed inserting test result");
+
+        let mut rng = thread_rng();
+        let rand_result: String = std::iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .take(7)
+            .collect();
+
+        let new_run_result2 = NewRunResult {
+            run_id: id.clone(),
+            result_id: new_result2.result_id.clone(),
+            value: String::from(rand_result),
+        };
+
+        let new_run_result2 = RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        return json!({
+            new_result.name: new_run_result.value,
+            new_result2.name: new_run_result2.value
+        });
+    }
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_run = NewRun {
@@ -423,6 +722,18 @@ mod tests {
             nonexistent_run,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_by_id_include_results_exists() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run_with_results(&conn);
+
+        let found_run = RunWithResultData::find_by_id(&conn, test_run.run_id)
+            .expect("Failed to retrieve test run by id.");
+
+        assert_eq!(found_run, test_run);
     }
 
     #[test]

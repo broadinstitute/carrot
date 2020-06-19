@@ -167,7 +167,7 @@ impl RunResultData {
             .get_result(conn)
     }
 
-    /// Inserts a new run_result mapping into the DB
+    /// Inserts multiple new run_result mappings into the DB
     ///
     /// Creates a new run_result row in the DB using `conn` for each insert record specified in
     /// `params`

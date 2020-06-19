@@ -101,6 +101,17 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    run_id_with_results(run_id) {
+        run_id -> Uuid,
+        results -> Json,
+    }
+}
+
+joinable!(run -> run_id_with_results(run_id));
+
 allow_tables_to_appear_in_same_query!(
     pipeline,
     result,
@@ -109,4 +120,5 @@ allow_tables_to_appear_in_same_query!(
     template,
     template_result,
     test,
+    run_id_with_results,
 );

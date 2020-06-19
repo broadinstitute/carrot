@@ -40,3 +40,8 @@ create table template_result (
     created_by text,
     primary key (template_id, result_id)
 );
+
+create view run_id_with_results as
+select run_id, json_object_agg(name, value) as results
+from run_result inner join result using (result_id)
+group by run_id;

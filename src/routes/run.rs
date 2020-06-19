@@ -6,7 +6,7 @@
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::run::{RunData, RunQuery, NewRun};
+use crate::models::run::{RunData, RunQuery, NewRun, RunWithResultData};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder, client::Client};
 use chrono::{NaiveDateTime, Utc};
 use log::error;
@@ -90,7 +90,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find_by_id(&conn, id) {
+        match RunWithResultData::find_by_id(&conn, id) {
             Ok(run) => Ok(run),
             Err(e) => {
                 error!("{}", e);
@@ -172,7 +172,7 @@ async fn find_for_test(
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find(&conn, query) {
+        match RunWithResultData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -259,7 +259,7 @@ async fn find_for_template(
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find(&conn, query) {
+        match RunWithResultData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -346,7 +346,7 @@ async fn find_for_pipeline(
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunData::find(&conn, query) {
+        match RunWithResultData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -625,8 +625,6 @@ async fn run_for_test(
         }
     };
 
-    // TODO: Start checking status of run
-
     // Return run to user
     HttpResponse::Ok().json(run)
 
@@ -657,15 +655,94 @@ mod tests {
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
+    use crate::models::result::{NewResult, ResultData};
+    use crate::custom_sql_types::ResultTypeEnum;
+    use crate::models::run_result::{NewRunResult, RunResultData};
+    use rand::prelude::*;
+    use rand::distributions::Alphanumeric;
+
+    fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
+        create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
+    }
+
+    fn create_test_run_with_results_and_test_id(conn: &PgConnection, test_id: Uuid) -> RunWithResultData {
+        let test_run = create_test_run_with_test_id(conn, test_id);
+
+        let test_results = create_test_results_with_run_id(&conn, &test_run.run_id);
+
+        RunWithResultData {
+            run_id: test_run.run_id,
+            test_id: test_run.test_id,
+            name: test_run.name,
+            status: test_run.status,
+            test_input: test_run.test_input,
+            eval_input: test_run.eval_input,
+            cromwell_job_id: test_run.cromwell_job_id,
+            created_at: test_run.created_at,
+            created_by: test_run.created_by,
+            finished_at: test_run.finished_at,
+            results: Some(test_results),
+        }
+    }
+
+    fn create_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
+
+        let new_result = NewResult {
+            name: String::from("Name1"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Description4")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let rand_result: u64 = rand::random();
+
+        let new_run_result = NewRunResult {
+            run_id: id.clone(),
+            result_id: new_result.result_id.clone(),
+            value: rand_result.to_string(),
+        };
+
+        let new_run_result = RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_result2 = NewResult {
+            name: String::from("Name2"),
+            result_type: ResultTypeEnum::File,
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result2 = ResultData::create(conn, new_result2).expect("Failed inserting test result");
+
+        let mut rng = thread_rng();
+        let rand_result: String = std::iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .take(7)
+            .collect();
+
+        let new_run_result2 = NewRunResult {
+            run_id: id.clone(),
+            result_id: new_result2.result_id.clone(),
+            value: String::from(rand_result),
+        };
+
+        let new_run_result2 = RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        return json!({
+            new_result.name: new_run_result.value,
+            new_result2.name: new_run_result2.value
+        });
+    }
 
     fn create_test_run(conn: &PgConnection) -> RunData {
         create_test_run_with_test_id(conn, Uuid::new_v4())
     }
 
-    fn create_run_with_test_and_template(conn: &PgConnection) -> (TemplateData, TestData, RunData) {
+    fn create_run_with_test_and_template(conn: &PgConnection) -> (TemplateData, TestData, RunWithResultData) {
         let new_template = create_test_template(conn);
         let new_test = create_test_test_with_template_id(conn, new_template.template_id);
-        let new_run = create_test_run_with_test_id(conn, new_test.test_id);
+        let new_run = create_test_run_with_results_and_test_id(conn, new_test.test_id);
 
         (new_template, new_test, new_run)
     }
@@ -715,7 +792,7 @@ mod tests {
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
 
-        let new_run = create_test_run(&pool.get().unwrap());
+        let new_run = create_test_run_with_results(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -727,7 +804,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_run: RunData = serde_json::from_slice(&result).unwrap();
+        let test_run: RunWithResultData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run, new_run);
     }
@@ -736,7 +813,7 @@ mod tests {
     async fn find_by_id_failure_not_found() {
         let pool = get_test_db_pool();
 
-        create_test_run(&pool.get().unwrap());
+        create_test_run_with_results(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -759,7 +836,7 @@ mod tests {
     async fn find_by_id_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_run(&pool.get().unwrap());
+        create_test_run_with_results(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -780,7 +857,7 @@ mod tests {
     async fn find_for_test_success() {
         let pool = get_test_db_pool();
 
-        let new_run = create_test_run(&pool.get().unwrap());
+        let new_run = create_test_run_with_results(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -792,7 +869,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<RunWithResultData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
@@ -802,7 +879,7 @@ mod tests {
     async fn find_for_test_failure_not_found() {
         let pool = get_test_db_pool();
 
-        create_test_run(&pool.get().unwrap());
+        create_test_run_with_results(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -828,7 +905,7 @@ mod tests {
     async fn find_for_test_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_run(&pool.get().unwrap());
+        create_test_run_with_results(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -863,7 +940,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<RunWithResultData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
@@ -934,7 +1011,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<RunWithResultData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
