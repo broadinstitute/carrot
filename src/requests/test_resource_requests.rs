@@ -127,9 +127,16 @@ mod tests {
         // Get client
         let client = Client::default();
 
-        let response = get_resource_as_string(&client, "https://storage.googleapis.com/storage/v1/b/broad-dsde-methods-carrot/o/test-data%2fTestResource.txt?alt=media").await;
+        // Define mockito mapping for response
+        let mock = mockito::mock("GET", "/test/resource")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body("Test")
+            .create();
 
-        println!("response: {:?}", response);
+        let response = get_resource_as_string(&client, &format!("{}/test/resource", mockito::server_url())).await;
+
+        mock.assert();
 
         assert_eq!(
             response.unwrap(),

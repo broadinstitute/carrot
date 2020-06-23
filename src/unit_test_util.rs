@@ -1,7 +1,6 @@
 //! Contains utility functions required by unit tests within the models module
 
 use crate::db;
-use crate::requests;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use dotenv;

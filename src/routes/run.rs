@@ -735,10 +735,6 @@ mod tests {
         });
     }
 
-    fn create_test_run(conn: &PgConnection) -> RunData {
-        create_test_run_with_test_id(conn, Uuid::new_v4())
-    }
-
     fn create_run_with_test_and_template(conn: &PgConnection) -> (TemplateData, TestData, RunWithResultData) {
         let new_template = create_test_template(conn);
         let new_test = create_test_test_with_template_id(conn, new_template.template_id);

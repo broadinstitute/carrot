@@ -14,7 +14,6 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::models::run_result::RunResultData;
 
 
 /// Mapping to a run as it exists in the RUN table in the database.
@@ -113,6 +112,7 @@ impl RunData {
     /// Queries the DB using `conn` to retrieve the first row with a run_id value of `id`
     /// Returns a result containing either the retrieved run as a RunData instance or an error if
     /// the query fails for some reason or if no pipeline is found matching the criteria
+    #[allow(dead_code)]
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         run.filter(run_id.eq(id)).first::<Self>(conn)
     }
@@ -122,6 +122,7 @@ impl RunData {
     /// Queries the DB using `conn` to retrieve runs matching the crieria in `params`
     /// Returns result containing either a vector of the retrieved runs as RunData
     /// instances or an error if the query fails for some reason
+    #[allow(dead_code)]
     pub fn find(conn: &PgConnection, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {
         // Put the query into a box (pointer) so it can be built dynamically and filter by test_id
         let mut query = run.into_boxed();
@@ -502,7 +503,7 @@ mod tests {
     use uuid::Uuid;
     use crate::models::result::{NewResult, ResultData};
     use crate::custom_sql_types::ResultTypeEnum;
-    use crate::models::run_result::NewRunResult;
+    use crate::models::run_result::{NewRunResult, RunResultData};
     use rand::prelude::*;
     use rand::distributions::Alphanumeric;
     use serde_json::json;
@@ -525,33 +526,6 @@ mod tests {
             finished_at: test_run.finished_at,
             results: Some(test_results),
         }
-    }
-
-    fn insert_test_runs_with_results(conn: &PgConnection) -> Vec<RunWithResultData> {
-        let mut test_runs_with_results : Vec<RunWithResultData> = Vec::new();
-
-        let test_runs = insert_test_runs_with_test_id(&conn, Uuid::new_v4());
-
-        for test_run in test_runs {
-            let test_results = insert_test_results_with_run_id(&conn, &test_run.run_id);
-
-            test_runs_with_results.push(RunWithResultData {
-                run_id: test_run.run_id,
-                test_id: test_run.test_id,
-                name: test_run.name,
-                status: test_run.status,
-                test_input: test_run.test_input,
-                eval_input: test_run.eval_input,
-                cromwell_job_id: test_run.cromwell_job_id,
-                created_at: test_run.created_at,
-                created_by: test_run.created_by,
-                finished_at: test_run.finished_at,
-                results: Some(test_results),
-            });
-        }
-
-        test_runs_with_results
-
     }
 
     fn insert_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {

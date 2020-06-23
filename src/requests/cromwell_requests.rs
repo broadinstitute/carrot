@@ -15,6 +15,8 @@ use dotenv;
 use std::env;
 use log::debug;
 
+#[cfg(test)]
+use mockito;
 
 lazy_static! {
     static ref CROMWELL_ADDRESS: String  = {
@@ -216,6 +218,11 @@ impl fmt::Display for MetadataSourceEnum {
 /// Utf8 if there is an issue converting the response body to Utf8
 /// Json if there is an issue parsing the response body to a WorkflowIdAndStatus struct
 pub async fn start_job(client: &Client, job_data: StartJobParams) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
+    // Set address to query based on whether we're running a unit test or not
+    #[cfg(not(test))]
+    let cromwell_address = &*CROMWELL_ADDRESS;
+    #[cfg(test)]
+    let cromwell_address = &mockito::server_url();
 
     // Create a multipart form and fill in fields from job_data
     let form = match assemble_form_data(job_data) {
@@ -224,7 +231,7 @@ pub async fn start_job(client: &Client, job_data: StartJobParams) -> Result<Work
     };
 
     // Make request
-    let response = client.post(format!("http://{}/api/workflows/v1", *CROMWELL_ADDRESS))
+    let response = client.post(format!("{}/api/workflows/v1", cromwell_address))
         .content_type(form.content_type())
         .send_body(multipart::Body::from(form))
         .await;
@@ -254,44 +261,6 @@ pub async fn start_job(client: &Client, job_data: StartJobParams) -> Result<Work
 
 }
 
-/// Checks the status of a job in cromwell
-///
-/// Submits a request to the Cromwell /api/workflows/v1/{id}/metadata mapping, with the
-/// specified id and limited to the status and end keys.
-/// Returns either the end and status from the response from Cromwell
-/// or one of the following errors wrapped in a CromwellRequestError:
-/// Request if there is an issue sending the request
-/// Payload if there is an issue getting the response body
-/// Utf8 if there is an issue converting the response body to Utf8
-/// Json if there is an issue parsing the response body to a WorkflowIdAndStatus struct
-pub async fn check_status(client: &Client, job_id: &str) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
-    // Make request
-    let response = client.get(format!("http://{}/api/workflows/v1/{}/status", *CROMWELL_ADDRESS, job_id))
-        .send()
-        .await;
-
-    // Get response
-    let mut response = match response {
-        Ok(res) => res,
-        Err(e) => return Err(e.into())
-    };
-
-    // Get response body and convert it into bytes
-    let response_body = response.body().await?;
-    let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
-
-    // If it didn't return a success status code, that's an error
-    if !response.status().is_success() {
-        return Err(CromwellRequestError::Failed(format!("Cromwell request returned status:{} body:{}", response.status(), body_utf8)));
-    }
-
-    // Parse response body into WorkflowIdAndStatus
-    match serde_json::from_str(body_utf8) {
-        Ok(id_and_status) => Ok(id_and_status),
-        Err(e) => Err(e.into())
-    }
-}
-
 /// Retrieve metadata for a job from Cromwell
 ///
 /// Submits a request to the Cromwell /api/workflows/v1/{id}/metadata mapping, with the
@@ -303,10 +272,16 @@ pub async fn check_status(client: &Client, job_id: &str) -> Result<WorkflowIdAnd
 /// Utf8 if there is an issue converting the response body to Utf8
 /// Params if there is an issue parsing `params`
 pub async fn get_metadata(client: &Client, job_id: &str, params: &MetadataParams) -> Result<Value, CromwellRequestError> {
+    // Set address to query based on whether we're running a unit test or not
+    #[cfg(not(test))]
+    let cromwell_address = &*CROMWELL_ADDRESS;
+    #[cfg(test)]
+    let cromwell_address = &mockito::server_url();
+
     let query_data = assemble_query_data(params);
     // Make request
     let request =
-        match client.get(format!("http://{}/api/workflows/v1/{}/metadata", *CROMWELL_ADDRESS, job_id)).query(&query_data){
+        match client.get(format!("{}/api/workflows/v1/{}/metadata", cromwell_address, job_id)).query(&query_data){
             Ok(val) => val,
             Err(e) => return Err(e.into())
         };
@@ -438,36 +413,10 @@ fn assemble_query_data(params: &MetadataParams) -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{StartJobParams, start_job, check_status, WorkflowIdAndStatus, MetadataParams, get_metadata};
+    use super::{StartJobParams, start_job, MetadataParams, get_metadata};
     use actix_web::client::Client;
-    use log::error;
     use serde_json::json;
     use std::path::PathBuf;
-
-    async fn create_test_job(client: &Client) -> WorkflowIdAndStatus {
-        // Create job data with simple test workflow
-        let test_path = PathBuf::from("testdata/requests/cromwell_requests/test_workflow.wdl");
-        let job_data = StartJobParams {
-            labels: None,
-            workflow_dependencies: None,
-            workflow_inputs: None,
-            workflow_inputs_2: None,
-            workflow_inputs_3: None,
-            workflow_inputs_4: None,
-            workflow_inputs_5: None,
-            workflow_on_hold: None,
-            workflow_options: None,
-            workflow_root: None,
-            workflow_source: Some(test_path),
-            workflow_type: None,
-            workflow_type_version: None,
-            workflow_url: None,
-        };
-
-        let response = start_job(&client, job_data).await;
-
-        response.unwrap()
-    }
 
     #[actix_rt::test]
     async fn test_start_job_simple() {
@@ -486,40 +435,53 @@ mod tests {
             workflow_on_hold: None,
             workflow_options: None,
             workflow_root: None,
-            workflow_source: Some(test_path),
+            workflow_source: Some(test_path.clone()),
             workflow_type: None,
             workflow_type_version: None,
             workflow_url: None,
         };
+        // Define mockito mapping for response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
 
-        let response = start_job(&client, job_data).await;
+        let response = start_job(&client, job_data).await.unwrap();
+
+        mock.assert();
 
         assert_eq!(
-            response.ok().unwrap().status,
+            response.status,
             String::from("Submitted")
         );
-    }
-
-    #[actix_rt::test]
-    async fn test_check_status() {
-        // Get client
-        let client = Client::default();
-        // Start a job to check the status of
-        let starting_status = create_test_job(&client).await;
-        std::thread::sleep(std::time::Duration::from_millis(10000));
-        // Get status of job
-        let response = check_status(&client, &starting_status.id).await;
-        // Verify we got it successfully
-        assert_eq!(response.unwrap().id, starting_status.id);
+        assert_eq!(
+            response.id,
+            "53709600-d114-4194-a7f7-9e41211ca2ce"
+        );
     }
 
     #[actix_rt::test]
     async fn test_get_metadata_simple() {
         //Get client
         let client = Client::default();
-        // Start a job to get metadata for
-        let starting_status = create_test_job(&client).await;
-        std::thread::sleep(std::time::Duration::from_millis(10000));
+        // Define mockito mapping for response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Running"
+        });
+        let mock = mockito::mock("GET", "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into())
+            ]))
+            .create();
         // Get metadata
         let params = MetadataParams {
             exclude_key: None,
@@ -527,9 +489,10 @@ mod tests {
             include_key: Some(vec![String::from("status")]),
             metadata_source: None,
         };
-        let response = get_metadata(&client, &starting_status.id, &params).await.unwrap();
+        let response = get_metadata(&client, "53709600-d114-4194-a7f7-9e41211ca2ce", &params).await;
 
-        assert_eq!(response.get("id").unwrap().as_str().unwrap(), starting_status.id);
-        assert!(matches!(response.get("status"), Some(_)));
+        mock.assert();
+
+        assert_eq!(response.unwrap(), mock_response_body);
     }
 }

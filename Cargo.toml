@@ -48,4 +48,6 @@ ctrlc = "3.1.4"
 [dev-dependencies]
 # For generating random values in test data
 rand = "0.7.3"
+# For testing functions that make http requests
+mockito = "0.25.2"
 

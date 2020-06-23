@@ -61,6 +61,7 @@ impl RunResultData {
     /// Returns a result containing either the retrieved run_result mapping as a
     /// RunResultData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
+    #[allow(dead_code)]
     pub fn find_by_run_and_result(
         conn: &PgConnection,
         query_run_id: Uuid,
@@ -78,6 +79,7 @@ impl RunResultData {
     /// `params`
     /// Returns a result containing either a vector of the retrieved run_result records as
     /// RunResultData instances or an error if the query fails for some reason
+    #[allow(dead_code)]
     pub fn find(
         conn: &PgConnection,
         params: RunResultQuery,
@@ -158,6 +160,7 @@ impl RunResultData {
     /// `params`
     /// Returns a result containing either the new run_result record that was created or an
     /// error if the insert fails for some reason
+    #[allow(dead_code)]
     pub fn create(
         conn: &PgConnection,
         params: NewRunResult,

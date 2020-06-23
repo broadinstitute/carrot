@@ -1,11 +1,14 @@
 //! Defines functionality for updating the status of test runs that have not yet completed
 //!
-//!
+//! The `manage` function is meant to be called in its own thread.  It will run in a cycle
+//! checking the DB for runs that haven't completed, requesting their status from
+//! Cromwell, and then updating accordingly.  It will also pull result data and add that to the DB
+//! for any tests runs that complete
 
 use crate::db::DbPool;
 use crate::models::run::{RunData, RunChangeset};
 use crate::requests::cromwell_requests;
-use log::{info, warn, debug, error};
+use log::{info, debug, error};
 use serde_json::{Map,Value};
 use std::env;
 use std::error::Error;
@@ -17,11 +20,10 @@ use actix_web::client::Client;
 use diesel::PgConnection;
 use crate::custom_sql_types::RunStatusEnum;
 use chrono::NaiveDateTime;
-use uuid::Uuid;
-use std::cmp::max;
 use crate::models::template_result::TemplateResultData;
 use crate::models::run_result::{NewRunResult, RunResultData};
 use futures::executor::block_on;
+
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]

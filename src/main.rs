@@ -23,19 +23,14 @@ extern crate lazy_static;
 extern crate regex;
 extern crate ctrlc;
 
-use actix_web::{middleware::Logger, web, App, HttpServer};
 use dotenv;
 use log::{error, info};
 use std::env;
 use std::sync::{mpsc, Arc};
 use std::thread;
-use actix_rt::System;
 use actix_web::client::Client;
 use futures::executor::block_on;
-use crate::db::DbPool;
-use actix_web::web::block;
 use std::sync::atomic::{AtomicBool, Ordering};
-use actix_web::dev::Server;
 
 
 embed_migrations!("migrations");

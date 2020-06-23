@@ -5,7 +5,6 @@
 
 use crate::schema::template_result;
 use crate::schema::template_result::dsl::*;
-use crate::schema::template;
 use crate::schema::test;
 use crate::util;
 use chrono::NaiveDateTime;
