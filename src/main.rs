@@ -1,11 +1,11 @@
 // Declare all modules that are children of main
 mod app;
-mod requests;
 mod custom_sql_types;
 mod db;
 mod error_body;
 mod manager;
 mod models;
+mod requests;
 mod routes;
 mod schema;
 mod util;
@@ -20,23 +20,21 @@ extern crate diesel;
 extern crate diesel_migrations;
 #[macro_use]
 extern crate lazy_static;
-extern crate regex;
 extern crate ctrlc;
+extern crate regex;
 
+use actix_web::client::Client;
 use dotenv;
+use futures::executor::block_on;
 use log::{error, info};
 use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use actix_web::client::Client;
-use futures::executor::block_on;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 
 embed_migrations!("migrations");
 
 fn main() {
-
     // Load environment variables from env file
     dotenv::from_filename(".env").ok();
     // Initializes logger with config from .env file
@@ -59,7 +57,8 @@ fn main() {
     ctrlc::set_handler(move || {
         // Set user_term bool so main thread knows it's time to stop
         user_term_clone.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     info!("Starting DB Connection Pool");
     let pool = db::get_pool(db_url, db_threads);
@@ -77,7 +76,9 @@ fn main() {
     info!("Starting status manager thread");
     let manager_pool = pool.clone();
     let manager_thread = thread::spawn(move || {
-        if let Err(e) = manager::status_manager::manage(manager_pool, Client::default(), manager_receive){
+        if let Err(e) =
+            manager::status_manager::manage(manager_pool, Client::default(), manager_receive)
+        {
             panic!(e);
         }
     });
@@ -91,15 +92,21 @@ fn main() {
     });
 
     // Receive app server controller
-    let app_srv_controller = app_receive.recv().expect("Failed to receive app server controller in main thread");
+    let app_srv_controller = app_receive
+        .recv()
+        .expect("Failed to receive app server controller in main thread");
 
     // Wait for Ctrl-C to terminate
-    while user_term.load(Ordering::SeqCst){}
+    while user_term.load(Ordering::SeqCst) {}
     // Once we've received a Ctrl-C send message to receiver to terminate
-    manager_send.send(()).expect("Failed to send terminate message to manager thread");
+    manager_send
+        .send(())
+        .expect("Failed to send terminate message to manager thread");
     // Then tell app server to stop
     let app_server_stop_future = app_srv_controller.stop(true);
     // Then wait for both to finish
     block_on(app_server_stop_future);
-    manager_thread.join().expect("Failed to join to manager thread");
+    manager_thread
+        .join()
+        .expect("Failed to join to manager thread");
 }

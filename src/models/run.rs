@@ -3,18 +3,17 @@
 //! A run represents a specific run of a test.  Represented in the database by the RUN table.
 
 use crate::custom_sql_types::RunStatusEnum;
-use crate::schema::run::dsl::*;
 use crate::schema::run;
+use crate::schema::run::dsl::*;
+use crate::schema::run_id_with_results;
 use crate::schema::template;
 use crate::schema::test;
-use crate::schema::run_id_with_results;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -324,8 +323,19 @@ impl RunWithResultData {
         run::table
             .left_join(run_id_with_results::table)
             .filter(run_id.eq(id))
-            .select((run_id, test_id, name, status, test_input, eval_input, cromwell_job_id,
-                    created_at, created_by, finished_at, run_id_with_results::results.nullable()))
+            .select((
+                run_id,
+                test_id,
+                name,
+                status,
+                test_input,
+                eval_input,
+                cromwell_job_id,
+                created_at,
+                created_by,
+                finished_at,
+                run_id_with_results::results.nullable(),
+            ))
             .first::<Self>(conn)
     }
 
@@ -484,8 +494,20 @@ impl RunWithResultData {
         }
 
         // Perform the query
-        query.select((run_id, test_id, name, status, test_input, eval_input, cromwell_job_id,
-                      created_at, created_by, finished_at, run_id_with_results::results.nullable()))
+        query
+            .select((
+                run_id,
+                test_id,
+                name,
+                status,
+                test_input,
+                eval_input,
+                cromwell_job_id,
+                created_at,
+                created_by,
+                finished_at,
+                run_id_with_results::results.nullable(),
+            ))
             .load::<Self>(conn)
     }
 }
@@ -494,19 +516,19 @@ impl RunWithResultData {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::ResultTypeEnum;
+    use crate::models::result::{NewResult, ResultData};
+    use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::NewTemplate;
     use crate::models::template::TemplateData;
     use crate::models::test::NewTest;
     use crate::models::test::TestData;
     use crate::unit_test_util::*;
     use chrono::offset::Utc;
-    use uuid::Uuid;
-    use crate::models::result::{NewResult, ResultData};
-    use crate::custom_sql_types::ResultTypeEnum;
-    use crate::models::run_result::{NewRunResult, RunResultData};
-    use rand::prelude::*;
     use rand::distributions::Alphanumeric;
+    use rand::prelude::*;
     use serde_json::json;
+    use uuid::Uuid;
 
     fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         let test_run = insert_test_run(&conn);
@@ -529,7 +551,6 @@ mod tests {
     }
 
     fn insert_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
-
         let new_result = NewResult {
             name: String::from("Name1"),
             result_type: ResultTypeEnum::Numeric,
@@ -537,7 +558,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let new_result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+        let new_result =
+            ResultData::create(conn, new_result).expect("Failed inserting test result");
 
         let rand_result: u64 = rand::random();
 
@@ -547,7 +569,8 @@ mod tests {
             value: rand_result.to_string(),
         };
 
-        let new_run_result = RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+        let new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
 
         let new_result2 = NewResult {
             name: String::from("Name2"),
@@ -556,7 +579,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let new_result2 = ResultData::create(conn, new_result2).expect("Failed inserting test result");
+        let new_result2 =
+            ResultData::create(conn, new_result2).expect("Failed inserting test result");
 
         let mut rng = thread_rng();
         let rand_result: String = std::iter::repeat(())
@@ -570,7 +594,8 @@ mod tests {
             value: String::from(rand_result),
         };
 
-        let new_run_result2 = RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+        let new_run_result2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
 
         return json!({
             new_result.name: new_run_result.value,
@@ -1150,17 +1175,14 @@ mod tests {
         let changes = RunChangeset {
             name: Some(String::from("TestTestTestTest")),
             status: Some(RunStatusEnum::Failed),
-            finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap())
+            finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
         };
 
-        let updated_run = RunData::update(&conn, test_run.run_id, changes)
-            .expect("Failed to update run");
+        let updated_run =
+            RunData::update(&conn, test_run.run_id, changes).expect("Failed to update run");
 
         assert_eq!(updated_run.name, String::from("TestTestTestTest"));
-        assert_eq!(
-            updated_run.status,
-            RunStatusEnum::Failed
-        );
+        assert_eq!(updated_run.status, RunStatusEnum::Failed);
         assert_eq!(
             updated_run.finished_at.unwrap(),
             "2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()
@@ -1176,7 +1198,7 @@ mod tests {
         let changes = RunChangeset {
             name: Some(test_runs[0].name.clone()),
             status: None,
-            finished_at: None
+            finished_at: None,
         };
 
         let updated_run = RunData::update(&conn, test_runs[1].run_id, changes);

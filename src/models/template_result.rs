@@ -82,7 +82,10 @@ impl TemplateResultData {
     /// equal to the id for the template for the test record with `test_id`
     /// Returns a result containing either a vector of the retrieved template_result mappings as
     /// TemplateResultData instances or an error if the query fails for some reason
-    pub fn find_for_test(conn: &PgConnection, test_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
+    pub fn find_for_test(
+        conn: &PgConnection,
+        test_id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
         let template_subquery = test::dsl::test
             .filter(test::dsl::test_id.eq(test_id))
             .select(test::dsl::template_id);
@@ -90,7 +93,6 @@ impl TemplateResultData {
         template_result
             .filter(template_id.eq_any(template_subquery))
             .load::<Self>(conn)
-
     }
 
     /// Queries the DB for template_result mappings matching the specified query criteria
@@ -203,8 +205,8 @@ impl TemplateResultData {
 mod tests {
 
     use super::*;
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
-    use crate::models::test::{TestData, NewTest};
     use uuid::Uuid;
 
     fn insert_test_template_result(conn: &PgConnection) -> TemplateResultData {
@@ -311,15 +313,12 @@ mod tests {
 
         let test_test = insert_test_test_with_template_id(&conn, test_template_result.template_id);
 
-        let found_template_results = TemplateResultData::find_for_test(
-            &conn,
-            test_test.test_id
-        ).expect("Failed to retrieve test template_result by test_id.");
+        let found_template_results = TemplateResultData::find_for_test(&conn, test_test.test_id)
+            .expect("Failed to retrieve test template_result by test_id.");
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_result);
     }
-
 
     #[test]
     fn find_with_template_id() {

@@ -11,7 +11,6 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-
 /// Mapping to a run result as it exists in the RUN_RESULT table in the database.
 ///
 /// An instance of this struct will be returned by any queries for run results.
@@ -53,7 +52,6 @@ pub struct NewRunResult {
 }
 
 impl RunResultData {
-
     /// Queries the DB for a run_result for the specified ids
     ///
     /// Queries the DB using `conn` to retrieve the first row with a run_id matching
@@ -184,7 +182,6 @@ impl RunResultData {
             .values(&params)
             .get_results(conn)
     }
-
 }
 
 #[cfg(test)]
@@ -192,8 +189,8 @@ mod tests {
 
     use super::*;
     use crate::unit_test_util::*;
-    use uuid::Uuid;
     use std::collections::HashSet;
+    use uuid::Uuid;
 
     fn insert_test_run_result(conn: &PgConnection) -> RunResultData {
         let new_run_result = NewRunResult {
@@ -202,8 +199,7 @@ mod tests {
             value: String::from("TestVal"),
         };
 
-        RunResultData::create(conn, new_run_result)
-            .expect("Failed inserting test run_result")
+        RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result")
     }
 
     fn insert_test_run_results(conn: &PgConnection) -> Vec<RunResultData> {
@@ -227,7 +223,8 @@ mod tests {
             value: String::from("TestVal3"),
         });
 
-        RunResultData::batch_create(conn, run_results).expect("Failed to batch insert test run results")
+        RunResultData::batch_create(conn, run_results)
+            .expect("Failed to batch insert test run results")
     }
 
     #[test]
@@ -241,7 +238,7 @@ mod tests {
             test_run_result.run_id,
             test_run_result.result_id,
         )
-            .expect("Failed to retrieve test run_result by id.");
+        .expect("Failed to retrieve test run_result by id.");
 
         assert_eq!(found_run_result, test_run_result);
     }

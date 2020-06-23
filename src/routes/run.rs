@@ -6,22 +6,22 @@
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::run::{RunData, RunQuery, NewRun, RunWithResultData};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder, client::Client};
+use crate::models::run::{NewRun, RunData, RunQuery, RunWithResultData};
+use crate::models::template::TemplateData;
+use crate::models::test::TestData;
+use crate::requests::cromwell_requests;
+use crate::requests::cromwell_requests::WorkflowTypeEnum;
+use crate::requests::test_resource_requests;
+use crate::wdl::combiner;
+use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use chrono::{NaiveDateTime, Utc};
 use log::error;
 use serde::Deserialize;
-use serde_json::{Value, json};
-use uuid::Uuid;
-use crate::models::test::TestData;
-use crate::models::template::TemplateData;
-use crate::requests::test_resource_requests;
-use crate::requests::cromwell_requests;
-use crate::wdl::combiner;
-use tempfile::NamedTempFile;
+use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
-use crate::requests::cromwell_requests::WorkflowTypeEnum;
+use tempfile::NamedTempFile;
+use uuid::Uuid;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -415,11 +415,13 @@ async fn run_for_test(
             error!("{}", e);
             return match e {
                 // If no test is found, return a 404
-                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No test found",
-                    status: 404,
-                    detail: "No test found with the specified ID",
-                }),
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No test found",
+                        status: 404,
+                        detail: "No test found with the specified ID",
+                    })
+                }
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
                     title: "Server error",
@@ -448,18 +450,23 @@ async fn run_for_test(
 
     // Retrieve template to get WDLs or return error
     let template_id = test.template_id.clone();
-    let conn = pool.clone().get().expect("Failed to get DB connection from pool");
+    let conn = pool
+        .clone()
+        .get()
+        .expect("Failed to get DB connection from pool");
     let template = match web::block(move || TemplateData::find_by_id(&conn, template_id)).await {
         Ok(template_data) => template_data,
         Err(e) => {
             error!("{}", e);
             return match e {
                 // If no test is found, return a 404
-                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template found",
-                    status: 404,
-                    detail: "No template found for the specified test",
-                }),
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No template found",
+                        status: 404,
+                        detail: "No template found for the specified test",
+                    })
+                }
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
                     title: "Server error",
@@ -471,33 +478,46 @@ async fn run_for_test(
     };
 
     // Retrieve WDLs from their cloud locations
-    let test_wdl = match test_resource_requests::get_resource_as_string(&client, &template.test_wdl).await {
-        Ok(wdl) => wdl,
-        Err(e) => {
-            error!("{}", e);
-            return HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: &format!("Error while attempting to retrieve test WDL from {}", template.test_wdl),
-            });
-        }
-    };
+    let test_wdl =
+        match test_resource_requests::get_resource_as_string(&client, &template.test_wdl).await {
+            Ok(wdl) => wdl,
+            Err(e) => {
+                error!("{}", e);
+                return HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: &format!(
+                        "Error while attempting to retrieve test WDL from {}",
+                        template.test_wdl
+                    ),
+                });
+            }
+        };
 
-    let eval_wdl = match test_resource_requests::get_resource_as_string(&client, &template.eval_wdl).await {
-        Ok(wdl) => wdl,
-        Err(e) => {
-            error!("{}", e);
-            return HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: &format!("Error while attempting to retrieve eval WDL from {}", template.eval_wdl),
-            });
-        }
-    };
-
+    let eval_wdl =
+        match test_resource_requests::get_resource_as_string(&client, &template.eval_wdl).await {
+            Ok(wdl) => wdl,
+            Err(e) => {
+                error!("{}", e);
+                return HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: &format!(
+                        "Error while attempting to retrieve eval WDL from {}",
+                        template.eval_wdl
+                    ),
+                });
+            }
+        };
 
     // Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
-    let combined_wdl = match combiner::combine_wdls(&test_wdl, &template.test_wdl, &eval_wdl, &template.eval_wdl, &test.name) {
+    let combined_wdl = match combiner::combine_wdls(
+        &test_wdl,
+        &template.test_wdl,
+        &eval_wdl,
+        &template.eval_wdl,
+        &test.name,
+    ) {
         Ok(wdl) => wdl,
         Err(e) => {
             error!("{}", e);
@@ -521,7 +541,7 @@ async fn run_for_test(
                 });
             }
             file
-        },
+        }
         Err(e) => {
             error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
@@ -534,7 +554,7 @@ async fn run_for_test(
     let json_file = match NamedTempFile::new() {
         Ok(mut file) => {
             let mut json_to_submit = test_json.clone();
-            json_patch::merge(& mut json_to_submit, &eval_json);
+            json_patch::merge(&mut json_to_submit, &eval_json);
             if let Err(e) = write!(file, "{}", json_to_submit.to_string()) {
                 error!("{}", e);
                 return HttpResponse::InternalServerError().json(ErrorBody {
@@ -544,7 +564,7 @@ async fn run_for_test(
                 });
             }
             file
-        },
+        }
         Err(e) => {
             error!("{}", e);
             return HttpResponse::InternalServerError().json(ErrorBody {
@@ -586,12 +606,14 @@ async fn run_for_test(
 
     // Write to Run table in DB
     let pool_for_new_thread = pool.clone();
-    let run = match web::block( move|| {
-        let conn = pool_for_new_thread.get().expect("Failed to get DB connection from pool");
+    let run = match web::block(move || {
+        let conn = pool_for_new_thread
+            .get()
+            .expect("Failed to get DB connection from pool");
 
-        let run_name =  match &run_inputs.name {
+        let run_name = match &run_inputs.name {
             Some(name) => String::from(name),
-            None => format!("{}run{}", test.name, Utc::now())
+            None => format!("{}run{}", test.name, Utc::now()),
         };
 
         let new_run = NewRun {
@@ -613,7 +635,8 @@ async fn run_for_test(
             }
         }
     })
-    .await {
+    .await
+    {
         Ok(run) => run,
         Err(e) => {
             error!("{}", e);
@@ -627,7 +650,6 @@ async fn run_for_test(
 
     // Return run to user
     HttpResponse::Ok().json(run)
-
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -637,8 +659,8 @@ async fn run_for_test(
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/tests/{id}/runs")
-        .route(web::get().to(find_for_test))
-        .route(web::post().to(run_for_test))
+            .route(web::get().to(find_for_test))
+            .route(web::post().to(run_for_test)),
     );
     cfg.service(web::resource("/runs/{id}").route(web::get().to(find_by_id)));
     cfg.service(web::resource("/templates/{id}/runs").route(web::get().to(find_for_template)));
@@ -648,24 +670,27 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::custom_sql_types::ResultTypeEnum;
+    use crate::models::result::{NewResult, ResultData};
     use crate::models::run::NewRun;
+    use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
-    use uuid::Uuid;
-    use crate::models::result::{NewResult, ResultData};
-    use crate::custom_sql_types::ResultTypeEnum;
-    use crate::models::run_result::{NewRunResult, RunResultData};
-    use rand::prelude::*;
     use rand::distributions::Alphanumeric;
+    use rand::prelude::*;
+    use uuid::Uuid;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
     }
 
-    fn create_test_run_with_results_and_test_id(conn: &PgConnection, test_id: Uuid) -> RunWithResultData {
+    fn create_test_run_with_results_and_test_id(
+        conn: &PgConnection,
+        test_id: Uuid,
+    ) -> RunWithResultData {
         let test_run = create_test_run_with_test_id(conn, test_id);
 
         let test_results = create_test_results_with_run_id(&conn, &test_run.run_id);
@@ -686,7 +711,6 @@ mod tests {
     }
 
     fn create_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
-
         let new_result = NewResult {
             name: String::from("Name1"),
             result_type: ResultTypeEnum::Numeric,
@@ -694,7 +718,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let new_result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+        let new_result =
+            ResultData::create(conn, new_result).expect("Failed inserting test result");
 
         let rand_result: u64 = rand::random();
 
@@ -704,7 +729,8 @@ mod tests {
             value: rand_result.to_string(),
         };
 
-        let new_run_result = RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+        let new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
 
         let new_result2 = NewResult {
             name: String::from("Name2"),
@@ -713,7 +739,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let new_result2 = ResultData::create(conn, new_result2).expect("Failed inserting test result");
+        let new_result2 =
+            ResultData::create(conn, new_result2).expect("Failed inserting test result");
 
         let mut rng = thread_rng();
         let rand_result: String = std::iter::repeat(())
@@ -727,7 +754,8 @@ mod tests {
             value: String::from(rand_result),
         };
 
-        let new_run_result2 = RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+        let new_run_result2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
 
         return json!({
             new_result.name: new_run_result.value,
@@ -735,7 +763,9 @@ mod tests {
         });
     }
 
-    fn create_run_with_test_and_template(conn: &PgConnection) -> (TemplateData, TestData, RunWithResultData) {
+    fn create_run_with_test_and_template(
+        conn: &PgConnection,
+    ) -> (TemplateData, TestData, RunWithResultData) {
         let new_template = create_test_template(conn);
         let new_test = create_test_test_with_template_id(conn, new_template.template_id);
         let new_run = create_test_run_with_results_and_test_id(conn, new_test.test_id);

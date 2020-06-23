@@ -3,10 +3,9 @@
 
 use log::debug;
 use regex::Regex;
-use std::fmt;
-use std::error::Error;
 use std::collections::HashMap;
-
+use std::error::Error;
+use std::fmt;
 
 /// An error returned in the case that combining WDLs fails
 #[derive(Debug, PartialEq)]
@@ -19,9 +18,7 @@ impl Error for CombineWdlError {}
 impl fmt::Display for CombineWdlError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CombineWdlError::WdlParse(msg) => {
-                write!(f, "WDL parse failed: {}", msg)
-            }
+            CombineWdlError::WdlParse(msg) => write!(f, "WDL parse failed: {}", msg),
         }
     }
 }
@@ -38,11 +35,9 @@ impl fmt::Display for WorkflowInput {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_optional {
             write!(f, "{}? {}", self.input_type, self.name)
-        }
-        else if self.cannot_be_empty {
+        } else if self.cannot_be_empty {
             write!(f, "{}+ {}", self.input_type, self.name)
-        }
-        else {
+        } else {
             write!(f, "{} {}", self.input_type, self.name)
         }
     }
@@ -70,9 +65,16 @@ pub fn combine_wdls(
     test_wdl_location: &str,
     eval_wdl: &str,
     eval_wdl_location: &str,
-    combined_name: &str
+    combined_name: &str,
 ) -> Result<String, CombineWdlError> {
-    combine_wdls_with_sort_option(test_wdl, test_wdl_location, eval_wdl, eval_wdl_location, combined_name, false)
+    combine_wdls_with_sort_option(
+        test_wdl,
+        test_wdl_location,
+        eval_wdl,
+        eval_wdl_location,
+        combined_name,
+        false,
+    )
 }
 
 /// Returns a WDL that calls `test_wdl` and `eval_wdl` as sub workflows
@@ -91,7 +93,7 @@ fn combine_wdls_with_sort_option(
     sort: bool,
 ) -> Result<String, CombineWdlError> {
     // Extract input variables from test_wdl and eval_wdl
-    let test_inputs= extract_workflow_inputs(test_wdl)?;
+    let test_inputs = extract_workflow_inputs(test_wdl)?;
     let eval_inputs = extract_workflow_inputs(eval_wdl)?;
     // Extract output variables from test_wdl and eval_wdl
     let test_outputs = extract_workflow_outputs(test_wdl)?;
@@ -100,8 +102,14 @@ fn combine_wdls_with_sort_option(
     let test_name = extract_workflow_name(test_wdl, "Could not find workflow name in Test WDL")?;
     let eval_name = extract_workflow_name(eval_wdl, "Could not find workflow name in Eval WDL")?;
     // Get inputs and outputs formatted for wdl
-    let (workflow_input_string, test_input_string, eval_input_string, workflow_output_string)
-        = build_input_and_output_strings(&test_inputs, &test_outputs, &eval_inputs, &eval_outputs, sort);
+    let (workflow_input_string, test_input_string, eval_input_string, workflow_output_string) =
+        build_input_and_output_strings(
+            &test_inputs,
+            &test_outputs,
+            &eval_inputs,
+            &eval_outputs,
+            sort,
+        );
     // Assemble into new wdl
     let combined_wdl = format!(
         "import \"{}\" as test\n\
@@ -159,7 +167,6 @@ fn build_input_and_output_strings(
         // Add test inputs to list of workflow inputs and also pass those into call to test
         workflow_inputs_strings.push(format!("    {}", value));
         test_inputs_strings.push(format!("            {} = {}", value.name, value.name));
-
     }
 
     // Figure out what needs to be passed into the call to the eval workflow, whether it needs to
@@ -168,7 +175,10 @@ fn build_input_and_output_strings(
         // If the current eval_input is in test_outputs, it means we need to funnel it from the
         // test workflow into the eval workflow
         if let Some(output) = test_outputs.get(name) {
-            eval_inputs_strings.push(format!("            {} = call_test.{}", input.name, output.name));
+            eval_inputs_strings.push(format!(
+                "            {} = call_test.{}",
+                input.name, output.name
+            ));
         }
         // Otherwise, the input is coming from a workflow input, so add it to the workflow inputs
         // and pass it to the eval inputs
@@ -193,30 +203,36 @@ fn build_input_and_output_strings(
         workflow_inputs_strings.join("\n"),
         test_inputs_strings.join(",\n"),
         eval_inputs_strings.join(",\n"),
-        workflow_outputs_strings.join("\n")
+        workflow_outputs_strings.join("\n"),
     )
 }
 
 /// Searches `input_wdl` for input variables starting with 'in_' and returns a map with the keys
 /// being the names of the variables with the prefix 'in_' removed and the values being
 /// WorkflowInput instances containing information about the input
-fn extract_workflow_inputs(input_wdl: &str) -> Result<HashMap<String,WorkflowInput>, CombineWdlError> {
+fn extract_workflow_inputs(
+    input_wdl: &str,
+) -> Result<HashMap<String, WorkflowInput>, CombineWdlError> {
     // Compile regex for finding input variables
     lazy_static! {
-        static ref IN_REGEX: Regex = Regex::new(r"\s[A-Z][a-zA-Z\[\],\s]+\+?\??\sin_[a-zA-z0-9_]+").unwrap();
+        static ref IN_REGEX: Regex =
+            Regex::new(r"\s[A-Z][a-zA-Z\[\],\s]+\+?\??\sin_[a-zA-z0-9_]+").unwrap();
     }
 
     // We'll fill this with the inputs we parse
-    let mut inputs_map : HashMap<String, WorkflowInput> = HashMap::new();
+    let mut inputs_map: HashMap<String, WorkflowInput> = HashMap::new();
 
     // Loop through matches for input regex and parse them into WorkflowInputs
     for declaration in IN_REGEX.find_iter(input_wdl) {
         let declaration: &str = declaration.as_str().trim();
         // Split declaration into name and type
-        let split_dec: Vec<&str> = declaration.rsplitn(2,' ').collect();
+        let split_dec: Vec<&str> = declaration.rsplitn(2, ' ').collect();
         // Return an error if we didn't get both name and type for some reason
         if split_dec.len() < 2 {
-            return Err(CombineWdlError::WdlParse(format!("Type and name could not be parsed from input {}", declaration)));
+            return Err(CombineWdlError::WdlParse(format!(
+                "Type and name could not be parsed from input {}",
+                declaration
+            )));
         }
         // Get the type
         let mut input_type = *split_dec.get(1).unwrap();
@@ -243,7 +259,7 @@ fn extract_workflow_inputs(input_wdl: &str) -> Result<HashMap<String,WorkflowInp
                 name,
                 is_optional,
                 cannot_be_empty,
-            }
+            },
         );
     }
 
@@ -253,10 +269,13 @@ fn extract_workflow_inputs(input_wdl: &str) -> Result<HashMap<String,WorkflowInp
 /// Searches `input_wdl` for output variables starting with 'out_' and returns a map with the keys
 /// being the names of the variables with the prefix 'out_' removed and the values being
 /// WorkflowOutput instances containing information about the output
-fn extract_workflow_outputs(input_wdl: &str) -> Result<HashMap<String,WorkflowOutput>, CombineWdlError> {
+fn extract_workflow_outputs(
+    input_wdl: &str,
+) -> Result<HashMap<String, WorkflowOutput>, CombineWdlError> {
     // Compile regex for finding output variables
     lazy_static! {
-        static ref OUT_REGEX: Regex = Regex::new(r"\s[A-Z][a-zA-Z\[\],\s]+\+?\??\sout_[a-zA-z0-9_]+").unwrap();
+        static ref OUT_REGEX: Regex =
+            Regex::new(r"\s[A-Z][a-zA-Z\[\],\s]+\+?\??\sout_[a-zA-z0-9_]+").unwrap();
     }
 
     // We'll fill this with the inputs we parse
@@ -266,10 +285,13 @@ fn extract_workflow_outputs(input_wdl: &str) -> Result<HashMap<String,WorkflowOu
     for declaration in OUT_REGEX.find_iter(input_wdl) {
         let declaration: &str = declaration.as_str().trim();
         // Split declaration into name and type
-        let split_dec: Vec<&str> = declaration.rsplitn(2,' ').collect();
+        let split_dec: Vec<&str> = declaration.rsplitn(2, ' ').collect();
         // Return an error if we didn't get both name and type for some reason
         if split_dec.len() < 2 {
-            return Err(CombineWdlError::WdlParse(format!("Type and name could not be parsed from output {}", declaration)));
+            return Err(CombineWdlError::WdlParse(format!(
+                "Type and name could not be parsed from output {}",
+                declaration
+            )));
         }
         // Get the type
         let output_type = String::from(*split_dec.get(1).unwrap());
@@ -278,13 +300,7 @@ fn extract_workflow_outputs(input_wdl: &str) -> Result<HashMap<String,WorkflowOu
         // Get the name with the in_ prefix stripped
         let stripped_name = String::from(name.trim_start_matches("out_"));
         // Add to map of inputs
-        outputs_map.insert(
-            stripped_name,
-            WorkflowOutput {
-                output_type,
-                name,
-            }
-        );
+        outputs_map.insert(stripped_name, WorkflowOutput { output_type, name });
     }
 
     Ok(outputs_map)
@@ -299,20 +315,18 @@ fn extract_workflow_name(wdl: &str, error_msg: &str) -> Result<String, CombineWd
         Some(name_match) => {
             let split_workflow_line: Vec<&str> = name_match.as_str().split_whitespace().collect();
             Ok(String::from(*split_workflow_line.get(1).unwrap()))
-        },
-        None => {
-            return Err(CombineWdlError::WdlParse(String::from(error_msg)))
         }
+        None => return Err(CombineWdlError::WdlParse(String::from(error_msg))),
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::path::Path;
-    use std::fs::read_to_string;
     use super::combine_wdls_with_sort_option;
     use super::CombineWdlError;
+    use std::fs::read_to_string;
+    use std::path::Path;
 
     #[test]
     fn test_combine_wdls_success() {
@@ -321,9 +335,18 @@ mod tests {
         let test_wdl = read_to_string(Path::new(test_wdl_location)).unwrap();
         let eval_wdl = read_to_string(Path::new(eval_wdl_location)).unwrap();
         // Combine
-        let combined_wdl = combine_wdls_with_sort_option(&test_wdl, test_wdl_location, &eval_wdl, eval_wdl_location, "merged_workflow", true).unwrap();
+        let combined_wdl = combine_wdls_with_sort_option(
+            &test_wdl,
+            test_wdl_location,
+            &eval_wdl,
+            eval_wdl_location,
+            "merged_workflow",
+            true,
+        )
+        .unwrap();
         // Load the expected output and compare
-        let expected_combined_wdl = read_to_string(Path::new("testdata/wdl/combiner/combined_wdl.wdl")).unwrap();
+        let expected_combined_wdl =
+            read_to_string(Path::new("testdata/wdl/combiner/combined_wdl.wdl")).unwrap();
         assert_eq!(combined_wdl, expected_combined_wdl);
     }
 
@@ -334,9 +357,20 @@ mod tests {
         let test_wdl = read_to_string(Path::new(test_wdl_location)).unwrap();
         let eval_wdl = read_to_string(Path::new(eval_wdl_location)).unwrap();
         // Combine
-        let combined_wdl = combine_wdls_with_sort_option(&test_wdl, test_wdl_location, &eval_wdl, eval_wdl_location, "merged_workflow", true);
+        let combined_wdl = combine_wdls_with_sort_option(
+            &test_wdl,
+            test_wdl_location,
+            &eval_wdl,
+            eval_wdl_location,
+            "merged_workflow",
+            true,
+        );
         // Check if expected error was produced
-        assert_eq!(Err(CombineWdlError::WdlParse(String::from("Could not find workflow name in Test WDL"))), combined_wdl);
+        assert_eq!(
+            Err(CombineWdlError::WdlParse(String::from(
+                "Could not find workflow name in Test WDL"
+            ))),
+            combined_wdl
+        );
     }
-
 }
