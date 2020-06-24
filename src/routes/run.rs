@@ -16,7 +16,7 @@ use crate::wdl::combiner;
 use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use chrono::{NaiveDateTime, Utc};
 use log::error;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -51,7 +51,7 @@ pub struct RunQueryIncomplete {
 /// The mapping for starting a run expects the test_id as a path param and the name, test_input,
 /// eval_input, and created by as part of the request body.  The cromwell_job_id and status are
 /// filled when the job is submitted to Cromwell
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct NewRunIncomplete {
     pub name: Option<String>,
     pub test_input: Option<Value>,
@@ -682,6 +682,7 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
     use uuid::Uuid;
+    use std::fs::read_to_string;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
@@ -778,8 +779,8 @@ mod tests {
             name: String::from("Kevin's test template"),
             pipeline_id: Uuid::new_v4(),
             description: None,
-            test_wdl: String::from(""),
-            eval_wdl: String::from(""),
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
             created_by: None,
         };
 
@@ -791,8 +792,8 @@ mod tests {
             name: String::from("Kevin's test test"),
             template_id: id,
             description: None,
-            test_input_defaults: None,
-            eval_input_defaults: None,
+            test_input_defaults: Some(json!({"test_test.in_greeting": "Yo"})),
+            eval_input_defaults: Some(json!({"test_test.in_output_filename": "greeting.txt"})),
             created_by: None,
         };
 
@@ -804,8 +805,8 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::Submitted,
-            test_input: serde_json::from_str("{\"test\":\"test\"}").unwrap(),
-            eval_input: serde_json::from_str("{\"eval\":\"test\"}").unwrap(),
+            test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
             cromwell_job_id: Some(String::from("123456789")),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: None,
@@ -1090,5 +1091,78 @@ mod tests {
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
         assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn run_test() {
+        let pool = get_test_db_pool();
+
+        let test_template = create_test_template(&pool.get().unwrap());
+        let test_test = create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
+
+        let test_input = json!({"test_test.in_greeted": "Cool Person"});
+        let eval_input = json!({"test_test.in_output_filename": "test_greeting.txt"});
+        let new_run = NewRunIncomplete {
+            name: None,
+            test_input: Some(test_input.clone()),
+            eval_input: Some(eval_input.clone()),
+            created_by: None,
+        };
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Define mappings for resource request responses
+        let test_wdl_resource = read_to_string("testdata/routes/run/test_wdl.wdl").unwrap();
+        let test_wdl_mock = mockito::mock("GET", "/test")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl_resource)
+            .create();
+        let eval_wdl_resource = read_to_string("testdata/routes/run/eval_wdl.wdl").unwrap();
+        let eval_wdl_mock = mockito::mock("GET", "/eval")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(eval_wdl_resource)
+            .create();
+
+        // Start up app for testing
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        // Make request
+        let req = test::TestRequest::post()
+            .uri(&format!("/tests/{}/runs", test_test.test_id))
+            .set_json(&new_run)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        cromwell_mock.assert();
+
+        let result = test::read_body(resp).await;
+        let test_run: RunData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_run.test_id, test_test.test_id);
+        assert_eq!(test_run.status, RunStatusEnum::Submitted);
+        assert_eq!(test_run.cromwell_job_id, Some("53709600-d114-4194-a7f7-9e41211ca2ce".to_string()));
+        let mut test_input_to_compare = json!({});
+        json_patch::merge(&mut test_input_to_compare, &test_test.test_input_defaults.unwrap());
+        json_patch::merge(&mut test_input_to_compare, &test_input);
+        let mut eval_input_to_compare = json!({});
+        json_patch::merge(&mut eval_input_to_compare, &test_test.eval_input_defaults.unwrap());
+        json_patch::merge(&mut eval_input_to_compare, &eval_input);
+        assert_eq!(test_run.test_input, test_input_to_compare);
+        assert_eq!(test_run.eval_input, eval_input_to_compare);
+
     }
 }

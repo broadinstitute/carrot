@@ -270,6 +270,7 @@ async fn check_and_update_status(
     Ok(())
 }
 
+/// Extracts value for `end` key from `metadata` and parses it into a NaiveDateTime
 fn get_end(metadata: &Map<String, Value>) -> Result<NaiveDateTime, UpdateStatusError> {
     let end = match metadata.get("end") {
         Some(end) => end.as_str().unwrap(),
@@ -289,7 +290,9 @@ fn get_end(metadata: &Map<String, Value>) -> Result<NaiveDateTime, UpdateStatusE
         }
     }
 }
-
+/// Writes records to the `run_result` table for each of the outputs in `outputs` for which there
+/// are mappings in the `template_result` table for the template from which `run` is derived and
+/// which have a key matching the `template_result` record's `result_key` column
 fn fill_results(
     outputs: &Map<String, Value>,
     run: &RunData,
@@ -362,4 +365,148 @@ fn fill_results(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::models::test::{NewTest, TestData};
+    use diesel::PgConnection;
+    use uuid::Uuid;
+    use crate::models::template_result::{TemplateResultData, NewTemplateResult};
+    use crate::models::run::{RunData, NewRun, RunWithResultData};
+    use crate::custom_sql_types::{RunStatusEnum, ResultTypeEnum};
+    use crate::unit_test_util::get_test_db_pool;
+    use serde_json::json;
+    use crate::manager::status_manager::{fill_results, check_and_update_status};
+    use crate::models::result::{ResultData, NewResult};
+    use actix_web::client::Client;
+    use chrono::NaiveDateTime;
+
+    fn insert_test_result(conn: &PgConnection) -> ResultData {
+        let new_result = NewResult {
+            name: String::from("Kevin's Result"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        ResultData::create(conn, new_result).expect("Failed inserting test result")
+    }
+
+    fn insert_test_template_result_with_template_id_and_result_id(conn: &PgConnection, template_id: Uuid, result_id: Uuid) -> TemplateResultData {
+        let new_template_result = NewTemplateResult {
+            template_id: template_id,
+            result_id: result_id,
+            result_key: String::from("TestKey"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template_result")
+    }
+
+    fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: id,
+            description: None,
+            test_input_defaults: Some(json!({"test_test.in_greeting": "Yo"})),
+            eval_input_defaults: Some(json!({"test_test.in_output_filename": "greeting.txt"})),
+            created_by: None,
+        };
+
+        TestData::create(&conn, new_test).expect("Failed to insert test")
+    }
+
+    fn insert_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: id,
+            status: RunStatusEnum::Submitted,
+            test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
+            cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    #[test]
+    fn test_fill_results() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_result = insert_test_result(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
+        insert_test_template_result_with_template_id_and_result_id(&conn, template_id, test_result.result_id);
+        let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
+        // Create results map
+        let results_map = json!({
+            "TestKey": "TestVal",
+            "UnimportantKey": "Who Cares?"
+        });
+        let results_map = results_map.as_object().unwrap().to_owned();
+        // Fill results
+        fill_results(&results_map, &test_run, &conn).unwrap();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let results = result_run.results.unwrap().as_object().unwrap().to_owned();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_status() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_result = insert_test_result(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
+        insert_test_template_result_with_template_id_and_result_id(&conn, template_id, test_result.result_id);
+        let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
+        // Create results map
+        let results_map = json!({
+            "TestKey": "TestVal",
+            "UnimportantKey": "Who Cares?"
+        });
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Succeeded",
+          "outputs": {
+            "TestKey": "TestVal",
+            "UnimportantKey": "Who Cares?"
+          },
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+        .with_status(201)
+        .with_header("content_type", "application/json")
+        .with_body(mock_response_body.to_string())
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into())
+        ]))
+        .create();
+        // Check and update status
+        check_and_update_status(&test_run, &Client::default(), &conn).await.unwrap();
+        mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::Succeeded);
+        assert_eq!(result_run.finished_at.unwrap(), NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ").unwrap());
+        let results = result_run.results.unwrap().as_object().unwrap().to_owned();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
+    }
+
 }
