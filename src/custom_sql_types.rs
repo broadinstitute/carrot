@@ -19,6 +19,9 @@ pub enum RunStatusEnum {
     Succeeded,
     Failed,
     Aborted,
+    Starting,
+    QueuedInCromwell,
+    WaitingForQueueSpace
 }
 
 impl fmt::Display for RunStatusEnum {
@@ -29,6 +32,9 @@ impl fmt::Display for RunStatusEnum {
             RunStatusEnum::Succeeded => write!(f, "succeeded"),
             RunStatusEnum::Failed => write!(f, "failed"),
             RunStatusEnum::Aborted => write!(f, "aborted"),
+            RunStatusEnum::Starting => write!(f, "starting"),
+            RunStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
+            RunStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
         }
     }
 }

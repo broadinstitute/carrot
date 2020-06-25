@@ -21,7 +21,6 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 /// Enum of possible errors from checking and updating a run's status
@@ -134,30 +133,36 @@ pub fn manage(
         }
 
         debug!("Finished status check.  Status manager sleeping . . .");
-        // While the time since the we last started a status check hasn't exceeded
-        // STATUS_CHECK_WAIT_TIME_IN_SECS, sleep in 1-second intervals, while checking for signal
-        // from main thread
-        while Duration::new(*STATUS_CHECK_WAIT_TIME_IN_SECS, 0) > (Instant::now() - query_time) {
-            // Check for message from main thread to exit
-            if let Some(_) = check_for_terminate_message(&channel_recv) {
+        // While the time since we last started a status check hasn't exceeded
+        // STATUS_CHECK_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
+        let wait_timeout = Duration::new(*STATUS_CHECK_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
+        if let Some(timeout) = wait_timeout {
+            if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout){
                 return Ok(());
-            };
-            // Sleep
-            thread::sleep(Duration::from_secs(1));
+            }
         }
         // Check for message from main thread to exit
         if let Some(_) = check_for_terminate_message(&channel_recv) {
             return Ok(());
-        };
+        }
     }
 }
 
-/// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one, or `None` if
-/// the channel is empty or disconnected
+/// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel
+/// is disconnected, or `None` if the channel is empty
 fn check_for_terminate_message(channel_recv: &mpsc::Receiver<()>) -> Option<()> {
     match channel_recv.try_recv() {
         Ok(_) | Err(mpsc::TryRecvError::Disconnected) => Some(()),
         _ => None,
+    }
+}
+
+/// Blocks for a message on `channel_recv` until timeout has passed, and returns `Some(())` if it
+/// finds one or the channel is disconnected, or `None` if it times out
+fn check_for_terminate_message_with_timeout(channel_recv: &mpsc::Receiver<()>, timeout: Duration) -> Option<()> {
+    match channel_recv.recv_timeout(timeout) {
+        Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => Some(()),
+        Err(mpsc::RecvTimeoutError::Timeout) => None,
     }
 }
 
@@ -203,6 +208,21 @@ async fn check_and_update_status(
                 status: Some(RunStatusEnum::Running),
                 finished_at: None,
             },
+            "starting" => RunChangeset {
+                name: None,
+                status: Some(RunStatusEnum::Starting),
+                finished_at: None,
+            },
+            "queuedincromwell" => RunChangeset {
+                name: None,
+                status: Some(RunStatusEnum::QueuedInCromwell),
+                finished_at: None
+            },
+            "waitingforqueuespace" => RunChangeset {
+                name: None,
+                status: Some(RunStatusEnum::WaitingForQueueSpace),
+                finished_at: None
+            },
             "succeeded" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::Succeeded),
@@ -220,7 +240,7 @@ async fn check_and_update_status(
             },
             _ => {
                 return Err(UpdateStatusError::Cromwell(format!(
-                    "Cromwell metadata request return invalid status {}",
+                    "Cromwell metadata request return unrecognized status {}",
                     status
                 )))
             }

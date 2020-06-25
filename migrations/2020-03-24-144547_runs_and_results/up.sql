@@ -1,4 +1,4 @@
-create type run_status_enum as enum('submitted', 'running', 'succeeded', 'failed', 'aborted');
+create type run_status_enum as enum('submitted', 'running', 'succeeded', 'failed', 'aborted', 'starting', 'queued_in_cromwell', 'waiting_for_queue_space');
 
 create type result_type_enum as enum('numeric', 'file', 'text');
 
