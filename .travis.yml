@@ -19,4 +19,4 @@ env:
 before_script:
   - sudo -u postgres psql -c 'create database test_framework_db;'
   - sudo -u postgres psql -c "create user test_framework_user with password 'test' superuser;"
-  - sudo -u postgres psql -c test_framework_db "create extension if not exists 'uuid-ossp';"
+  - sudo -u postgres psql -c "create extension if not exists 'uuid-ossp';" test_framework_db
