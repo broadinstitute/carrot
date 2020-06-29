@@ -5,6 +5,7 @@
 
 use diesel_derive_enum::*;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Maps to the custom type `run_status_enum` in the DB
 ///
@@ -13,10 +14,29 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 #[DieselType = "Run_status_enum"]
 pub enum RunStatusEnum {
-    Created,
+    Submitted,
     Running,
-    Completed,
+    Succeeded,
     Failed,
+    Aborted,
+    Starting,
+    QueuedInCromwell,
+    WaitingForQueueSpace
+}
+
+impl fmt::Display for RunStatusEnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            RunStatusEnum::Submitted => write!(f, "submitted"),
+            RunStatusEnum::Running => write!(f, "running"),
+            RunStatusEnum::Succeeded => write!(f, "succeeded"),
+            RunStatusEnum::Failed => write!(f, "failed"),
+            RunStatusEnum::Aborted => write!(f, "aborted"),
+            RunStatusEnum::Starting => write!(f, "starting"),
+            RunStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
+            RunStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
+        }
+    }
 }
 
 /// Maps to the custom type `result_type_enum` in the DB
@@ -28,4 +48,5 @@ pub enum RunStatusEnum {
 pub enum ResultTypeEnum {
     Numeric,
     File,
+    Text,
 }

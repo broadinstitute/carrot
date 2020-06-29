@@ -51,21 +51,10 @@ table! {
 table! {
     use diesel::sql_types::*;
 
-    run_result_file (run_id, result_id) {
+    run_result (run_id, result_id) {
         run_id -> Uuid,
         result_id -> Uuid,
-        uri -> Text,
-        created_at -> Timestamptz,
-    }
-}
-
-table! {
-    use diesel::sql_types::*;
-
-    run_result_numeric (run_id, result_id) {
-        run_id -> Uuid,
-        result_id -> Uuid,
-        value -> Float8,
+        value -> Text,
         created_at -> Timestamptz,
     }
 }
@@ -112,13 +101,24 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    run_id_with_results(run_id) {
+        run_id -> Uuid,
+        results -> Json,
+    }
+}
+
+joinable!(run -> run_id_with_results(run_id));
+
 allow_tables_to_appear_in_same_query!(
     pipeline,
     result,
     run,
-    run_result_file,
-    run_result_numeric,
+    run_result,
     template,
     template_result,
     test,
+    run_id_with_results,
 );
