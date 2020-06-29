@@ -15,7 +15,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
         * PostgreSQL can be downloaded from the PostgreSQL website, [here](https://www.postgresql.org/download/).
         * It is also a requirement that the PostgreSQL DB have the `uuid-ossp` extension for using UUIDs.
             * This extension can be installed by connecting to the database as a user with SUPERUSER privileges and running the following command:
-            `create extension if not exists 'uuid-ossp';`
+            `create extension if not exists "uuid-ossp";`
     * Certain configuration information must be specified in a file called `.env` before building.
         * An example of a `.env` configuration can be found within the `.env.example` file.
     * CARROT uses the [Diesel](http://diesel.rs/) crate for interfacing with the database.  For certain dev and build tasks, the Diesel CLI is required.
