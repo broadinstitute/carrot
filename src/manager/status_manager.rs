@@ -56,7 +56,7 @@ impl Error for StatusManagerError {}
 
 /// Main loop function for this manager. Queries DB for runs that haven't finished, checks their
 /// statuses on cromwell, and updates accordingly
-pub fn manage(
+pub async fn manage(
     db_pool: DbPool,
     client: Client,
     channel_recv: mpsc::Receiver<()>,
@@ -107,11 +107,11 @@ pub fn manage(
                     };
                     // Check and update status
                     debug!("Checking status of run with id: {}", run.run_id);
-                    if let Err(e) = block_on(check_and_update_status(
+                    if let Err(e) = check_and_update_status(
                         &run,
                         &client,
                         &db_pool.get().unwrap(),
-                    )) {
+                    ).await {
                         error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
                     }
                 }
