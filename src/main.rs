@@ -31,6 +31,7 @@ use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
+use actix_rt::System;
 
 embed_migrations!("migrations");
 
@@ -76,11 +77,8 @@ fn main() {
     info!("Starting status manager thread");
     let manager_pool = pool.clone();
     let manager_thread = thread::spawn(move || {
-        if let Err(e) =
-            manager::status_manager::manage(manager_pool, Client::default(), manager_receive)
-        {
-            panic!(e);
-        }
+        let mut sys = System::new("StatusManagerSystem");
+        sys.block_on(manager::status_manager::manage(manager_pool, Client::default(), manager_receive));
     });
 
     // Create channel for getting app server controller from app thread
