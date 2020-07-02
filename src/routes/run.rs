@@ -681,8 +681,8 @@ mod tests {
     use diesel::PgConnection;
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
-    use uuid::Uuid;
     use std::fs::read_to_string;
+    use uuid::Uuid;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
@@ -1098,7 +1098,8 @@ mod tests {
         let pool = get_test_db_pool();
 
         let test_template = create_test_template(&pool.get().unwrap());
-        let test_test = create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
+        let test_test =
+            create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
 
         let test_input = json!({"test_test.in_greeted": "Cool Person"});
         let eval_input = json!({"test_test.in_output_filename": "test_greeting.txt"});
@@ -1135,7 +1136,13 @@ mod tests {
             .create();
 
         // Start up app for testing
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
         // Make request
         let req = test::TestRequest::post()
@@ -1154,15 +1161,23 @@ mod tests {
 
         assert_eq!(test_run.test_id, test_test.test_id);
         assert_eq!(test_run.status, RunStatusEnum::Submitted);
-        assert_eq!(test_run.cromwell_job_id, Some("53709600-d114-4194-a7f7-9e41211ca2ce".to_string()));
+        assert_eq!(
+            test_run.cromwell_job_id,
+            Some("53709600-d114-4194-a7f7-9e41211ca2ce".to_string())
+        );
         let mut test_input_to_compare = json!({});
-        json_patch::merge(&mut test_input_to_compare, &test_test.test_input_defaults.unwrap());
+        json_patch::merge(
+            &mut test_input_to_compare,
+            &test_test.test_input_defaults.unwrap(),
+        );
         json_patch::merge(&mut test_input_to_compare, &test_input);
         let mut eval_input_to_compare = json!({});
-        json_patch::merge(&mut eval_input_to_compare, &test_test.eval_input_defaults.unwrap());
+        json_patch::merge(
+            &mut eval_input_to_compare,
+            &test_test.eval_input_defaults.unwrap(),
+        );
         json_patch::merge(&mut eval_input_to_compare, &eval_input);
         assert_eq!(test_run.test_input, test_input_to_compare);
         assert_eq!(test_run.eval_input, eval_input_to_compare);
-
     }
 }

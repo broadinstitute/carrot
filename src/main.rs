@@ -23,6 +23,7 @@ extern crate lazy_static;
 extern crate ctrlc;
 extern crate regex;
 
+use actix_rt::System;
 use actix_web::client::Client;
 use dotenv;
 use futures::executor::block_on;
@@ -31,7 +32,6 @@ use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use actix_rt::System;
 
 embed_migrations!("migrations");
 
@@ -78,7 +78,12 @@ fn main() {
     let manager_pool = pool.clone();
     let manager_thread = thread::spawn(move || {
         let mut sys = System::new("StatusManagerSystem");
-        sys.block_on(manager::status_manager::manage(manager_pool, Client::default(), manager_receive));
+        sys.block_on(manager::status_manager::manage(
+            manager_pool,
+            Client::default(),
+            manager_receive,
+        ))
+        .expect("Failed to start status manager with StatusManagerSystem");
     });
 
     // Create channel for getting app server controller from app thread

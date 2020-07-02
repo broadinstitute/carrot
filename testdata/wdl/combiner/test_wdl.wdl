@@ -1,7 +1,13 @@
+## Comments for trying to mess with the parser
+## workflow
+## workflow cool_workflow {
+## String out_output
+## File in_input
+
 task hello_user {
     input{
         String user
-        File hello_file
+        File hello_file # File in_file
     }
     command {
         echo "Hello ${user}"
@@ -26,5 +32,6 @@ workflow test_workflow {
     output {
         String out_greeting = hello_user.greeting
         File out_file = hello_user.output_hello
+        # String out_string
     }
 }
