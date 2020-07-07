@@ -14,7 +14,6 @@ use crate::requests::cromwell_requests;
 use actix_web::client::Client;
 use chrono::NaiveDateTime;
 use diesel::PgConnection;
-use futures::executor::block_on;
 use log::{debug, error, info};
 use serde_json::{Map, Value};
 use std::env;
@@ -107,11 +106,9 @@ pub async fn manage(
                     };
                     // Check and update status
                     debug!("Checking status of run with id: {}", run.run_id);
-                    if let Err(e) = check_and_update_status(
-                        &run,
-                        &client,
-                        &db_pool.get().unwrap(),
-                    ).await {
+                    if let Err(e) =
+                        check_and_update_status(&run, &client, &db_pool.get().unwrap()).await
+                    {
                         error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
                     }
                 }
@@ -135,9 +132,10 @@ pub async fn manage(
         debug!("Finished status check.  Status manager sleeping . . .");
         // While the time since we last started a status check hasn't exceeded
         // STATUS_CHECK_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
-        let wait_timeout = Duration::new(*STATUS_CHECK_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
+        let wait_timeout = Duration::new(*STATUS_CHECK_WAIT_TIME_IN_SECS, 0)
+            .checked_sub(Instant::now() - query_time);
         if let Some(timeout) = wait_timeout {
-            if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout){
+            if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout) {
                 return Ok(());
             }
         }
@@ -159,7 +157,10 @@ fn check_for_terminate_message(channel_recv: &mpsc::Receiver<()>) -> Option<()> 
 
 /// Blocks for a message on `channel_recv` until timeout has passed, and returns `Some(())` if it
 /// finds one or the channel is disconnected, or `None` if it times out
-fn check_for_terminate_message_with_timeout(channel_recv: &mpsc::Receiver<()>, timeout: Duration) -> Option<()> {
+fn check_for_terminate_message_with_timeout(
+    channel_recv: &mpsc::Receiver<()>,
+    timeout: Duration,
+) -> Option<()> {
     match channel_recv.recv_timeout(timeout) {
         Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => Some(()),
         Err(mpsc::RecvTimeoutError::Timeout) => None,
@@ -216,12 +217,12 @@ async fn check_and_update_status(
             "queuedincromwell" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::QueuedInCromwell),
-                finished_at: None
+                finished_at: None,
             },
             "waitingforqueuespace" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::WaitingForQueueSpace),
-                finished_at: None
+                finished_at: None,
             },
             "succeeded" => RunChangeset {
                 name: None,
@@ -390,18 +391,18 @@ fn fill_results(
 #[cfg(test)]
 mod tests {
 
+    use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
+    use crate::manager::status_manager::{check_and_update_status, fill_results};
+    use crate::models::result::{NewResult, ResultData};
+    use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
-    use diesel::PgConnection;
-    use uuid::Uuid;
-    use crate::models::template_result::{TemplateResultData, NewTemplateResult};
-    use crate::models::run::{RunData, NewRun, RunWithResultData};
-    use crate::custom_sql_types::{RunStatusEnum, ResultTypeEnum};
     use crate::unit_test_util::get_test_db_pool;
-    use serde_json::json;
-    use crate::manager::status_manager::{fill_results, check_and_update_status};
-    use crate::models::result::{ResultData, NewResult};
     use actix_web::client::Client;
     use chrono::NaiveDateTime;
+    use diesel::PgConnection;
+    use serde_json::json;
+    use uuid::Uuid;
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -414,7 +415,11 @@ mod tests {
         ResultData::create(conn, new_result).expect("Failed inserting test result")
     }
 
-    fn insert_test_template_result_with_template_id_and_result_id(conn: &PgConnection, template_id: Uuid, result_id: Uuid) -> TemplateResultData {
+    fn insert_test_template_result_with_template_id_and_result_id(
+        conn: &PgConnection,
+        template_id: Uuid,
+        result_id: Uuid,
+    ) -> TemplateResultData {
         let new_template_result = NewTemplateResult {
             template_id: template_id,
             result_id: result_id,
@@ -462,7 +467,11 @@ mod tests {
         let template_id = Uuid::new_v4();
         let test_result = insert_test_result(&conn);
         let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
-        insert_test_template_result_with_template_id_and_result_id(&conn, template_id, test_result.result_id);
+        insert_test_template_result_with_template_id_and_result_id(
+            &conn,
+            template_id,
+            test_result.result_id,
+        );
         let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
         // Create results map
         let results_map = json!({
@@ -487,7 +496,11 @@ mod tests {
         let template_id = Uuid::new_v4();
         let test_result = insert_test_result(&conn);
         let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
-        insert_test_template_result_with_template_id_and_result_id(&conn, template_id, test_result.result_id);
+        insert_test_template_result_with_template_id_and_result_id(
+            &conn,
+            template_id,
+            test_result.result_id,
+        );
         let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
         // Create results map
         let results_map = json!({
@@ -514,19 +527,24 @@ mod tests {
         .match_query(mockito::Matcher::AllOf(vec![
             mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
             mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
-            mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into())
+            mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
         ]))
         .create();
         // Check and update status
-        check_and_update_status(&test_run, &Client::default(), &conn).await.unwrap();
+        check_and_update_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
         mock.assert();
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::Succeeded);
-        assert_eq!(result_run.finished_at.unwrap(), NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ").unwrap());
+        assert_eq!(
+            result_run.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
         assert_eq!(results.len(), 1);
         assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
     }
-
 }

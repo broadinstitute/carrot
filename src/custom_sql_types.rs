@@ -21,7 +21,7 @@ pub enum RunStatusEnum {
     Aborted,
     Starting,
     QueuedInCromwell,
-    WaitingForQueueSpace
+    WaitingForQueueSpace,
 }
 
 impl fmt::Display for RunStatusEnum {

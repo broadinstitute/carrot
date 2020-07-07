@@ -92,15 +92,17 @@ fn combine_wdls_with_sort_option(
     combined_name: &str,
     sort: bool,
 ) -> Result<String, CombineWdlError> {
+    let test_wdl = strip_comments(test_wdl);
+    let eval_wdl = strip_comments(eval_wdl);
     // Extract input variables from test_wdl and eval_wdl
-    let test_inputs = extract_workflow_inputs(test_wdl)?;
-    let eval_inputs = extract_workflow_inputs(eval_wdl)?;
+    let test_inputs = extract_workflow_inputs(&test_wdl)?;
+    let eval_inputs = extract_workflow_inputs(&eval_wdl)?;
     // Extract output variables from test_wdl and eval_wdl
-    let test_outputs = extract_workflow_outputs(test_wdl)?;
-    let eval_outputs = extract_workflow_outputs(eval_wdl)?;
+    let test_outputs = extract_workflow_outputs(&test_wdl)?;
+    let eval_outputs = extract_workflow_outputs(&eval_wdl)?;
     // Extract workflow names from test_wdl and eval_wdl
-    let test_name = extract_workflow_name(test_wdl, "Could not find workflow name in Test WDL")?;
-    let eval_name = extract_workflow_name(eval_wdl, "Could not find workflow name in Eval WDL")?;
+    let test_name = extract_workflow_name(&test_wdl, "Could not find workflow name in Test WDL")?;
+    let eval_name = extract_workflow_name(&eval_wdl, "Could not find workflow name in Eval WDL")?;
     // Get inputs and outputs formatted for wdl
     let (workflow_input_string, test_input_string, eval_input_string, workflow_output_string) =
         build_input_and_output_strings(
@@ -306,6 +308,8 @@ fn extract_workflow_outputs(
     Ok(outputs_map)
 }
 
+/// Searches `wdl` for the name of the workflow defined within it
+/// Returns either the workflow name or an error if it fails to find one
 fn extract_workflow_name(wdl: &str, error_msg: &str) -> Result<String, CombineWdlError> {
     lazy_static! {
         static ref NAME_REGEX: Regex = Regex::new(r"workflow\s[A-Za-z0-9][A-Za-z0-9_]*").unwrap();
@@ -318,6 +322,22 @@ fn extract_workflow_name(wdl: &str, error_msg: &str) -> Result<String, CombineWd
         }
         None => return Err(CombineWdlError::WdlParse(String::from(error_msg))),
     }
+}
+
+/// Searches `wdl` for comments (starting with '#'), and returns a String of the WDL with the
+/// comments removed
+///
+/// This function has potential to run into issues in cases where the `#` character is present in
+/// strings or command blocks.  For that reason, it should only be used as part of the
+/// combine_wdls function, and not in other contexts.  This and the other functions in this
+/// module will likely become obsolete once we switch to a more robust method of WDL parsing using
+/// existing tools
+fn strip_comments(wdl: &str) -> String {
+    lazy_static! {
+        static ref COMMENT_REGEX: Regex = Regex::new(r"#.*").unwrap();
+    }
+
+    COMMENT_REGEX.replace_all(wdl, "").to_string()
 }
 
 #[cfg(test)]
