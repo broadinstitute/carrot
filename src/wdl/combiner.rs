@@ -326,6 +326,12 @@ fn extract_workflow_name(wdl: &str, error_msg: &str) -> Result<String, CombineWd
 
 /// Searches `wdl` for comments (starting with '#'), and returns a String of the WDL with the
 /// comments removed
+///
+/// This function has potential to run into issues in cases where the `#` character is present in
+/// strings or command blocks.  For that reason, it should only be used as part of the
+/// combine_wdls function, and not in other contexts.  This and the other functions in this
+/// module will likely become obsolete once we switch to a more robust method of WDL parsing using
+/// existing tools
 fn strip_comments(wdl: &str) -> String {
     lazy_static! {
         static ref COMMENT_REGEX: Regex = Regex::new(r"#.*").unwrap();
