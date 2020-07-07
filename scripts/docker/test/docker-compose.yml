@@ -8,13 +8,11 @@ services:
       context: ../../../
       dockerfile: scripts/docker/test/Dockerfile
     environment:
-      - DATABASE_URL=postgres://test_framework_user:test@postgres:5432/test_framework_db
+      - DATABASE_URL=postgres://test_framework_user:test@db-test:5432/test_framework_db
     depends_on:
-      - postgres
+      - db-test
 
-  postgres:
-    image: postgres:12.1
-    environment:
-      - POSTGRES_USER=test_framework_user
-      - POSTGRES_PASSWORD=test
-      - POSTGRES_DB=test_framework_db
+  db-test:
+    image: db-test
+    build:
+      context: db/
