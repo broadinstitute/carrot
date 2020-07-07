@@ -15,4 +15,4 @@ services:
   db-test:
     image: db-test
     build:
-      context: db/
+      context: ../db/

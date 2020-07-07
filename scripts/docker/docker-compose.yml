@@ -10,22 +10,27 @@ services:
     ports:
       - "8080:80"
     environment:
-      - DATABASE_URL=postgres://test_framework_user:test@postgres:5432/test_framework_db
+      - DATABASE_URL=postgres://test_framework_user:test@db:5432/test_framework_db
       - DB_THREADS=4
       - RUST_LOG=carrot=info,actix=info
       - HOST=0.0.0.0
       - PORT=80
+      - CROMWELL_ADDRESS=http://cromwell:8000
     depends_on:
-      - postgres
+      - db
+      - cromwell
 
-  postgres:
-    image: postgres:12.1
-    environment:
-      - POSTGRES_USER=test_framework_user
-      - POSTGRES_PASSWORD=test
-      - POSTGRES_DB=test_framework_db
+  db:
+    image: postgres-with-extension
+    build:
+      context: db/
     volumes:
       - db-data:/var/lib/postgresql/data
+
+  cromwell:
+    image: broadinstitute/cromwell:51
+    environment:
+      - CROMWELL_ARGS=server
 
 volumes:
   db-data:
