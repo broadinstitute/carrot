@@ -502,11 +502,6 @@ mod tests {
             test_result.result_id,
         );
         let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
-        // Create results map
-        let results_map = json!({
-            "TestKey": "TestVal",
-            "UnimportantKey": "Who Cares?"
-        });
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
