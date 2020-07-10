@@ -50,3 +50,16 @@ pub enum ResultTypeEnum {
     File,
     Text,
 }
+
+/// Maps to the custom type `entity_type_enum` in the DB
+///
+/// Represents th enum used in the DB for representing a type of entity to which a user can
+/// subscribe
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[DieselType = "Entity_type_enum"]
+pub enum EntityTypeEnum {
+    Pipeline,
+    Template,
+    Test,
+}
