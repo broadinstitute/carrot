@@ -7,6 +7,7 @@
 use crate::schema::subscription;
 use crate::schema::subscription::dsl::*;
 use crate::custom_sql_types::EntityTypeEnum;
+use crate::models::sql_functions;
 use crate::util;
 use uuid::Uuid;
 use chrono::NaiveDateTime;
@@ -108,7 +109,7 @@ impl SubscriptionData {
             query = query.filter(created_at.gt(param));
         }
         if let Some(param) = params.email {
-            query = query.filter(email.eq(param));
+            query = query.filter(sql_functions::lower(email).eq(param.to_lowercase()));
         }
 
         // If there is a sort param, parse it and add to the order by clause accordingly
@@ -376,7 +377,7 @@ mod tests {
             entity_id: None,
             created_before: None,
             created_after: None,
-            email: Some(String::from("Kevin@example.com")),
+            email: Some(String::from("KEVIN@example.com")),
             sort: Some(String::from("desc(entity_type)")),
             limit: Some(2),
             offset: None,

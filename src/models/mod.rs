@@ -9,3 +9,6 @@ pub mod template;
 pub mod template_result;
 pub mod test;
 pub mod subscription;
+
+// Utility modules only meant to be used within this module
+mod sql_functions;

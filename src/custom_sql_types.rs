@@ -55,7 +55,7 @@ pub enum ResultTypeEnum {
 ///
 /// Represents th enum used in the DB for representing a type of entity to which a user can
 /// subscribe
-#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 #[DieselType = "Entity_type_enum"]
 pub enum EntityTypeEnum {

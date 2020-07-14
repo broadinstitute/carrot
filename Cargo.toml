@@ -44,6 +44,8 @@ regex = "1"
 futures = "0.3.5"
 # To handle CTRL-C(SIGINT) signals
 ctrlc = "3.1.4"
+# For validating user input (particularly email addresses)
+validator = "0.10.1"
 
 [dev-dependencies]
 # For generating random values in test data
