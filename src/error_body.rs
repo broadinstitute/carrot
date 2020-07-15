@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// `title` is a brief summary of the error
 /// `status` is the http status code
 /// `detail` is a more detailed explanation of the error
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct ErrorBody<'a> {
     pub title: &'a str,
     pub status: u16,

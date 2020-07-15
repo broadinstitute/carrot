@@ -65,14 +65,12 @@ pub fn combine_wdls(
     test_wdl_location: &str,
     eval_wdl: &str,
     eval_wdl_location: &str,
-    combined_name: &str,
 ) -> Result<String, CombineWdlError> {
     combine_wdls_with_sort_option(
         test_wdl,
         test_wdl_location,
         eval_wdl,
         eval_wdl_location,
-        combined_name,
         false,
     )
 }
@@ -89,7 +87,6 @@ fn combine_wdls_with_sort_option(
     test_wdl_location: &str,
     eval_wdl: &str,
     eval_wdl_location: &str,
-    combined_name: &str,
     sort: bool,
 ) -> Result<String, CombineWdlError> {
     let test_wdl = strip_comments(test_wdl);
@@ -116,7 +113,7 @@ fn combine_wdls_with_sort_option(
     let combined_wdl = format!(
         "import \"{}\" as test\n\
          import \"{}\" as eval\n\n\
-         workflow {} {{\n\
+         workflow merged_workflow {{\n\
          {}\n    \
          call test.{} as call_test {{\n        \
          input:\n{}\n    \
@@ -129,7 +126,6 @@ fn combine_wdls_with_sort_option(
          }}",
         test_wdl_location,
         eval_wdl_location,
-        combined_name.replace(" ", "_"),
         workflow_input_string,
         test_name,
         test_input_string,
@@ -360,7 +356,6 @@ mod tests {
             test_wdl_location,
             &eval_wdl,
             eval_wdl_location,
-            "merged_workflow",
             true,
         )
         .unwrap();
@@ -382,7 +377,6 @@ mod tests {
             test_wdl_location,
             &eval_wdl,
             eval_wdl_location,
-            "merged_workflow",
             true,
         );
         // Check if expected error was produced
