@@ -5,6 +5,7 @@ mod db;
 mod error_body;
 mod manager;
 mod models;
+mod notifications;
 mod requests;
 mod routes;
 mod schema;
@@ -36,6 +37,7 @@ use std::thread;
 embed_migrations!("migrations");
 
 fn main() {
+
     // Load environment variables from env file
     dotenv::from_filename(".env").ok();
     // Initializes logger with config from .env file

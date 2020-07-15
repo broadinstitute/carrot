@@ -46,6 +46,9 @@ futures = "0.3.5"
 ctrlc = "3.1.4"
 # For validating user input (particularly email addresses)
 validator = "0.10.1"
+# For sending emails
+lettre = "0.9"
+lettre_email = "0.9"
 
 [dev-dependencies]
 # For generating random values in test data
