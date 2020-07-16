@@ -9,6 +9,10 @@ use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;
+use crate::wdl::combiner;
+use crate::requests::test_resource_requests;
+use crate::models::template::TemplateData;
+use actix_web::client::Client;
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
 ///
@@ -161,7 +165,7 @@ async fn create(
     })
 }
 
-/// Handles requests to /test/{id} for updating a test
+/// Handles requests to /tests/{id} for updating a test
 ///
 /// This function is called by Actix-Web when a put request is made to the /tests/{id} mapping
 /// It deserializes the request body to a TestChangeset, connects to the db via a connection
@@ -215,6 +219,163 @@ async fn update(
     })
 }
 
+/// Handles requests to /tests/{id}/wrapper for getting the wrapper wdl generated for that test
+///
+/// This function is called by Actix-Web when a get request is made to the /tests/{id}/wrapper
+/// mapping
+/// It retrieves the template for the specified test, assembles the wrapper WDL for its test and
+/// eval wdls, and returns the wrapper wdl to the user
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn get_wrapper_wdl(
+    id: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
+) -> Result<HttpResponse, actix_web::error::Error> {
+    // Parse test id into UUID
+    let test_id = match Uuid::parse_str(&*id) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                title: "ID formatted incorrectly",
+                status: 400,
+                detail: "ID must be formatted as a Uuid",
+            }));
+        }
+    };
+    // Retrieve test for id or return error
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+    let test = match web::block(move || TestData::find_by_id(&conn, test_id)).await {
+        Ok(test_data) => test_data,
+        Err(e) => {
+            error!("{}", e);
+            return Ok(match e {
+                // If no test is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No test found",
+                        status: 404,
+                        detail: "No test found with the specified ID",
+                    })
+                }
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: "Error while attempting to retrieve test data",
+                }),
+            });
+        }
+    };
+
+    // Retrieve template to get WDLs or return error
+    let template_id = test.template_id.clone();
+    let conn = pool
+        .clone()
+        .get()
+        .expect("Failed to get DB connection from pool");
+    let template = match web::block(move || TemplateData::find_by_id(&conn, template_id)).await {
+        Ok(template_data) => template_data,
+        Err(e) => {
+            error!("{}", e);
+            return Ok(match e {
+                // If no test is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No template found",
+                        status: 404,
+                        detail: "No template found for the specified test",
+                    })
+                }
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: "Error while attempting to retrieve template data",
+                }),
+            });
+        }
+    };
+
+    // Retrieve WDLs from their cloud locations
+    let test_wdl =
+        match test_resource_requests::get_resource_as_string(&client, &template.test_wdl).await {
+            Ok(wdl) => wdl,
+            Err(e) => {
+                error!("{}", e);
+                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: &format!(
+                        "Error while attempting to retrieve test WDL from {}",
+                        template.test_wdl
+                    ),
+                }));
+            }
+        };
+
+    let eval_wdl =
+        match test_resource_requests::get_resource_as_string(&client, &template.eval_wdl).await {
+            Ok(wdl) => wdl,
+            Err(e) => {
+                error!("{}", e);
+                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error",
+                    status: 500,
+                    detail: &format!(
+                        "Error while attempting to retrieve eval WDL from {}",
+                        template.eval_wdl
+                    ),
+                }));
+            }
+        };
+
+    // Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
+    #[cfg(not(test))]
+    let combined_wdl = match combiner::combine_wdls(
+        &test_wdl,
+        &template.test_wdl,
+        &eval_wdl,
+        &template.eval_wdl,
+    ) {
+        Ok(wdl) => wdl,
+        Err(e) => {
+            error!("{}", e);
+            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
+            }));
+        }
+    };
+
+    // For ensuring tests work properly, we have to use the sorted WDL combiner (otherwise, the
+    // variables might end up out of order and then the test can fail)
+    #[cfg(test)]
+    let combined_wdl = match combiner::combine_wdls_with_sort_option(
+        &test_wdl,
+        &template.test_wdl,
+        &eval_wdl,
+        &template.eval_wdl,
+        true,
+    ) {
+        Ok(wdl) => wdl,
+        Err(e) => {
+            error!("{}", e);
+            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
+            }));
+        }
+    };
+
+    return Ok(HttpResponse::Ok().body(combined_wdl));
+}
+
 /// Attaches the REST mappings in this file to a service config
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
@@ -230,6 +391,10 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route(web::get().to(find))
             .route(web::post().to(create)),
     );
+    cfg.service(
+        web::resource("/tests/{id}/wrapper")
+            .route(web::get().to(get_wrapper_wdl))
+    );
 }
 
 #[cfg(test)]
@@ -239,6 +404,10 @@ mod tests {
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
+    use crate::models::template::NewTemplate;
+    use std::fs::read_to_string;
+    use serde_json::json;
+    use std::str::from_utf8;
 
     fn create_test_test(conn: &PgConnection) -> TestData {
         let new_test = NewTest {
@@ -251,6 +420,32 @@ mod tests {
         };
 
         TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
+
+    fn create_test_template(conn: &PgConnection) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: Uuid::new_v4(),
+            description: None,
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
+            created_by: None,
+        };
+
+        TemplateData::create(&conn, new_template).expect("Failed to insert test")
+    }
+
+    fn create_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: id,
+            description: None,
+            test_input_defaults: Some(json!({"in_greeting": "Yo"})),
+            eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
+            created_by: None,
+        };
+
+        TestData::create(&conn, new_test).expect("Failed to insert test")
     }
 
     #[actix_rt::test]
@@ -549,5 +744,55 @@ mod tests {
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
         assert_eq!(error_body.detail, "Error while attempting to update test");
+    }
+
+    #[actix_rt::test]
+    async fn get_wrapper_success() {
+        let pool = get_test_db_pool();
+
+        let test_template = create_test_template(&pool.get().unwrap());
+        let test_test =
+            create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
+
+        // Define mappings for resource request responses
+        let test_wdl_resource = read_to_string("testdata/wdl/combiner/test_wdl.wdl").unwrap();
+        let test_wdl_mock = mockito::mock("GET", "/test")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl_resource)
+            .create();
+        let eval_wdl_resource = read_to_string("testdata/wdl/combiner/eval_wdl.wdl").unwrap();
+        let eval_wdl_mock = mockito::mock("GET", "/eval")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(eval_wdl_resource)
+            .create();
+
+        // Start up app for testing
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+            .await;
+
+        // Make request
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/wrapper", test_test.test_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let wrapper_wdl: String = from_utf8(&*result).unwrap().to_string();
+
+        let truth_wdl = read_to_string("testdata/routes/test/combined_wdl.wdl").unwrap();
+
+        assert_eq!(wrapper_wdl, truth_wdl);
+
     }
 }

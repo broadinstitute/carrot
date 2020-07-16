@@ -82,7 +82,7 @@ pub fn combine_wdls(
 /// `test_wdl` and funnels its outputs into a call to the workflow defined in `eval_wdl`
 ///
 /// Is wrapped by combine_wdls just so we can sort variable declarations for testing
-fn combine_wdls_with_sort_option(
+pub fn combine_wdls_with_sort_option(
     test_wdl: &str,
     test_wdl_location: &str,
     eval_wdl: &str,
