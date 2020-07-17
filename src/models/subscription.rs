@@ -4,6 +4,8 @@
 //! the purpose of being notified of events related to that entity. Represented in the database by
 //! the SUBSCRIPTION table.
 
+use crate::schema::template;
+use crate::schema::test;
 use crate::schema::subscription;
 use crate::schema::subscription::dsl::*;
 use crate::custom_sql_types::EntityTypeEnum;
@@ -78,6 +80,25 @@ impl SubscriptionData {
     /// matching the criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         subscription.filter(subscription_id.eq(id)).first::<Self>(conn)
+    }
+
+
+    pub fn find_all_for_test(conn: &PgConnection, test_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
+        // Get pipeline and template ids for this test
+        let (pipeline_id, template_id) = test::table
+            .inner_join(template::table)
+            .filter(template::template_id.eq(test::template_id))
+            .filter(test::test_id.eq(test_id))
+            .select((
+                template::template_id,
+                template::pipeline_id
+            ))
+            .first::<(Uuid, Uuid)>(conn)?;
+
+        subscription.filter(entity_id.eq(test_id).and(entity_type.eq(EntityTypeEnum::Test)))
+            .or_filter(entity_id.eq(template_id).and(entity_type.eq(EntityTypeEnum::Template)))
+            .or_filter(entity_id.eq(pipeline_id).and(entity_type.eq(EntityTypeEnum::Pipeline)))
+            .load::<Self>(conn)
     }
 
     /// Queries the DB for subscriptions matching the specified query criteria

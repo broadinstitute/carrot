@@ -48,6 +48,10 @@ fn main() {
     let port = env::var("PORT").expect("PORT environment variable not set");
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
     let db_threads = env::var("DB_THREADS").expect("DB_THREADS environment variable not set");
+    // Make sure we have values for EMAIL_DOMAIN and EMAIL_FROM because they will be necessary
+    // for the email notifications to work
+    env::var("EMAIL_DOMAIN").expect("EMAIL_DOMAIN variable not set");
+    env::var("EMAIL_FROM").expect("EMAIL_FROM variable not set");
     // Parse db_threads variable into an integer and terminate if unsuccessful
     let db_threads: u32 = db_threads
         .parse()

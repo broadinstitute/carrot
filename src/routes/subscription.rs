@@ -6,7 +6,7 @@
 use crate::db;
 use crate::error_body::ErrorBody;
 use crate::models::subscription::{NewSubscription, SubscriptionData, SubscriptionDeleteParams, SubscriptionQuery};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
+use actix_web::{error::BlockingError, web, HttpResponse};
 use log::error;
 use uuid::Uuid;
 use crate::custom_sql_types::EntityTypeEnum;
