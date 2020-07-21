@@ -7,11 +7,11 @@
 
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db::DbPool;
+use crate::manager::notification_handler;
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_result::{NewRunResult, RunResultData};
 use crate::models::template_result::TemplateResultData;
 use crate::requests::cromwell_requests;
-use crate::manager::notification_handler;
 use actix_web::client::Client;
 use chrono::NaiveDateTime;
 use diesel::PgConnection;

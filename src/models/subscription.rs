@@ -4,17 +4,17 @@
 //! the purpose of being notified of events related to that entity. Represented in the database by
 //! the SUBSCRIPTION table.
 
-use crate::schema::template;
-use crate::schema::test;
-use crate::schema::subscription;
-use crate::schema::subscription::dsl::*;
 use crate::custom_sql_types::EntityTypeEnum;
 use crate::models::sql_functions;
+use crate::schema::subscription;
+use crate::schema::subscription::dsl::*;
+use crate::schema::template;
+use crate::schema::test;
 use crate::util;
-use uuid::Uuid;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Mapping to a subscription as it exists in the SUBSCRIPTION table in the database.
 ///
@@ -71,7 +71,6 @@ pub struct SubscriptionDeleteParams {
 }
 
 impl SubscriptionData {
-
     /// Queries the DB for a subscription with the specified id
     ///
     /// Queries the DB using `conn` to retrieve the first row with a subscription_id value of `id`
@@ -79,7 +78,9 @@ impl SubscriptionData {
     /// instance or an error if the query fails for some reason or if no subscription is found
     /// matching the criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
-        subscription.filter(subscription_id.eq(id)).first::<Self>(conn)
+        subscription
+            .filter(subscription_id.eq(id))
+            .first::<Self>(conn)
     }
 
     /// Queries the DB for all subscriptions for the test for the specified id and subscriptions to
@@ -89,27 +90,40 @@ impl SubscriptionData {
     /// - An entity_type value of `Test` and an entity_id = `test_id`
     /// - An entity_type value of `Template` and an entity_id = {test's template_id}
     /// - An entity_type value of `Pipeline` and an entity_id = {test's template's pipeline_id}
-    pub fn find_all_for_test(conn: &PgConnection, test_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
+    pub fn find_all_for_test(
+        conn: &PgConnection,
+        test_id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
         // Get pipeline and template ids for this test
         let (pipeline_id, template_id) = test::table
             .inner_join(template::table)
             .filter(test::test_id.eq(test_id))
-            .select((
-                template::pipeline_id,
-                template::template_id
-            ))
+            .select((template::pipeline_id, template::template_id))
             .first::<(Uuid, Uuid)>(conn)?;
 
-        subscription.filter(entity_id.eq(test_id).and(entity_type.eq(EntityTypeEnum::Test)))
-            .or_filter(entity_id.eq(template_id).and(entity_type.eq(EntityTypeEnum::Template)))
-            .or_filter(entity_id.eq(pipeline_id).and(entity_type.eq(EntityTypeEnum::Pipeline)))
+        subscription
+            .filter(
+                entity_id
+                    .eq(test_id)
+                    .and(entity_type.eq(EntityTypeEnum::Test)),
+            )
+            .or_filter(
+                entity_id
+                    .eq(template_id)
+                    .and(entity_type.eq(EntityTypeEnum::Template)),
+            )
+            .or_filter(
+                entity_id
+                    .eq(pipeline_id)
+                    .and(entity_type.eq(EntityTypeEnum::Pipeline)),
+            )
             .load::<Self>(conn)
     }
 
     /// Queries the DB for subscriptions matching the specified query criteria
     ///
     /// Queries the DB using `conn` to retrieve subscriptions matching the criteria in `params`
-    /// Returns a result containing either a vector of the retrieved subscriptions as 
+    /// Returns a result containing either a vector of the retrieved subscriptions as
     /// SubscriptionData instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
@@ -200,7 +214,10 @@ impl SubscriptionData {
     /// Creates a new subscription row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new subscription that was created or an error if
     /// the insert fails for some reason
-    pub fn create(conn: &PgConnection, params: NewSubscription) -> Result<Self, diesel::result::Error> {
+    pub fn create(
+        conn: &PgConnection,
+        params: NewSubscription,
+    ) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(subscription)
             .values(&params)
             .get_result(conn)
@@ -211,7 +228,10 @@ impl SubscriptionData {
     /// Deletes subscriptions based on the params specified in `params`
     /// Returns either the number of subscriptions deleted, or an error if something goes wrong
     /// during the delete
-    pub fn delete(conn: &PgConnection, params: SubscriptionDeleteParams) -> Result<usize, diesel::result::Error> {
+    pub fn delete(
+        conn: &PgConnection,
+        params: SubscriptionDeleteParams,
+    ) -> Result<usize, diesel::result::Error> {
         // Put the query into a box (pointer) so it can be built dynamically
         let mut query = diesel::delete(subscription).into_boxed();
 
@@ -243,12 +263,12 @@ impl SubscriptionData {
 mod tests {
 
     use super::*;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
-    use uuid::Uuid;
-    use crate::models::template::{TemplateData, NewTemplate};
-    use crate::models::test::{TestData, NewTest};
-    use crate::models::pipeline::{PipelineData, NewPipeline};
     use std::cmp::Ordering;
+    use uuid::Uuid;
 
     fn insert_test_subscription(conn: &PgConnection) -> SubscriptionData {
         let new_subscription = NewSubscription {
@@ -257,7 +277,8 @@ mod tests {
             email: String::from("Kevin@example.com"),
         };
 
-        SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription")
+        SubscriptionData::create(conn, new_subscription)
+            .expect("Failed inserting test subscription")
     }
 
     fn insert_test_subscriptions(conn: &PgConnection) -> Vec<SubscriptionData> {
@@ -270,7 +291,8 @@ mod tests {
         };
 
         subscriptions.push(
-            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+            SubscriptionData::create(conn, new_subscription)
+                .expect("Failed inserting test subscription"),
         );
 
         let new_subscription = NewSubscription {
@@ -280,7 +302,8 @@ mod tests {
         };
 
         subscriptions.push(
-            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+            SubscriptionData::create(conn, new_subscription)
+                .expect("Failed inserting test subscription"),
         );
 
         let new_subscription = NewSubscription {
@@ -290,7 +313,8 @@ mod tests {
         };
 
         subscriptions.push(
-            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+            SubscriptionData::create(conn, new_subscription)
+                .expect("Failed inserting test subscription"),
         );
 
         subscriptions
@@ -310,7 +334,8 @@ mod tests {
         };
 
         subscriptions.push(
-            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+            SubscriptionData::create(conn, new_subscription)
+                .expect("Failed inserting test subscription"),
         );
 
         let new_subscription = NewSubscription {
@@ -320,7 +345,8 @@ mod tests {
         };
 
         subscriptions.push(
-            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+            SubscriptionData::create(conn, new_subscription)
+                .expect("Failed inserting test subscription"),
         );
 
         let new_subscription = NewSubscription {
@@ -330,7 +356,8 @@ mod tests {
         };
 
         subscriptions.push(
-            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+            SubscriptionData::create(conn, new_subscription)
+                .expect("Failed inserting test subscription"),
         );
 
         subscriptions
@@ -378,8 +405,9 @@ mod tests {
 
         let test_subscription = insert_test_subscription(&conn);
 
-        let found_subscription = SubscriptionData::find_by_id(&conn, test_subscription.subscription_id)
-            .expect("Failed to retrieve test subscription by id.");
+        let found_subscription =
+            SubscriptionData::find_by_id(&conn, test_subscription.subscription_id)
+                .expect("Failed to retrieve test subscription by id.");
 
         assert_eq!(found_subscription, test_subscription);
     }
@@ -402,34 +430,35 @@ mod tests {
 
         let test_subscriptions = insert_test_subscriptions_with_entities(&conn);
 
-        let mut found_subscriptions = SubscriptionData::find_all_for_test(&conn, test_subscriptions[2].entity_id).unwrap();
+        let mut found_subscriptions =
+            SubscriptionData::find_all_for_test(&conn, test_subscriptions[2].entity_id).unwrap();
 
         assert_eq!(found_subscriptions.len(), 3);
 
-        found_subscriptions.sort_by(|a, b| {
-            match a.entity_type {
-                EntityTypeEnum::Pipeline => {
-                    Ordering::Less
-                },
-                EntityTypeEnum::Template => {
-                    match b.entity_type {
-                        EntityTypeEnum::Pipeline => {
-                            Ordering::Greater
-                        },
-                        _ => Ordering::Less
-                    }
-                },
-                _ => Ordering::Greater
-            }
+        found_subscriptions.sort_by(|a, b| match a.entity_type {
+            EntityTypeEnum::Pipeline => Ordering::Less,
+            EntityTypeEnum::Template => match b.entity_type {
+                EntityTypeEnum::Pipeline => Ordering::Greater,
+                _ => Ordering::Less,
+            },
+            _ => Ordering::Greater,
         });
 
-        assert_eq!(test_subscriptions[0].entity_id, found_subscriptions[0].entity_id);
+        assert_eq!(
+            test_subscriptions[0].entity_id,
+            found_subscriptions[0].entity_id
+        );
         assert_eq!(test_subscriptions[0].email, found_subscriptions[0].email);
-        assert_eq!(test_subscriptions[1].entity_id, found_subscriptions[1].entity_id);
+        assert_eq!(
+            test_subscriptions[1].entity_id,
+            found_subscriptions[1].entity_id
+        );
         assert_eq!(test_subscriptions[1].email, found_subscriptions[1].email);
-        assert_eq!(test_subscriptions[2].entity_id, found_subscriptions[2].entity_id);
+        assert_eq!(
+            test_subscriptions[2].entity_id,
+            found_subscriptions[2].entity_id
+        );
         assert_eq!(test_subscriptions[2].email, found_subscriptions[2].email);
-
     }
 
     #[test]
@@ -599,11 +628,7 @@ mod tests {
         let test_subscription = insert_test_subscription(&conn);
 
         assert_eq!(test_subscription.entity_type, EntityTypeEnum::Pipeline);
-        assert_eq!(
-            test_subscription
-                .email,
-            "Kevin@example.com"
-        );
+        assert_eq!(test_subscription.email, "Kevin@example.com");
     }
 
     #[test]
@@ -625,15 +650,18 @@ mod tests {
             created_after: None,
             email: None,
         };
-        let delete_count = SubscriptionData::delete(&conn, delete_params)
-            .expect("Error during delete");
+        let delete_count =
+            SubscriptionData::delete(&conn, delete_params).expect("Error during delete");
 
         assert_eq!(delete_count, 1);
 
         // Make sure we can't find it now
-        let find_after_delete = SubscriptionData::find_by_id(&conn, test_subscription.subscription_id);
+        let find_after_delete =
+            SubscriptionData::find_by_id(&conn, test_subscription.subscription_id);
 
-        assert!(matches!(find_after_delete, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            find_after_delete,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 }
-

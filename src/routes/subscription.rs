@@ -3,27 +3,29 @@
 //! Contains functions for processing requests to create, delete, and search subscriptions, along
 //! with their URI mappings
 
+use crate::custom_sql_types::EntityTypeEnum;
 use crate::db;
 use crate::error_body::ErrorBody;
-use crate::models::subscription::{NewSubscription, SubscriptionData, SubscriptionDeleteParams, SubscriptionQuery};
-use actix_web::{error::BlockingError, web, HttpResponse};
-use log::error;
-use uuid::Uuid;
-use crate::custom_sql_types::EntityTypeEnum;
 use crate::models::pipeline::PipelineData;
-use diesel::PgConnection;
+use crate::models::subscription::{
+    NewSubscription, SubscriptionData, SubscriptionDeleteParams, SubscriptionQuery,
+};
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
+use actix_web::{error::BlockingError, web, HttpResponse};
 use diesel::r2d2::ConnectionManager;
+use diesel::PgConnection;
+use log::error;
 use r2d2::PooledConnection;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
 /// Represents the part of a subscription that is received as a request body
 ///
 /// The mappings for creating/deleting a subscription expect the entity_id as a path param, the
 /// email as a part of the request body, and then the entity_type is inferred from the mapping.
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SubscriptionIncomplete {
     pub email: String,
 }
@@ -53,26 +55,26 @@ async fn find_by_id(
             Err(e) => Err(e),
         }
     })
-        .await
-        // If there is no error, return a response with the retrieved data
-        .map(|results| HttpResponse::Ok().json(results))
-        .map_err(|e| {
-            error!("{}", e);
-            match e {
-                // If no pipeline is found, return a 404
-                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No subscription found",
-                    status: 404,
-                    detail: "No subscription found with the specified ID",
-                }),
-                // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: "Error while attempting to retrieve requested subscription from DB",
-                }),
-            }
-        })?;
+    .await
+    // If there is no error, return a response with the retrieved data
+    .map(|results| HttpResponse::Ok().json(results))
+    .map_err(|e| {
+        error!("{}", e);
+        match e {
+            // If no pipeline is found, return a 404
+            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                title: "No subscription found",
+                status: 404,
+                detail: "No subscription found with the specified ID",
+            }),
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error",
+                status: 500,
+                detail: "Error while attempting to retrieve requested subscription from DB",
+            }),
+        }
+    })?;
 
     Ok(res)
 }
@@ -90,7 +92,7 @@ async fn create(
     id: String,
     email: String,
     entity_type: EntityTypeEnum,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Parse id into Uuid
     let entity_id = parse_id(&id)?;
@@ -108,15 +110,15 @@ async fn create(
     };
     // Insert in new thread
     let conn = pool.get().expect("Failed to get DB connection from pool");
-    let res = web::block(move || {
-        match SubscriptionData::create(&conn, new_subscription) {
+    let res = web::block(
+        move || match SubscriptionData::create(&conn, new_subscription) {
             Ok(subscription) => Ok(subscription),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
             }
-        }
-    })
+        },
+    )
     .await
     // If there is no error, return a response with the created subscription
     .map(|results| HttpResponse::Ok().json(results))
@@ -146,9 +148,15 @@ async fn create(
 async fn create_for_pipeline(
     id: web::Path<String>,
     web::Json(new_sub): web::Json<SubscriptionIncomplete>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    create(id.to_string(), new_sub.email, EntityTypeEnum::Pipeline, pool).await
+    create(
+        id.to_string(),
+        new_sub.email,
+        EntityTypeEnum::Pipeline,
+        pool,
+    )
+    .await
 }
 
 /// Handles POST requests to /templates/{id}/subscriptions for creating a subscription to a
@@ -165,9 +173,15 @@ async fn create_for_pipeline(
 async fn create_for_template(
     id: web::Path<String>,
     web::Json(new_sub): web::Json<SubscriptionIncomplete>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    create(id.to_string(), new_sub.email, EntityTypeEnum::Template, pool).await
+    create(
+        id.to_string(),
+        new_sub.email,
+        EntityTypeEnum::Template,
+        pool,
+    )
+    .await
 }
 
 /// Handles POST requests to /tests/{id}/subscriptions for creating a subscription to a
@@ -184,7 +198,7 @@ async fn create_for_template(
 async fn create_for_test(
     id: web::Path<String>,
     web::Json(new_sub): web::Json<SubscriptionIncomplete>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     create(id.to_string(), new_sub.email, EntityTypeEnum::Test, pool).await
 }
@@ -203,7 +217,7 @@ async fn delete(
     entity_id: String,
     email: String,
     entity_type: EntityTypeEnum,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let entity_id = parse_id(&entity_id)?;
     // Create SubscriptionDeleteParams from params
@@ -217,32 +231,28 @@ async fn delete(
     };
     // Delete in new thread
     let conn = pool.get().expect("Failed to get DB connection from pool");
-    let res = web::block(move || {
-        match SubscriptionData::delete(&conn, delete_query) {
+    let res = web::block(
+        move || match SubscriptionData::delete(&conn, delete_query) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
             }
-        }
-    })
+        },
+    )
     .await
     // If there is no error, verify that a row was deleted
     .map(|results| {
         if results > 0 {
             let message = format!("Successfully deleted {} row(s)", results);
-            HttpResponse::Ok().json(json!({
-                "message": message
-            }))
-        }
-        else {
+            HttpResponse::Ok().json(json!({ "message": message }))
+        } else {
             HttpResponse::NotFound().json(ErrorBody {
                 title: "No subscription found",
                 status: 404,
-                detail: "No subscription found for the specified parameters"
+                detail: "No subscription found for the specified parameters",
             })
         }
-
     })
     .map_err(|e| {
         error!("{}", e);
@@ -270,9 +280,15 @@ async fn delete(
 async fn delete_for_pipeline(
     id: web::Path<String>,
     web::Query(new_sub): web::Query<SubscriptionIncomplete>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    delete(id.to_string(), new_sub.email, EntityTypeEnum::Pipeline, pool).await
+    delete(
+        id.to_string(),
+        new_sub.email,
+        EntityTypeEnum::Pipeline,
+        pool,
+    )
+    .await
 }
 
 /// Handles DELETE requests to /templates/{id}/subscriptions for deleting a subscription to a
@@ -289,9 +305,15 @@ async fn delete_for_pipeline(
 async fn delete_for_template(
     id: web::Path<String>,
     web::Query(new_sub): web::Query<SubscriptionIncomplete>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    delete(id.to_string(), new_sub.email, EntityTypeEnum::Template, pool).await
+    delete(
+        id.to_string(),
+        new_sub.email,
+        EntityTypeEnum::Template,
+        pool,
+    )
+    .await
 }
 
 /// Handles DELETE requests to /tests/{id}/subscriptions for deleting a subscription to a
@@ -308,7 +330,7 @@ async fn delete_for_template(
 async fn delete_for_test(
     id: web::Path<String>,
     web::Query(new_sub): web::Query<SubscriptionIncomplete>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     delete(id.to_string(), new_sub.email, EntityTypeEnum::Test, pool).await
 }
@@ -324,7 +346,7 @@ async fn delete_for_test(
 /// Panics if attempting to connect to the database results in an error
 async fn find(
     query: SubscriptionQuery,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Query DB for subscriptions in new thread
     let res = web::block(move || {
@@ -338,29 +360,29 @@ async fn find(
             }
         }
     })
-        .await
-        .map(|results| {
-            // If there are no results, return a 404
-            if results.len() < 1 {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No subscriptions found",
-                    status: 404,
-                    detail: "No subscriptions found with the specified parameters",
-                })
-            } else {
-                // If there is no error, return a response with the retrieved data
-                HttpResponse::Ok().json(results)
-            }
-        })
-        .map_err(|e| {
-            error!("{}", e);
-            // If there is an error, return a 500
-            HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: "Error while attempting to retrieve requested subscription(s) from DB",
+    .await
+    .map(|results| {
+        // If there are no results, return a 404
+        if results.len() < 1 {
+            HttpResponse::NotFound().json(ErrorBody {
+                title: "No subscriptions found",
+                status: 404,
+                detail: "No subscriptions found with the specified parameters",
             })
-        })?;
+        } else {
+            // If there is no error, return a response with the retrieved data
+            HttpResponse::Ok().json(results)
+        }
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        // If there is an error, return a 500
+        HttpResponse::InternalServerError().json(ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: "Error while attempting to retrieve requested subscription(s) from DB",
+        })
+    })?;
 
     Ok(res)
 }
@@ -377,7 +399,7 @@ async fn find(
 /// Panics if attempting to connect to the database results in an error
 async fn find_for_any(
     web::Query(query): web::Query<SubscriptionQuery>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     find(query, pool).await
 }
@@ -396,7 +418,7 @@ async fn find_for_any(
 async fn find_for_pipeline(
     id: web::Path<String>,
     web::Query(mut query): web::Query<SubscriptionQuery>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let entity_id = parse_id(&id)?;
     // Fill in id and type in query
@@ -420,7 +442,7 @@ async fn find_for_pipeline(
 async fn find_for_template(
     id: web::Path<String>,
     web::Query(mut query): web::Query<SubscriptionQuery>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let entity_id = parse_id(&id)?;
     // Fill in id and type in query
@@ -444,7 +466,7 @@ async fn find_for_template(
 async fn find_for_test(
     id: web::Path<String>,
     web::Query(mut query): web::Query<SubscriptionQuery>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let entity_id = parse_id(&id)?;
     // Fill in id and type in query
@@ -464,7 +486,7 @@ fn validate_email(email: &str) -> Result<(), HttpResponse> {
             title: "Not a valid email address",
             status: 400,
             detail: "The value submitted for 'email' is not a valid email address",
-        }))
+        }));
     }
 
     Ok(())
@@ -485,7 +507,7 @@ fn parse_id(id: &str) -> Result<Uuid, HttpResponse> {
                 title: "ID formatted incorrectly",
                 status: 400,
                 detail: "ID must be formatted as a Uuid",
-            }))
+            }));
         }
     }
 }
@@ -497,30 +519,22 @@ fn parse_id(id: &str) -> Result<Uuid, HttpResponse> {
 async fn verify_existence(
     id: Uuid,
     conn: PooledConnection<ConnectionManager<PgConnection>>,
-    entity_type: EntityTypeEnum
+    entity_type: EntityTypeEnum,
 ) -> Result<(), HttpResponse> {
     // Verify the pipeline with this id exists
-    web::block(move || {
-        match entity_type {
-            EntityTypeEnum::Pipeline => {
-                match PipelineData::find_by_id(&conn, id) {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(e)
-                }
-            },
-            EntityTypeEnum::Template => {
-                match TemplateData::find_by_id(&conn, id) {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(e)
-                }
-            },
-            EntityTypeEnum::Test => {
-                match TestData::find_by_id(&conn, id) {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(e)
-                }
-            },
-        }
+    web::block(move || match entity_type {
+        EntityTypeEnum::Pipeline => match PipelineData::find_by_id(&conn, id) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        },
+        EntityTypeEnum::Template => match TemplateData::find_by_id(&conn, id) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        },
+        EntityTypeEnum::Test => match TestData::find_by_id(&conn, id) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        },
     })
     .await
     .map(|_| ())
@@ -532,23 +546,22 @@ async fn verify_existence(
                 let (title, detail) = match entity_type {
                     EntityTypeEnum::Pipeline => (
                         "No pipeline found",
-                        "No pipeline found with the specified ID"
+                        "No pipeline found with the specified ID",
                     ),
                     EntityTypeEnum::Template => (
                         "No template found",
-                        "No template found with the specified ID"
+                        "No template found with the specified ID",
                     ),
-                    EntityTypeEnum::Test => (
-                        "No test found",
-                        "No test found with the specified ID"
-                    ),
+                    EntityTypeEnum::Test => {
+                        ("No test found", "No test found with the specified ID")
+                    }
                 };
                 HttpResponse::NotFound().json(ErrorBody {
                     title,
                     status: 404,
                     detail,
                 })
-            },
+            }
             // For other errors, return a 500
             _ => {
                 let detail = match entity_type {
@@ -561,7 +574,7 @@ async fn verify_existence(
                     status: 500,
                     detail,
                 })
-            },
+            }
         }
     })
 }
@@ -589,30 +602,24 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route(web::post().to(create_for_test))
             .route(web::get().to(find_for_test)),
     );
-    cfg.service(
-        web::resource("/subscriptions")
-            .route(web::get().to(find_for_any)),
-    );
-    cfg.service(
-        web::resource("/subscriptions/{id}")
-            .route(web::get().to(find_by_id)),
-    );
+    cfg.service(web::resource("/subscriptions").route(web::get().to(find_for_any)));
+    cfg.service(web::resource("/subscriptions/{id}").route(web::get().to(find_by_id)));
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::models::pipeline::{PipelineData, NewPipeline};
-    use diesel::PgConnection;
-    use crate::models::template::{TemplateData, NewTemplate};
-    use uuid::Uuid;
-    use crate::models::test::{TestData, NewTest};
-    use crate::models::subscription::{SubscriptionData, NewSubscription};
+    use super::*;
     use crate::custom_sql_types::EntityTypeEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::subscription::{NewSubscription, SubscriptionData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_pool;
     use actix_web::{http, test, App};
-    use super::*;
-    use serde_json::{Value, json};
+    use diesel::PgConnection;
+    use serde_json::{json, Value};
+    use uuid::Uuid;
 
     fn create_test_pipeline(conn: &PgConnection) -> PipelineData {
         let new_pipeline = NewPipeline {
@@ -655,25 +662,28 @@ mod tests {
         let new_subscription1 = NewSubscription {
             entity_type: EntityTypeEnum::Pipeline,
             entity_id: new_pipeline.pipeline_id,
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
-        let new_subscription1 = SubscriptionData::create(conn, new_subscription1).expect("Failed to insert test subscription 1");
+        let new_subscription1 = SubscriptionData::create(conn, new_subscription1)
+            .expect("Failed to insert test subscription 1");
 
         let new_template = create_test_template(conn);
         let new_subscription2 = NewSubscription {
             entity_type: EntityTypeEnum::Template,
             entity_id: new_template.template_id,
-            email: String::from("Jonn@example.com")
+            email: String::from("Jonn@example.com"),
         };
-        let new_subscription2 = SubscriptionData::create(conn, new_subscription2).expect("Failed to insert test subscription 2");
+        let new_subscription2 = SubscriptionData::create(conn, new_subscription2)
+            .expect("Failed to insert test subscription 2");
 
         let new_test = create_test_test(conn);
         let new_subscription3 = NewSubscription {
             entity_type: EntityTypeEnum::Test,
             entity_id: new_test.test_id,
-            email: String::from("Louis@example.com")
+            email: String::from("Louis@example.com"),
         };
-        let new_subscription3 = SubscriptionData::create(conn, new_subscription3).expect("Failed to insert test subscription 3");
+        let new_subscription3 = SubscriptionData::create(conn, new_subscription3)
+            .expect("Failed to insert test subscription 3");
 
         [new_subscription1, new_subscription2, new_subscription3]
     }
@@ -687,7 +697,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/subscriptions/{}", subscriptions[0].subscription_id))
+            .uri(&format!(
+                "/subscriptions/{}",
+                subscriptions[0].subscription_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -719,7 +732,10 @@ mod tests {
 
         assert_eq!(error_body.title, "No subscription found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(error_body.detail, "No subscription found with the specified ID");
+        assert_eq!(
+            error_body.detail,
+            "No subscription found with the specified ID"
+        );
     }
 
     #[actix_rt::test]
@@ -730,7 +746,9 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get().uri("/subscriptions/123456789").to_request();
+        let req = test::TestRequest::get()
+            .uri("/subscriptions/123456789")
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
@@ -823,7 +841,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/subscriptions", new_subs[1].entity_id))
+            .uri(&format!(
+                "/templates/{}/subscriptions",
+                new_subs[1].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -894,7 +915,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/pipelines/{}/subscriptions", new_subs[0].entity_id))
+            .uri(&format!(
+                "/pipelines/{}/subscriptions",
+                new_subs[0].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1011,7 +1035,7 @@ mod tests {
         let new_test = create_test_test(&pool.get().unwrap());
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1037,7 +1061,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1055,10 +1079,7 @@ mod tests {
 
         assert_eq!(error_body.title, "No test found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(
-            error_body.detail,
-            "No test found with the specified ID"
-        );
+        assert_eq!(error_body.detail, "No test found with the specified ID");
     }
 
     #[actix_rt::test]
@@ -1068,7 +1089,7 @@ mod tests {
         let new_test = create_test_test(&pool.get().unwrap());
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("@example.com")
+            email: String::from("@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1097,7 +1118,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1115,10 +1136,7 @@ mod tests {
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(
-            error_body.detail,
-            "ID must be formatted as a Uuid"
-        );
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
@@ -1128,13 +1146,16 @@ mod tests {
         let new_template = create_test_template(&pool.get().unwrap());
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::post()
-            .uri(&format!("/templates/{}/subscriptions", new_template.template_id))
+            .uri(&format!(
+                "/templates/{}/subscriptions",
+                new_template.template_id
+            ))
             .set_json(&new_subscription)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1154,7 +1175,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1172,10 +1193,7 @@ mod tests {
 
         assert_eq!(error_body.title, "No template found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(
-            error_body.detail,
-            "No template found with the specified ID"
-        );
+        assert_eq!(error_body.detail, "No template found with the specified ID");
     }
 
     #[actix_rt::test]
@@ -1185,13 +1203,16 @@ mod tests {
         let new_template = create_test_template(&pool.get().unwrap());
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("@example.com")
+            email: String::from("@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::post()
-            .uri(&format!("/templates/{}/subscriptions", new_template.template_id))
+            .uri(&format!(
+                "/templates/{}/subscriptions",
+                new_template.template_id
+            ))
             .set_json(&new_subscription)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1214,7 +1235,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1232,10 +1253,7 @@ mod tests {
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(
-            error_body.detail,
-            "ID must be formatted as a Uuid"
-        );
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
@@ -1245,13 +1263,16 @@ mod tests {
         let new_pipeline = create_test_pipeline(&pool.get().unwrap());
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::post()
-            .uri(&format!("/pipelines/{}/subscriptions", new_pipeline.pipeline_id))
+            .uri(&format!(
+                "/pipelines/{}/subscriptions",
+                new_pipeline.pipeline_id
+            ))
             .set_json(&new_subscription)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1271,7 +1292,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1289,10 +1310,7 @@ mod tests {
 
         assert_eq!(error_body.title, "No pipeline found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(
-            error_body.detail,
-            "No pipeline found with the specified ID"
-        );
+        assert_eq!(error_body.detail, "No pipeline found with the specified ID");
     }
 
     #[actix_rt::test]
@@ -1302,13 +1320,16 @@ mod tests {
         let new_pipeline = create_test_pipeline(&pool.get().unwrap());
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("@example.com")
+            email: String::from("@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::post()
-            .uri(&format!("/pipelines/{}/subscriptions", new_pipeline.pipeline_id))
+            .uri(&format!(
+                "/pipelines/{}/subscriptions",
+                new_pipeline.pipeline_id
+            ))
             .set_json(&new_subscription)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1331,7 +1352,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let new_subscription = SubscriptionIncomplete {
-            email: String::from("Kevin@example.com")
+            email: String::from("Kevin@example.com"),
         };
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1349,10 +1370,7 @@ mod tests {
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(
-            error_body.detail,
-            "ID must be formatted as a Uuid"
-        );
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
@@ -1364,7 +1382,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/tests/{}/subscriptions?email=Louis%40example.com", new_subs[2].entity_id))
+            .uri(&format!(
+                "/tests/{}/subscriptions?email=Louis%40example.com",
+                new_subs[2].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1389,7 +1410,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/tests/{}/subscriptions?email=James%40example.com", new_subs[2].entity_id))
+            .uri(&format!(
+                "/tests/{}/subscriptions?email=James%40example.com",
+                new_subs[2].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1405,7 +1429,6 @@ mod tests {
             "No subscription found for the specified parameters"
         );
     }
-
 
     #[actix_rt::test]
     async fn delete_for_test_failure_bad_uuid() {
@@ -1425,10 +1448,7 @@ mod tests {
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(
-            error_body.detail,
-            "ID must be formatted as a Uuid"
-        );
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
@@ -1440,7 +1460,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/templates/{}/subscriptions?email=Jonn%40example.com", new_subs[1].entity_id))
+            .uri(&format!(
+                "/templates/{}/subscriptions?email=Jonn%40example.com",
+                new_subs[1].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1465,7 +1488,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/templates/{}/subscriptions?email=James%40example.com", new_subs[1].entity_id))
+            .uri(&format!(
+                "/templates/{}/subscriptions?email=James%40example.com",
+                new_subs[1].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1481,7 +1507,6 @@ mod tests {
             "No subscription found for the specified parameters"
         );
     }
-
 
     #[actix_rt::test]
     async fn delete_for_template_failure_bad_uuid() {
@@ -1501,10 +1526,7 @@ mod tests {
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(
-            error_body.detail,
-            "ID must be formatted as a Uuid"
-        );
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
@@ -1516,7 +1538,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/pipelines/{}/subscriptions?email=Kevin%40example.com", new_subs[0].entity_id))
+            .uri(&format!(
+                "/pipelines/{}/subscriptions?email=Kevin%40example.com",
+                new_subs[0].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1541,7 +1566,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/pipelines/{}/subscriptions?email=James%40example.com", new_subs[0].entity_id))
+            .uri(&format!(
+                "/pipelines/{}/subscriptions?email=James%40example.com",
+                new_subs[0].entity_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1557,7 +1585,6 @@ mod tests {
             "No subscription found for the specified parameters"
         );
     }
-
 
     #[actix_rt::test]
     async fn delete_for_pipeline_failure_bad_uuid() {
@@ -1577,9 +1604,6 @@ mod tests {
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(
-            error_body.detail,
-            "ID must be formatted as a Uuid"
-        );
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 }

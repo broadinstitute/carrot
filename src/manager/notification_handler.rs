@@ -4,16 +4,16 @@ use crate::models::run::RunWithResultData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::emailer;
-use log::{debug, error, info};
-use uuid::Uuid;
 use diesel::PgConnection;
-use std::fmt;
-use threadpool::ThreadPool;
+use log::{debug, error, info};
 use std::cmp::min;
+use std::collections::HashSet;
 use std::env;
+use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::collections::HashSet;
+use threadpool::ThreadPool;
+use uuid::Uuid;
 
 lazy_static! {
     // Number of threads to create in the threadpool for sending emails
@@ -63,7 +63,7 @@ impl From<serde_json::error::Error> for Error {
 /// run_id
 pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
     // Get run with result data
-    let run = RunWithResultData::find_by_id(conn,run_id)?;
+    let run = RunWithResultData::find_by_id(conn, run_id)?;
     // Get test
     let test = TestData::find_by_id(conn, run.test_id.clone())?;
     // Get subscriptions
@@ -79,7 +79,10 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
     }
 
     // Put together subject and message for emails
-    let subject = format!("Run {} completed for test {} with status {}", run.name, test.name, run.status);
+    let subject = format!(
+        "Run {} completed for test {} with status {}",
+        run.name, test.name, run.status
+    );
     let message = serde_json::to_string_pretty(&run)?;
 
     // Create a threadpool so we can send the emails in multiple threads
@@ -94,13 +97,16 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
         let subject_clone = subject.clone();
         let message_clone = message.clone();
         // Give the new thread a clone of the error boolean so it can set it to true if it fails
-        let email_error_clone  = email_error.clone();
+        let email_error_clone = email_error.clone();
         pool.execute(move || {
             debug!("Sending email to {}", &email_clone);
             // Attempt to send email, and log an error and mark the error boolean as true if it fails
             if let Err(e) = emailer::send_email(&email_clone, &subject_clone, &message_clone) {
-                error!("Failed to send email to {} with subject {} with the following error: {}", &email_clone, &subject_clone, e);
-                email_error_clone.store(true,Ordering::Relaxed);
+                error!(
+                    "Failed to send email to {} with subject {} with the following error: {}",
+                    &email_clone, &subject_clone, e
+                );
+                email_error_clone.store(true, Ordering::Relaxed);
             }
         })
     }
@@ -110,7 +116,10 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
 
     // If we saw an error, return an error
     if email_error.load(Ordering::SeqCst) {
-        return Err(Error::Email(format!("Encountered an error while attempting to send one or more emails for run {}", &run.run_id)));
+        return Err(Error::Email(format!(
+            "Encountered an error while attempting to send one or more emails for run {}",
+            &run.run_id
+        )));
     }
 
     Ok(())

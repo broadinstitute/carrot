@@ -1,7 +1,7 @@
 //! Contains functionality for sending notification emails to users for entities to which they've
 //! subscribed
 
-use lettre::{SmtpClient, Transport, smtp::authentication::Credentials, SendmailTransport};
+use lettre::{smtp::authentication::Credentials, SendmailTransport, SmtpClient, Transport};
 use lettre_email::EmailBuilder;
 use log::info;
 use std::env;
@@ -63,7 +63,7 @@ lazy_static! {
 pub enum EmailMode {
     Server,
     Sendmail,
-    None
+    None,
 }
 
 impl FromStr for EmailMode {
@@ -74,7 +74,7 @@ impl FromStr for EmailMode {
             "SERVER" => Ok(EmailMode::Server),
             "SENDMAIL" => Ok(EmailMode::Sendmail),
             "NONE" => Ok(EmailMode::None),
-            _ => Err(ParseEmailModeError)
+            _ => Err(ParseEmailModeError),
         }
     }
 }
@@ -148,7 +148,9 @@ pub fn send_email(address: &str, subject: &str, message: &str) -> Result<(), Sen
     match *EMAIL_MODE {
         EmailMode::Server => send_email_server_mode(address, subject, message),
         EmailMode::Sendmail => send_email_sendmail_mode(address, subject, message),
-        EmailMode::None => Err(SendEmailError::Config(String::from("Called send_email but EMAIL_MODE is None."))),
+        EmailMode::None => Err(SendEmailError::Config(String::from(
+            "Called send_email but EMAIL_MODE is None.",
+        ))),
     }
 }
 
@@ -159,7 +161,11 @@ pub fn send_email(address: &str, subject: &str, message: &str) -> Result<(), Sen
 /// domain of the mail server.  If values are provided in environment variables for
 /// `EMAIL_USERNAME` and `EMAIL_PASSWORD`, those will be used as credentials for connecting to the
 /// mail server
-fn send_email_server_mode(address: &str, subject: &str, message: &str) -> Result<(), SendEmailError> {
+fn send_email_server_mode(
+    address: &str,
+    subject: &str,
+    message: &str,
+) -> Result<(), SendEmailError> {
     // Set up email to send
     let email = EmailBuilder::new()
         .to(address)
@@ -174,7 +180,10 @@ fn send_email_server_mode(address: &str, subject: &str, message: &str) -> Result
 
     // If we have credentials, add those to the client setup
     if (*EMAIL_USERNAME).is_some() && (*EMAIL_PASSWORD).is_some() {
-        mailer = mailer.credentials(Credentials::new((*EMAIL_USERNAME).clone().unwrap(), (*EMAIL_PASSWORD).clone().unwrap()));
+        mailer = mailer.credentials(Credentials::new(
+            (*EMAIL_USERNAME).clone().unwrap(),
+            (*EMAIL_PASSWORD).clone().unwrap(),
+        ));
     }
 
     // Convert to transport to prepare to send
@@ -190,8 +199,12 @@ fn send_email_server_mode(address: &str, subject: &str, message: &str) -> Result
 ///
 /// Sends an email via the Sendmail utility to the address specified by `address` with `subject`
 /// and `message`. Uses the environment variable `EMAIL_FROM` for the `from` field.
-fn send_email_sendmail_mode(address: &str, subject: &str, message: &str) -> Result<(), SendEmailError> {
-// Set up email to send
+fn send_email_sendmail_mode(
+    address: &str,
+    subject: &str,
+    message: &str,
+) -> Result<(), SendEmailError> {
+    // Set up email to send
     let email = EmailBuilder::new()
         .to(address)
         .from((*EMAIL_FROM).clone().unwrap())

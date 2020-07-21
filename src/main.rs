@@ -38,7 +38,6 @@ use std::thread;
 embed_migrations!("migrations");
 
 fn main() {
-
     // Load environment variables from env file
     dotenv::from_filename(".env").ok();
     // Initializes logger with config from .env file
