@@ -339,7 +339,7 @@ fn fill_results(
     // Loop through template_results, check for each of the keys in outputs, and add them to list to write
     for template_result in template_results {
         // Check outputs for this result
-        match outputs.get(&*template_result.result_key) {
+        match outputs.get(&format!("merged_workflow.{}", template_result.result_key)) {
             // If we found it, add it to the list of results to write tot he DB
             Some(output) => {
                 let output = match output.as_str() {
@@ -475,8 +475,8 @@ mod tests {
         let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
         // Create results map
         let results_map = json!({
-            "TestKey": "TestVal",
-            "UnimportantKey": "Who Cares?"
+            "merged_workflow.TestKey": "TestVal",
+            "merged_workflow.UnimportantKey": "Who Cares?"
         });
         let results_map = results_map.as_object().unwrap().to_owned();
         // Fill results
@@ -507,8 +507,8 @@ mod tests {
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Succeeded",
           "outputs": {
-            "TestKey": "TestVal",
-            "UnimportantKey": "Who Cares?"
+            "merged_workflow.TestKey": "TestVal",
+            "merged_workflow.UnimportantKey": "Who Cares?"
           },
           "end": "2020-12-31T11:11:11.0000Z"
         });
