@@ -23,6 +23,7 @@ extern crate diesel_migrations;
 extern crate lazy_static;
 extern crate ctrlc;
 extern crate regex;
+extern crate threadpool;
 
 use actix_rt::System;
 use actix_web::client::Client;
@@ -48,14 +49,13 @@ fn main() {
     let port = env::var("PORT").expect("PORT environment variable not set");
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
     let db_threads = env::var("DB_THREADS").expect("DB_THREADS environment variable not set");
-    // Make sure we have values for EMAIL_DOMAIN and EMAIL_FROM because they will be necessary
-    // for the email notifications to work
-    env::var("EMAIL_DOMAIN").expect("EMAIL_DOMAIN variable not set");
-    env::var("EMAIL_FROM").expect("EMAIL_FROM variable not set");
     // Parse db_threads variable into an integer and terminate if unsuccessful
     let db_threads: u32 = db_threads
         .parse()
         .expect("DB_THREADS environment variable must be an integer");
+
+    // Make sure we have values for necessary email config variables
+    notifications::emailer::setup();
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));

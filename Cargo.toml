@@ -49,6 +49,8 @@ validator = "0.10.1"
 # For sending emails
 lettre = "0.9"
 lettre_email = "0.9"
+# For minor multithreading tasks
+threadpool = "1.0"
 
 [dev-dependencies]
 # For generating random values in test data

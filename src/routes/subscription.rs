@@ -612,7 +612,6 @@ mod tests {
     use crate::unit_test_util::get_test_db_pool;
     use actix_web::{http, test, App};
     use super::*;
-    use std::str::from_utf8;
     use serde_json::{Value, json};
 
     fn create_test_pipeline(conn: &PgConnection) -> PipelineData {

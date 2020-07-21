@@ -82,16 +82,21 @@ impl SubscriptionData {
         subscription.filter(subscription_id.eq(id)).first::<Self>(conn)
     }
 
-
+    /// Queries the DB for all subscriptions for the test for the specified id and subscriptions to
+    /// that test's parent template and pipeline
+    ///
+    /// Queries the DB using `conn` to retrieve all rows with either:
+    /// - An entity_type value of `Test` and an entity_id = `test_id`
+    /// - An entity_type value of `Template` and an entity_id = {test's template_id}
+    /// - An entity_type value of `Pipeline` and an entity_id = {test's template's pipeline_id}
     pub fn find_all_for_test(conn: &PgConnection, test_id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
         // Get pipeline and template ids for this test
         let (pipeline_id, template_id) = test::table
             .inner_join(template::table)
-            .filter(template::template_id.eq(test::template_id))
             .filter(test::test_id.eq(test_id))
             .select((
-                template::template_id,
-                template::pipeline_id
+                template::pipeline_id,
+                template::template_id
             ))
             .first::<(Uuid, Uuid)>(conn)?;
 
@@ -240,6 +245,10 @@ mod tests {
     use super::*;
     use crate::unit_test_util::*;
     use uuid::Uuid;
+    use crate::models::template::{TemplateData, NewTemplate};
+    use crate::models::test::{TestData, NewTest};
+    use crate::models::pipeline::{PipelineData, NewPipeline};
+    use std::cmp::Ordering;
 
     fn insert_test_subscription(conn: &PgConnection) -> SubscriptionData {
         let new_subscription = NewSubscription {
@@ -287,6 +296,82 @@ mod tests {
         subscriptions
     }
 
+    fn insert_test_subscriptions_with_entities(conn: &PgConnection) -> Vec<SubscriptionData> {
+        let pipeline = insert_test_pipeline(conn);
+        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
+        let test = insert_test_test_with_template_id(conn, template.template_id.clone());
+
+        let mut subscriptions = Vec::new();
+
+        let new_subscription = NewSubscription {
+            entity_type: EntityTypeEnum::Pipeline,
+            entity_id: pipeline.pipeline_id,
+            email: String::from("Kevin@example.com"),
+        };
+
+        subscriptions.push(
+            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+        );
+
+        let new_subscription = NewSubscription {
+            entity_type: EntityTypeEnum::Template,
+            entity_id: template.template_id,
+            email: String::from("Kevin@example.com"),
+        };
+
+        subscriptions.push(
+            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+        );
+
+        let new_subscription = NewSubscription {
+            entity_type: EntityTypeEnum::Test,
+            entity_id: test.test_id,
+            email: String::from("Kevin@example.com"),
+        };
+
+        subscriptions.push(
+            SubscriptionData::create(conn, new_subscription).expect("Failed inserting test subscription"),
+        );
+
+        subscriptions
+    }
+
+    fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+    }
+
+    fn insert_test_template_with_pipeline_id(conn: &PgConnection, id: Uuid) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: id,
+            description: None,
+            test_wdl: String::from(""),
+            eval_wdl: String::from(""),
+            created_by: None,
+        };
+
+        TemplateData::create(&conn, new_template).expect("Failed to insert test")
+    }
+
+    fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: id,
+            description: None,
+            test_input_defaults: None,
+            eval_input_defaults: None,
+            created_by: None,
+        };
+
+        TestData::create(&conn, new_test).expect("Failed to insert test")
+    }
+
     #[test]
     fn find_by_id_exists() {
         let conn = get_test_db_connection();
@@ -309,6 +394,42 @@ mod tests {
             nonexistent_subscription,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_all_for_test_success() {
+        let conn = get_test_db_connection();
+
+        let test_subscriptions = insert_test_subscriptions_with_entities(&conn);
+
+        let mut found_subscriptions = SubscriptionData::find_all_for_test(&conn, test_subscriptions[2].entity_id).unwrap();
+
+        assert_eq!(found_subscriptions.len(), 3);
+
+        found_subscriptions.sort_by(|a, b| {
+            match a.entity_type {
+                EntityTypeEnum::Pipeline => {
+                    Ordering::Less
+                },
+                EntityTypeEnum::Template => {
+                    match b.entity_type {
+                        EntityTypeEnum::Pipeline => {
+                            Ordering::Greater
+                        },
+                        _ => Ordering::Less
+                    }
+                },
+                _ => Ordering::Greater
+            }
+        });
+
+        assert_eq!(test_subscriptions[0].entity_id, found_subscriptions[0].entity_id);
+        assert_eq!(test_subscriptions[0].email, found_subscriptions[0].email);
+        assert_eq!(test_subscriptions[1].entity_id, found_subscriptions[1].entity_id);
+        assert_eq!(test_subscriptions[1].email, found_subscriptions[1].email);
+        assert_eq!(test_subscriptions[2].entity_id, found_subscriptions[2].entity_id);
+        assert_eq!(test_subscriptions[2].email, found_subscriptions[2].email);
+
     }
 
     #[test]
