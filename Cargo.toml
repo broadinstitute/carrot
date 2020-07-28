@@ -57,4 +57,7 @@ threadpool = "1.0"
 rand = "0.7.3"
 # For testing functions that make http requests
 mockito = "0.25.2"
+# For parsing test emails
+mailparse = "0.13.0"
+serde_bytes = "0.11"
 
