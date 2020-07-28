@@ -15,22 +15,11 @@ use std::sync::Arc;
 use threadpool::ThreadPool;
 use uuid::Uuid;
 
-lazy_static! {
-    // Number of threads to create in the threadpool for sending emails
-    static ref EMAIL_THREADS: usize = match env::var("EMAIL_THREADS") {
-        Ok(s) => s.parse::<usize>().expect("Failed to parse EMAIL_THREADS to usize"),
-        Err(_) => {
-            info!("No value specified for EMAIL_THREADS.  Defaulting to 4");
-            4
-        }
-    };
-}
-
 /// Enum of error types for sending notifications
 #[derive(Debug)]
 pub enum Error {
     DB(diesel::result::Error),
-    Email(String),
+    Email(emailer::SendEmailError),
     Json(serde_json::error::Error),
 }
 
@@ -50,6 +39,11 @@ impl std::error::Error for Error {}
 impl From<diesel::result::Error> for Error {
     fn from(e: diesel::result::Error) -> Error {
         Error::DB(e)
+    }
+}
+impl From<emailer::SendEmailError> for Error {
+    fn from(e: emailer::SendEmailError) -> Error {
+        Error::Email(e)
     }
 }
 impl From<serde_json::error::Error> for Error {
@@ -85,42 +79,8 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
     );
     let message = serde_json::to_string_pretty(&run)?;
 
-    // Create a threadpool so we can send the emails in multiple threads
-    let pool = ThreadPool::new(min(subs.len(), *EMAIL_THREADS));
-
-    // Keep track of whether any of the emails encountered an error
-    let email_error = Arc::new(AtomicBool::new(false));
-
-    // Send an email for each subscription
-    for address in email_addresses {
-        let email_clone = address.to_owned();
-        let subject_clone = subject.clone();
-        let message_clone = message.clone();
-        // Give the new thread a clone of the error boolean so it can set it to true if it fails
-        let email_error_clone = email_error.clone();
-        pool.execute(move || {
-            debug!("Sending email to {}", &email_clone);
-            // Attempt to send email, and log an error and mark the error boolean as true if it fails
-            if let Err(e) = emailer::send_email(&email_clone, &subject_clone, &message_clone) {
-                error!(
-                    "Failed to send email to {} with subject {} with the following error: {}",
-                    &email_clone, &subject_clone, e
-                );
-                email_error_clone.store(true, Ordering::Relaxed);
-            }
-        })
-    }
-
-    // Wait until we've sent all the emails
-    pool.join();
-
-    // If we saw an error, return an error
-    if email_error.load(Ordering::SeqCst) {
-        return Err(Error::Email(format!(
-            "Encountered an error while attempting to send one or more emails for run {}",
-            &run.run_id
-        )));
-    }
+    // Attempt to send email, and log an error and mark the error boolean as true if it fails
+    emailer::send_email(email_addresses.into_iter().collect(), &subject, &message)?;
 
     Ok(())
 }
@@ -160,7 +120,7 @@ mod tests {
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Pipeline,
             entity_id: pipeline.pipeline_id,
-            email: String::from(format!("{}{}@example.com", email_base_name, 0)),
+            email: String::from(format!("{}@example.com", email_base_name)),
         };
 
         SubscriptionData::create(conn, new_subscription)
@@ -169,7 +129,7 @@ mod tests {
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Template,
             entity_id: template.template_id,
-            email: String::from(format!("{}{}@example.com", email_base_name, 1)),
+            email: String::from(format!("{}@example.com", email_base_name)),
         };
 
         SubscriptionData::create(conn, new_subscription)
@@ -178,7 +138,7 @@ mod tests {
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Test,
             entity_id: test.test_id,
-            email: String::from(format!("{}{}@example.com", email_base_name, 2)),
+            email: String::from(format!("{}@example.com", email_base_name)),
         };
         SubscriptionData::create(conn, new_subscription)
                 .expect("Failed inserting test subscription");
@@ -230,7 +190,7 @@ mod tests {
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
             cromwell_job_id: Some(String::from("123456789")),
-            created_by: Some(String::from("test_send_run_complete_emails3@example.com")),
+            created_by: Some(String::from("test_send_run_complete_emails@example.com")),
             finished_at: None,
         };
 
@@ -251,43 +211,33 @@ mod tests {
         let new_run_with_results = RunWithResultData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
-        let mut email_paths = Vec::new();
+        // Make temporary directory for the email
+        let mut email_path = Builder::new()
+            .prefix("test_send_run_complete_emails")
+            .rand_bytes(0)
+            .tempdir_in(temp_dir())
+            .unwrap();
 
-        // Make temporary directories for the emails
-        for n in 0..4 {
-            email_paths.push(
-                Builder::new()
-                    .prefix(&format!("test_send_run_complete_emails{}", n))
-                    .rand_bytes(0)
-                    .tempdir_in(temp_dir())
-                    .unwrap()
-            );
-        }
-
-        // Send emails
+        // Send email
         send_run_complete_emails(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
 
-        // Verify that the emails were created correctly
-        for n in 0..4 {
-            let files_in_dir = read_dir(email_paths[n].path()).unwrap().collect::<Vec<std::io::Result<DirEntry>>>();
+        // Verify that the email was created correctly
+        let files_in_dir = read_dir(email_path.path()).unwrap().collect::<Vec<std::io::Result<DirEntry>>>();
 
-            assert_eq!(files_in_dir.len(), 1);
+        assert_eq!(files_in_dir.len(), 1);
 
-            let test_email_string = read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
-            let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
+        let test_email_string = read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
+        let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
 
-            assert_eq!(test_email.envelope.get("forward_path").unwrap().as_array().unwrap().get(0).unwrap(), &format!("test_send_run_complete_emails{}@example.com", n));
-            assert_eq!(test_email.envelope.get("reverse_path").unwrap(), "kevin@example.com");
+        assert_eq!(test_email.envelope.get("forward_path").unwrap().as_array().unwrap().get(0).unwrap(), "test_send_run_complete_emails@example.com");
+        assert_eq!(test_email.envelope.get("reverse_path").unwrap(), "kevin@example.com");
 
-            let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
+        let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
 
-            assert_eq!(parsed_mail.subparts[0].get_body().unwrap().trim(), test_message);
-            assert_eq!(parsed_mail.headers.get_first_value("Subject").unwrap(), test_subject);
-        }
+        assert_eq!(parsed_mail.subparts[0].get_body().unwrap().trim(), test_message);
+        assert_eq!(parsed_mail.headers.get_first_value("Subject").unwrap(), test_subject);
 
-        for n in 0..4 {
-            email_paths.pop().unwrap().close().unwrap();
-        }
+        email_path.close().unwrap();
 
     }
 

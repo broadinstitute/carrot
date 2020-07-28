@@ -29,7 +29,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
         * Emails can be configured to be sent in the following ways:
             * Using the local machine's `sendmail` utility, or
             * Using an SMTP mail server (either running your own, or using an existing mail service like GMail).
-        * Setting this up requires the use of a few configuration variables, which are list and explained in the `.env.example` file.
+        * Setting this up requires the use of a few configuration variables, which are listed and explained in the `.env.example` file.
         
 * A Dockerfile is provided in the `/scripts/docker` directory that can be used to run CARROT in a Docker container
     * The image can be built by running `docker build -f scripts/docker/Dockerfile .` from the project root.

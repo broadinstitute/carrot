@@ -151,14 +151,14 @@ pub fn setup() {
     lazy_static::initialize(&EMAIL_DOMAIN);
 }
 
-/// Sends an email to `address` with `subject` and `message`
+/// Sends an email bcc'd to `addresses` with `subject` and `message`
 ///
 /// Sends an email via an SMTP server if `EMAIL_MODE` is `Server`, via the Sendmail utility if the
 /// `EMAIL_MODE` is `Sendmail`, or returns an error if the `EMAIL_MODE` is `None`.
-pub fn send_email(address: &str, subject: &str, message: &str) -> Result<(), SendEmailError> {
+pub fn send_email(addresses: Vec<&str>, subject: &str, message: &str) -> Result<(), SendEmailError> {
 
     // Set up email to send
-    let email = build_email(address, subject, message)?;
+    let email = build_email(&addresses, subject, message)?;
 
     // Send email based on email mode
     #[cfg(not(test))]
@@ -177,22 +177,26 @@ pub fn send_email(address: &str, subject: &str, message: &str) -> Result<(), Sen
     // and the one above is for all others), so there is no actual syntax error here.
     #[cfg(test)]
     {
-        let dir: &str = address.split("@").collect::<Vec<&str>>()[0];
+        let dir: &str = addresses[0].split("@").collect::<Vec<&str>>()[0];
         send_email_test_mode(email, dir)
     }
 
 }
 
 /// Assembles and returns a lettre email based on `address`, `subject`, and `message`
-fn build_email(address: &str, subject: &str, message: &str) -> Result<Email, lettre_email::error::Error> {
+fn build_email(addresses: &Vec<&str>, subject: &str, message: &str) -> Result<Email, lettre_email::error::Error> {
 
     // Set up email to send
-    let email = EmailBuilder::new()
-        .to(address)
+    let mut email = EmailBuilder::new()
         .from((*EMAIL_FROM).clone().unwrap())
         .subject(subject)
-        .text(message)
-        .build()?;
+        .text(message);
+
+    for address in addresses {
+        email = email.bcc(*address)
+    }
+
+    let email = email.build()?;
 
     Ok(email)
 }
@@ -294,7 +298,7 @@ mod tests {
         let test_subject = "Test Subject";
         let test_message = "This is a test message";
 
-        if let Err(e) = send_email(test_address, test_subject, test_message){
+        if let Err(e) = send_email(vec![test_address], test_subject, test_message){
             panic!("Send email failed with error: {}", e);
         };
 
@@ -323,11 +327,11 @@ mod tests {
         std::env::set_var("EMAIL_MODE", "SENDMAIL");
         std::env::set_var("EMAIL_FROM", "kevin@example.com");
 
-        let test_address = "t@es@t_s@end_@email@example.com";
+        let test_addresses = vec!["t@es@t_s@end_@email@example.com"];
         let test_subject = "Test Subject";
         let test_message = "This is a test message";
 
-        match send_email(test_address, test_subject, test_message){
+        match send_email(test_addresses, test_subject, test_message){
             Err(e) => {
                 match e {
                     super::SendEmailError::Build(_) => {},
