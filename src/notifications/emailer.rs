@@ -1,15 +1,17 @@
 //! Contains functionality for sending notification emails to users for entities to which they've
 //! subscribed
 
-use lettre::{smtp::authentication::Credentials, SendmailTransport, SmtpClient, Transport, FileTransport};
-use lettre_email::{EmailBuilder, Email};
+#[cfg(test)]
+use lettre::FileTransport;
+use lettre::{smtp::authentication::Credentials, SendmailTransport, SmtpClient, Transport};
+use lettre_email::{Email, EmailBuilder};
 use log::info;
 use std::env;
+#[cfg(test)]
+use std::env::temp_dir;
 use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
-#[cfg(test)]
-use std::env::temp_dir;
 
 lazy_static! {
     // Get environment variable for the mode we'll use for sending mail
@@ -155,8 +157,11 @@ pub fn setup() {
 ///
 /// Sends an email via an SMTP server if `EMAIL_MODE` is `Server`, via the Sendmail utility if the
 /// `EMAIL_MODE` is `Sendmail`, or returns an error if the `EMAIL_MODE` is `None`.
-pub fn send_email(addresses: Vec<&str>, subject: &str, message: &str) -> Result<(), SendEmailError> {
-
+pub fn send_email(
+    addresses: Vec<&str>,
+    subject: &str,
+    message: &str,
+) -> Result<(), SendEmailError> {
     // Set up email to send
     let email = build_email(&addresses, subject, message)?;
 
@@ -180,12 +185,14 @@ pub fn send_email(addresses: Vec<&str>, subject: &str, message: &str) -> Result<
         let dir: &str = addresses[0].split("@").collect::<Vec<&str>>()[0];
         send_email_test_mode(email, dir)
     }
-
 }
 
 /// Assembles and returns a lettre email based on `address`, `subject`, and `message`
-fn build_email(addresses: &Vec<&str>, subject: &str, message: &str) -> Result<Email, lettre_email::error::Error> {
-
+fn build_email(
+    addresses: &Vec<&str>,
+    subject: &str,
+    message: &str,
+) -> Result<Email, lettre_email::error::Error> {
     // Set up email to send
     let mut email = EmailBuilder::new()
         .from((*EMAIL_FROM).clone().unwrap())
@@ -206,10 +213,7 @@ fn build_email(addresses: &Vec<&str>, subject: &str, message: &str) -> Result<Em
 /// Uses the environment variable `EMAIL_DOMAIN` for the domain of the mail server.  If values are
 /// provided in environment variables for `EMAIL_USERNAME` and `EMAIL_PASSWORD`, those will be
 /// used as credentials for connecting to the mail server
-fn send_email_server_mode(
-    email: Email
-) -> Result<(), SendEmailError> {
-
+fn send_email_server_mode(email: Email) -> Result<(), SendEmailError> {
     // Start to set up client for connecting to email server
     let mut mailer = SmtpClient::new_simple(&(*EMAIL_DOMAIN).clone().unwrap())
         .expect("Failed to create smtp client for sending email");
@@ -232,10 +236,7 @@ fn send_email_server_mode(
 }
 
 /// Sends email defined by `email` via the Sendmail utility.
-fn send_email_sendmail_mode(
-    email: Email
-) -> Result<(), SendEmailError> {
-
+fn send_email_sendmail_mode(email: Email) -> Result<(), SendEmailError> {
     // Create sendmail transport to prepare to send
     let mut mailer = SendmailTransport::new();
 
@@ -247,11 +248,7 @@ fn send_email_sendmail_mode(
 
 // Test function that prints email to file instead of sending it
 #[cfg(test)]
-fn send_email_test_mode(
-    email: Email,
-    dir: &str
-) -> Result<(), SendEmailError> {
-
+fn send_email_test_mode(email: Email, dir: &str) -> Result<(), SendEmailError> {
     let mut dir_path = temp_dir();
     dir_path.push(dir);
 
@@ -267,18 +264,18 @@ fn send_email_test_mode(
 #[cfg(test)]
 mod tests {
     use crate::notifications::emailer::send_email;
-    use tempfile::Builder;
-    use std::fs::{read_dir, DirEntry, read_to_string};
-    use serde_json::Value;
-    use serde::Deserialize;
     use mailparse::MailHeaderMap;
+    use serde::Deserialize;
+    use serde_json::Value;
     use std::env::temp_dir;
+    use std::fs::{read_dir, read_to_string, DirEntry};
+    use tempfile::Builder;
 
     #[derive(Deserialize)]
     struct ParsedEmailFile {
         envelope: Value,
         #[serde(with = "serde_bytes")]
-        message: Vec<u8>
+        message: Vec<u8>,
     }
 
     #[test]
@@ -298,25 +295,47 @@ mod tests {
         let test_subject = "Test Subject";
         let test_message = "This is a test message";
 
-        if let Err(e) = send_email(vec![test_address], test_subject, test_message){
+        if let Err(e) = send_email(vec![test_address], test_subject, test_message) {
             panic!("Send email failed with error: {}", e);
         };
 
         // Read the file
-        let files_in_dir = read_dir(dir_path.path()).unwrap().collect::<Vec<std::io::Result<DirEntry>>>();
+        let files_in_dir = read_dir(dir_path.path())
+            .unwrap()
+            .collect::<Vec<std::io::Result<DirEntry>>>();
 
         assert_eq!(files_in_dir.len(), 1);
 
-        let test_email_string = read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
+        let test_email_string =
+            read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
         let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
 
-        assert_eq!(test_email.envelope.get("forward_path").unwrap().as_array().unwrap().get(0).unwrap(), test_address);
-        assert_eq!(test_email.envelope.get("reverse_path").unwrap(), "kevin@example.com");
+        assert_eq!(
+            test_email
+                .envelope
+                .get("forward_path")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .get(0)
+                .unwrap(),
+            test_address
+        );
+        assert_eq!(
+            test_email.envelope.get("reverse_path").unwrap(),
+            "kevin@example.com"
+        );
 
         let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
 
-        assert_eq!(parsed_mail.subparts[0].get_body().unwrap().trim(), test_message);
-        assert_eq!(parsed_mail.headers.get_first_value("Subject").unwrap(), test_subject);
+        assert_eq!(
+            parsed_mail.subparts[0].get_body().unwrap().trim(),
+            test_message
+        );
+        assert_eq!(
+            parsed_mail.headers.get_first_value("Subject").unwrap(),
+            test_subject
+        );
 
         dir_path.close().unwrap();
     }
@@ -331,16 +350,12 @@ mod tests {
         let test_subject = "Test Subject";
         let test_message = "This is a test message";
 
-        match send_email(test_addresses, test_subject, test_message){
-            Err(e) => {
-                match e {
-                    super::SendEmailError::Build(_) => {},
-                    _ => panic!("Send email failed with unexpected error: {}", e)
-                }
+        match send_email(test_addresses, test_subject, test_message) {
+            Err(e) => match e {
+                super::SendEmailError::Build(_) => {}
+                _ => panic!("Send email failed with unexpected error: {}", e),
             },
-            _ => panic!("Send email succeeded unexpectedly")
+            _ => panic!("Send email succeeded unexpectedly"),
         }
     }
-
-
 }

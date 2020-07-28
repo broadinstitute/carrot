@@ -5,14 +5,8 @@ use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::emailer;
 use diesel::PgConnection;
-use log::{debug, error, info};
-use std::cmp::min;
 use std::collections::HashSet;
-use std::env;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use threadpool::ThreadPool;
 use uuid::Uuid;
 
 /// Enum of error types for sending notifications
@@ -87,31 +81,34 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use diesel::PgConnection;
-    use crate::models::subscription::{SubscriptionData, NewSubscription};
     use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum};
-    use crate::models::pipeline::{PipelineData, NewPipeline};
-    use uuid::Uuid;
-    use crate::models::template::{TemplateData, NewTemplate};
-    use crate::models::test::{TestData, NewTest};
-    use crate::models::run::{RunData, NewRun, RunWithResultData};
-    use crate::unit_test_util::get_test_db_pool;
-    use tempfile::{Builder, TempDir};
-    use std::env::temp_dir;
     use crate::manager::notification_handler::send_run_complete_emails;
-    use serde_json::{Value, json};
-    use std::fs::{read_dir, DirEntry, read_to_string};
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::subscription::{NewSubscription, SubscriptionData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
+    use crate::unit_test_util::get_test_db_pool;
+    use diesel::PgConnection;
     use mailparse::MailHeaderMap;
     use serde::Deserialize;
+    use serde_json::{json, Value};
+    use std::env::temp_dir;
+    use std::fs::{read_dir, read_to_string, DirEntry};
+    use tempfile::{Builder, TempDir};
+    use uuid::Uuid;
 
     #[derive(Deserialize)]
     struct ParsedEmailFile {
         envelope: Value,
         #[serde(with = "serde_bytes")]
-        message: Vec<u8>
+        message: Vec<u8>,
     }
 
-    fn insert_test_run_with_subscriptions_with_entities(conn: &PgConnection, email_base_name: &str) -> (RunData, TestData) {
+    fn insert_test_run_with_subscriptions_with_entities(
+        conn: &PgConnection,
+        email_base_name: &str,
+    ) -> (RunData, TestData) {
         let pipeline = insert_test_pipeline(conn);
         let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
         let test = insert_test_test_with_template_id(conn, template.template_id.clone());
@@ -141,7 +138,7 @@ mod tests {
             email: String::from(format!("{}@example.com", email_base_name)),
         };
         SubscriptionData::create(conn, new_subscription)
-                .expect("Failed inserting test subscription");
+            .expect("Failed inserting test subscription");
 
         (run, test)
     }
@@ -205,10 +202,17 @@ mod tests {
 
         let pool = get_test_db_pool();
 
-        let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(&pool.get().unwrap(), "test_send_run_complete_emails");
+        let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(
+            &pool.get().unwrap(),
+            "test_send_run_complete_emails",
+        );
 
-        let test_subject = format!("Run {} completed for test {} with status {}", &new_run.name, &new_test.name, &new_run.status);
-        let new_run_with_results = RunWithResultData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
+        let test_subject = format!(
+            "Run {} completed for test {} with status {}",
+            &new_run.name, &new_test.name, &new_run.status
+        );
+        let new_run_with_results =
+            RunWithResultData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
         // Make temporary directory for the email
@@ -222,23 +226,44 @@ mod tests {
         send_run_complete_emails(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
 
         // Verify that the email was created correctly
-        let files_in_dir = read_dir(email_path.path()).unwrap().collect::<Vec<std::io::Result<DirEntry>>>();
+        let files_in_dir = read_dir(email_path.path())
+            .unwrap()
+            .collect::<Vec<std::io::Result<DirEntry>>>();
 
         assert_eq!(files_in_dir.len(), 1);
 
-        let test_email_string = read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
+        let test_email_string =
+            read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
         let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
 
-        assert_eq!(test_email.envelope.get("forward_path").unwrap().as_array().unwrap().get(0).unwrap(), "test_send_run_complete_emails@example.com");
-        assert_eq!(test_email.envelope.get("reverse_path").unwrap(), "kevin@example.com");
+        assert_eq!(
+            test_email
+                .envelope
+                .get("forward_path")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .get(0)
+                .unwrap(),
+            "test_send_run_complete_emails@example.com"
+        );
+        assert_eq!(
+            test_email.envelope.get("reverse_path").unwrap(),
+            "kevin@example.com"
+        );
 
         let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
 
-        assert_eq!(parsed_mail.subparts[0].get_body().unwrap().trim(), test_message);
-        assert_eq!(parsed_mail.headers.get_first_value("Subject").unwrap(), test_subject);
+        assert_eq!(
+            parsed_mail.subparts[0].get_body().unwrap().trim(),
+            test_message
+        );
+        assert_eq!(
+            parsed_mail.headers.get_first_value("Subject").unwrap(),
+            test_subject
+        );
 
         email_path.close().unwrap();
-
     }
 
     #[test]
@@ -251,17 +276,17 @@ mod tests {
 
         // Send emails
         match send_run_complete_emails(&pool.get().unwrap(), Uuid::new_v4()) {
-            Err(e) => {
-                match e {
-                    super::Error::DB(_) => {}
-                    _ => panic!("Send run complete emails failed with unexpected error: {}", e)
-                }
+            Err(e) => match e {
+                super::Error::DB(_) => {}
+                _ => panic!(
+                    "Send run complete emails failed with unexpected error: {}",
+                    e
+                ),
             },
             _ => {
                 panic!("Send run complete emails succeeded unexpectedly");
             }
         }
-
     }
 
     #[test]
@@ -272,21 +297,23 @@ mod tests {
 
         let pool = get_test_db_pool();
 
-        let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(&pool.get().unwrap(), "test_send_run_complete_emails@");
+        let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(
+            &pool.get().unwrap(),
+            "test_send_run_complete_emails@",
+        );
 
         // Send emails
         match send_run_complete_emails(&pool.get().unwrap(), new_run.run_id.clone()) {
-            Err(e) => {
-                match e {
-                    super::Error::Email(_) => {}
-                    _ => panic!("Send run complete emails failed with unexpected error: {}", e)
-                }
+            Err(e) => match e {
+                super::Error::Email(_) => {}
+                _ => panic!(
+                    "Send run complete emails failed with unexpected error: {}",
+                    e
+                ),
             },
             _ => {
                 panic!("Send run complete emails succeeded unexpectedly");
             }
         }
-
     }
-
 }
