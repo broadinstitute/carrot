@@ -110,6 +110,67 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    software(software_id) {
+        software_id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        repository_url -> Text,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    template_software(template_id, software_id) {
+        template_id -> Uuid,
+        software_id -> Uuid,
+        image_key -> Text,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    software_version(software_version_id) {
+        software_version_id -> Uuid,
+        software_id -> Uuid,
+        commit -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    run_software_version(run_id, software_version_id) {
+        run_id -> Uuid,
+        software_version_id -> Uuid,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::custom_sql_types::Build_status_enum;
+
+    software_build(software_build_id) {
+        software_build_id -> Uuid,
+        software_version_id -> Uuid,
+        cromwell_job_id -> Nullable<Text>,
+        status -> Build_status_enum,
+        image_url -> Nullable<Text>,
+        created_at -> Timestamptz,
+        finished_at -> Nullable<Timestamptz>,
+    }
+}
+
 joinable!(run -> run_id_with_results(run_id));
 
 allow_tables_to_appear_in_same_query!(
