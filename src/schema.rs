@@ -175,7 +175,7 @@ table! {
     software_build(software_build_id) {
         software_build_id -> Uuid,
         software_version_id -> Uuid,
-        cromwell_job_id -> Nullable<Text>,
+        build_id -> Nullable<Text>,
         status -> Build_status_enum,
         image_url -> Nullable<Text>,
         created_at -> Timestamptz,

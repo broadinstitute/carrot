@@ -44,7 +44,7 @@ impl fmt::Display for RunStatusEnum {
 /// Maps to the custom type `build_status_enum` in the DB
 ///
 /// Represents the enum used in the DB for storing the status of a run
-#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 #[DieselType = "Build_status_enum"]
 pub enum BuildStatusEnum {

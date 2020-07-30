@@ -12,7 +12,7 @@ create table software(
     software_id uuid primary key DEFAULT uuid_generate_v4(),
     name text not null unique,
     description text,
-    repository_url text not null,
+    repository_url text not null unique,
     created_at timestamptz not null default current_timestamp,
     created_by text
 );
@@ -36,7 +36,7 @@ create table software_version(
 create table software_build(
      software_build_id uuid primary key default uuid_generate_v4(),
      software_version_id uuid not null references software_version(software_version_id),
-     cromwell_job_id text,
+     build_id text,
      status build_status_enum not null,
      image_url text,
      created_at timestamptz not null default current_timestamp,
