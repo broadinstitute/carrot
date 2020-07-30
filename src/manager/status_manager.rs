@@ -7,6 +7,7 @@
 
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db::DbPool;
+use crate::manager::notification_handler;
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_result::{NewRunResult, RunResultData};
 use crate::models::template_result::TemplateResultData;
@@ -27,6 +28,7 @@ use std::time::{Duration, Instant};
 enum UpdateStatusError {
     DB(String),
     Cromwell(String),
+    Notification(notification_handler::Error),
 }
 
 impl fmt::Display for UpdateStatusError {
@@ -34,11 +36,18 @@ impl fmt::Display for UpdateStatusError {
         match self {
             UpdateStatusError::DB(e) => write!(f, "UpdateStatusError DB {}", e),
             UpdateStatusError::Cromwell(e) => write!(f, "UpdateStatusError Cromwell {}", e),
+            UpdateStatusError::Notification(e) => write!(f, "UpdateStatusError Notification {}", e),
         }
     }
 }
 
 impl Error for UpdateStatusError {}
+
+impl From<notification_handler::Error> for UpdateStatusError {
+    fn from(e: notification_handler::Error) -> UpdateStatusError {
+        UpdateStatusError::Notification(e)
+    }
+}
 
 #[derive(Debug)]
 pub struct StatusManagerError {
@@ -285,6 +294,11 @@ async fn check_and_update_status(
                 };
                 return Err(e);
             }
+        }
+        // If it ended, send notification emails
+        if &*status == "succeeded" || &*status == "failed" || &*status == "aborted" {
+            #[cfg(not(test))] // Skip the email step when testing
+            notification_handler::send_run_complete_emails(conn, run.run_id)?;
         }
     }
 

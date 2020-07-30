@@ -5,6 +5,7 @@ mod db;
 mod error_body;
 mod manager;
 mod models;
+mod notifications;
 mod requests;
 mod routes;
 mod schema;
@@ -22,6 +23,7 @@ extern crate diesel_migrations;
 extern crate lazy_static;
 extern crate ctrlc;
 extern crate regex;
+extern crate threadpool;
 
 use actix_rt::System;
 use actix_web::client::Client;
@@ -50,6 +52,9 @@ fn main() {
     let db_threads: u32 = db_threads
         .parse()
         .expect("DB_THREADS environment variable must be an integer");
+
+    // Make sure we have values for necessary email config variables
+    notifications::emailer::setup();
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));

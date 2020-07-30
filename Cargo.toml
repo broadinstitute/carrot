@@ -44,10 +44,20 @@ regex = "1"
 futures = "0.3.5"
 # To handle CTRL-C(SIGINT) signals
 ctrlc = "3.1.4"
+# For validating user input (particularly email addresses)
+validator = "0.10.1"
+# For sending emails
+lettre = "0.9"
+lettre_email = "0.9"
+# For minor multithreading tasks
+threadpool = "1.0"
 
 [dev-dependencies]
 # For generating random values in test data
 rand = "0.7.3"
 # For testing functions that make http requests
 mockito = "0.25.2"
+# For parsing test emails
+mailparse = "0.13.0"
+serde_bytes = "0.11"
 

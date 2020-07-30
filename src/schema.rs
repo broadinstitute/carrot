@@ -112,7 +112,19 @@ table! {
 
 table! {
     use diesel::sql_types::*;
+    use crate::custom_sql_types::Entity_type_enum;
 
+    subscription(subscription_id) {
+        subscription_id -> Uuid,
+        entity_type -> Entity_type_enum,
+        entity_id -> Uuid,
+        email -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
     software(software_id) {
         software_id -> Uuid,
         name -> Text,
@@ -125,7 +137,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-
     template_software(template_id, software_id) {
         template_id -> Uuid,
         software_id -> Uuid,
@@ -145,6 +156,7 @@ table! {
         created_at -> Timestamptz,
     }
 }
+
 
 table! {
     use diesel::sql_types::*;
@@ -172,6 +184,7 @@ table! {
 }
 
 joinable!(run -> run_id_with_results(run_id));
+joinable!(test -> template(template_id));
 
 allow_tables_to_appear_in_same_query!(
     pipeline,

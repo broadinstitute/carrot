@@ -76,7 +76,7 @@ impl PipelineData {
 
     /// Queries the DB for pipelines matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve pipelines matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve pipelines matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved pipelines as PipelineData
     /// instances or an error if the query fails for some reason
     pub fn find(

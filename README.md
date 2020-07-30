@@ -25,6 +25,12 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
             * Alternatively, these tables and types will all be created when running CARROT for the first time
     * Once Rust is installed, the project can be built using the `cargo build` command in the project directory.
         * Building for release can be done using `cargo build --release`
+    * CARROT supports the option of sending email notifications to subscribed users upon completion of a test run.  
+        * Emails can be configured to be sent in the following ways:
+            * Using the local machine's `sendmail` utility, or
+            * Using an SMTP mail server (either running your own, or using an existing mail service like GMail).
+        * Setting this up requires the use of a few configuration variables, which are listed and explained in the `.env.example` file.
+        
 * A Dockerfile is provided in the `/scripts/docker` directory that can be used to run CARROT in a Docker container
     * The image can be built by running `docker build -f scripts/docker/Dockerfile .` from the project root.
     * For development purposes, the `docker-compose.yml` file can be used to run CARROT with a PostreSQL server and a Cromwell server in their own containers.  This can be done using `docker-compose up` within that directory.
