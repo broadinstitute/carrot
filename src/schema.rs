@@ -110,7 +110,21 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+    use crate::custom_sql_types::Entity_type_enum;
+
+    subscription(subscription_id) {
+        subscription_id -> Uuid,
+        entity_type -> Entity_type_enum,
+        entity_id -> Uuid,
+        email -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
 joinable!(run -> run_id_with_results(run_id));
+joinable!(test -> template(template_id));
 
 allow_tables_to_appear_in_same_query!(
     pipeline,
