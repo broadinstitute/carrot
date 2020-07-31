@@ -175,7 +175,7 @@ table! {
     software_build(software_build_id) {
         software_build_id -> Uuid,
         software_version_id -> Uuid,
-        build_id -> Nullable<Text>,
+        build_job_id -> Nullable<Text>,
         status -> Build_status_enum,
         image_url -> Nullable<Text>,
         created_at -> Timestamptz,
@@ -195,4 +195,10 @@ allow_tables_to_appear_in_same_query!(
     template_result,
     test,
     run_id_with_results,
+    software,
+    software_version,
+    software_build,
+    template_software,
+    run_software_version,
+    subscription,
 );

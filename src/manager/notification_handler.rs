@@ -95,7 +95,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::env::temp_dir;
     use std::fs::{read_dir, read_to_string, DirEntry};
-    use tempfile::{Builder, TempDir};
+    use tempfile::Builder;
     use uuid::Uuid;
 
     #[derive(Deserialize)]
@@ -216,7 +216,7 @@ mod tests {
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
         // Make temporary directory for the email
-        let mut email_path = Builder::new()
+        let email_path = Builder::new()
             .prefix("test_send_run_complete_emails")
             .rand_bytes(0)
             .tempdir_in(temp_dir())
@@ -297,7 +297,7 @@ mod tests {
 
         let pool = get_test_db_pool();
 
-        let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(
+        let (new_run, _) = insert_test_run_with_subscriptions_with_entities(
             &pool.get().unwrap(),
             "test_send_run_complete_emails@",
         );

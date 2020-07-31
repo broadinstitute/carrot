@@ -36,7 +36,7 @@ create table software_version(
 create table software_build(
      software_build_id uuid primary key default uuid_generate_v4(),
      software_version_id uuid not null references software_version(software_version_id),
-     build_id text,
+     build_job_id text,
      status build_status_enum not null,
      image_url text,
      created_at timestamptz not null default current_timestamp,

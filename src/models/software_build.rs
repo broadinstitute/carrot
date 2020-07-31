@@ -4,8 +4,6 @@
 //! status of the build process and a url pointing to the image location. Represented in the 
 //! database by the SOFTWARE_BUILD table.
 
-use crate::models::software_version::SoftwareVersionData;
-use crate::schema::software_version;
 use crate::schema::software_build;
 use crate::schema::software_build::dsl::*;
 use crate::util;
@@ -22,7 +20,7 @@ use crate::custom_sql_types::BuildStatusEnum;
 pub struct SoftwareBuildData {
     pub software_build_id: Uuid,
     pub software_version_id: Uuid,
-    pub build_id: Option<String>,
+    pub build_job_id: Option<String>,
     pub status: BuildStatusEnum,
     pub image_url: Option<String>,
     pub created_at: NaiveDateTime,
@@ -38,7 +36,7 @@ pub struct SoftwareBuildData {
 pub struct SoftwareBuildQuery {
     pub software_build_id: Option<Uuid>,
     pub software_version_id: Option<Uuid>,
-    pub build_id: Option<String>,
+    pub build_job_id: Option<String>,
     pub status: Option<BuildStatusEnum>,
     pub image_url: Option<String>,
     pub created_before: Option<NaiveDateTime>,
@@ -52,13 +50,13 @@ pub struct SoftwareBuildQuery {
 
 /// A new software_build to be inserted into the DB
 ///
-/// status and software_version_id are required fields, but build_id, image_url, and finished_at
+/// status and software_version_id are required fields, but build_job_id, image_url, and finished_at
 /// are not, so can be filled with `None`; software_build_id and created_at are populated automatically
 /// by the DB
 #[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "software_build"]
 pub struct NewSoftwareBuild {
-    pub build_id: Option<String>,
+    pub build_job_id: Option<String>,
     pub software_version_id: Uuid,
     pub status: BuildStatusEnum,
     pub image_url: Option<String>,
@@ -67,14 +65,14 @@ pub struct NewSoftwareBuild {
 
 /// Represents fields to change when updating a software build
 ///
-/// Only build_id, status, image_url, and finished_at can be modified after the software build has
+/// Only build_job_id, status, image_url, and finished_at can be modified after the software build has
 /// been created
 #[derive(Deserialize, Serialize, AsChangeset, Debug)]
 #[table_name = "software_build"]
 pub struct SoftwareBuildChangeset {
     pub image_url: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
-    pub build_id: Option<String>,
+    pub build_job_id: Option<String>,
     pub status: Option<BuildStatusEnum>,
 }
 
@@ -108,8 +106,8 @@ impl SoftwareBuildData {
         if let Some(param) = params.software_version_id {
             query = query.filter(software_version_id.eq(param));
         }
-        if let Some(param) = params.build_id {
-            query = query.filter(build_id.eq(param));
+        if let Some(param) = params.build_job_id {
+            query = query.filter(build_job_id.eq(param));
         }
         if let Some(param) = params.status {
             query = query.filter(status.eq(param));
@@ -149,11 +147,11 @@ impl SoftwareBuildData {
                             query = query.then_order_by(software_version_id.desc());
                         }
                     }
-                    "build_id" => {
+                    "build_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(build_id.asc());
+                            query = query.then_order_by(build_job_id.asc());
                         } else {
-                            query = query.then_order_by(build_id.desc());
+                            query = query.then_order_by(build_job_id.desc());
                         }
                     }
                     "image_url" => {
@@ -259,7 +257,7 @@ mod tests {
 
         let new_software_build = NewSoftwareBuild {
             software_version_id: new_software_version.software_version_id,
-            build_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
+            build_job_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
             status: BuildStatusEnum::Submitted,
             image_url: None,
             finished_at: None,
@@ -312,7 +310,7 @@ mod tests {
 
         let new_software_build = NewSoftwareBuild {
             software_version_id: ids[0].clone(),
-            build_id: Some(String::from("f80efebf-f3a1-4764-afe4-1f920f532a06")),
+            build_job_id: Some(String::from("f80efebf-f3a1-4764-afe4-1f920f532a06")),
             status: BuildStatusEnum::Succeeded,
             image_url: Some(String::from("example.com/example/example")),
             finished_at: Some(Utc::now().naive_utc()),
@@ -324,7 +322,7 @@ mod tests {
 
         let new_software_build = NewSoftwareBuild {
             software_version_id: ids[1].clone(),
-            build_id: Some(String::from("75845b99-664f-4ec8-8922-7ac5e5e21354")),
+            build_job_id: Some(String::from("75845b99-664f-4ec8-8922-7ac5e5e21354")),
             status: BuildStatusEnum::Starting,
             image_url: None,
             finished_at: None,
@@ -336,7 +334,7 @@ mod tests {
 
         let new_software_build = NewSoftwareBuild {
             software_version_id: ids[1].clone(),
-            build_id: Some(String::from("24c8ec49-82bd-4581-a942-32299d0c9022")),
+            build_job_id: Some(String::from("24c8ec49-82bd-4581-a942-32299d0c9022")),
             status: BuildStatusEnum::Running,
             image_url: None,
             finished_at: None,
@@ -383,7 +381,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: Some(test_software_build.software_build_id),
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: None,
             created_before: None,
@@ -412,7 +410,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: Some(test_software_build.software_version_id),
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: None,
             created_before: None,
@@ -432,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn find_with_build_id() {
+    fn find_with_build_job_id() {
         let conn = get_test_db_connection();
 
         let (_, test_software_builds) = insert_software_builds_with_versions(&conn);
@@ -440,7 +438,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: test_software_builds[0].build_id.clone(),
+            build_job_id: test_software_builds[0].build_job_id.clone(),
             status: None,
             image_url: None,
             created_before: None,
@@ -468,7 +466,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: Some(test_software_builds[0].status.clone()),
             image_url: None,
             created_before: None,
@@ -496,7 +494,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: test_software_builds[0].image_url.clone(),
             created_before: None,
@@ -525,7 +523,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: None,
             created_before: None,
@@ -547,7 +545,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: None,
             created_before: None,
@@ -575,7 +573,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: None,
             created_before: None,
@@ -595,7 +593,7 @@ mod tests {
         let test_query = SoftwareBuildQuery {
             software_build_id: None,
             software_version_id: None,
-            build_id: None,
+            build_job_id: None,
             status: None,
             image_url: None,
             created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
@@ -619,7 +617,7 @@ mod tests {
 
         let test_software_build = insert_test_software_build(&conn);
 
-        assert_eq!(test_software_build.build_id.unwrap(), "ca92ed46-cb1e-4486-b8ff-fc48d7771e67");
+        assert_eq!(test_software_build.build_job_id.unwrap(), "ca92ed46-cb1e-4486-b8ff-fc48d7771e67");
         assert_eq!(test_software_build.status, BuildStatusEnum::Submitted);
     }
 
@@ -629,12 +627,10 @@ mod tests {
 
         let test_software_build = insert_test_software_build(&conn);
 
-        let finished_at_val = Utc::now().naive_utc();
-
         let changes = SoftwareBuildChangeset {
             image_url: Some(String::from("example.com/kevin")),
-            finished_at: Some(finished_at_val.clone()),
-            build_id: None,
+            finished_at: None,
+            build_job_id: None,
             status: Some(BuildStatusEnum::Succeeded),
         };
 
@@ -643,6 +639,5 @@ mod tests {
 
         assert_eq!(updated_software_build.image_url, Some(String::from("example.com/kevin")));
         assert_eq!(updated_software_build.status, BuildStatusEnum::Succeeded);
-        assert_eq!(updated_software_build.finished_at, Some(finished_at_val));
     }
 }
