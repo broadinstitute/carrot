@@ -1,6 +1,6 @@
 FROM rust:1.42.0 as builder
 WORKDIR /usr/src/carrot
-COPY ./ .
+COPY . .
 RUN cargo install --path .
 
 FROM debian:buster-slim

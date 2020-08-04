@@ -1,10 +1,10 @@
-create type build_status_enum as enum('aborted', 'expired', 'failed', 'queued_in_cromwell', 'running', 'starting', 'submitted', 'succeeded', 'waiting_for_queue_space');
+create type build_status_enum as enum('aborted', 'created', 'expired', 'failed', 'queued_in_cromwell', 'running', 'starting', 'submitted', 'succeeded', 'waiting_for_queue_space');
 
 -- Adding the 'building' status is a bit involved because the enum needs to be replaced
 -- (Diesel runs these in a transaction, and postgres won't let you add values to a type in a transaction)
 -- (Also taking this opportunity to reorder the run_status_enum values)
 alter type run_status_enum rename to old_run_status_enum;
-create type run_status_enum as enum('aborted', 'building', 'failed', 'queued_in_cromwell', 'running', 'starting', 'submitted', 'succeeded', 'waiting_for_queue_space');
+create type run_status_enum as enum('aborted', 'building', 'created', 'failed', 'queued_in_cromwell', 'running', 'starting', 'submitted', 'succeeded', 'waiting_for_queue_space');
 alter table run alter column status type run_status_enum using (status::text::run_status_enum);
 drop type old_run_status_enum;
 

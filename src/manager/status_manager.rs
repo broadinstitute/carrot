@@ -216,36 +216,43 @@ async fn check_and_update_status(
             "running" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::Running),
+                cromwell_job_id: None,
                 finished_at: None,
             },
             "starting" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::Starting),
+                cromwell_job_id: None,
                 finished_at: None,
             },
             "queuedincromwell" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::QueuedInCromwell),
+                cromwell_job_id: None,
                 finished_at: None,
             },
             "waitingforqueuespace" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::WaitingForQueueSpace),
+                cromwell_job_id: None,
                 finished_at: None,
             },
             "succeeded" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::Succeeded),
+                cromwell_job_id: None,
                 finished_at: Some(get_end(&metadata)?),
             },
             "failed" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::Failed),
+                cromwell_job_id: None,
                 finished_at: Some(get_end(&metadata)?),
             },
             "aborted" => RunChangeset {
                 name: None,
                 status: Some(RunStatusEnum::Aborted),
+                cromwell_job_id: None,
                 finished_at: Some(get_end(&metadata)?),
             },
             _ => {
@@ -281,6 +288,7 @@ async fn check_and_update_status(
                 let run_update = RunChangeset {
                     name: None,
                     status: Some(RunStatusEnum::Failed),
+                    cromwell_job_id: None,
                     finished_at: None,
                 };
                 match RunData::update(conn, run.run_id.clone(), run_update) {

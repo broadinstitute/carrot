@@ -378,8 +378,14 @@ mod tests {
 
         // Sort test data by run_id so we know the order to compare
         test_run_software_versions.sort_by(|a, b|  {
-            return if a.run_id <= b.run_id {
+            return if a.run_id > b.run_id {
                 Ordering::Less
+            } else if a.run_id == b.run_id {
+                if a.software_version_id < b.software_version_id {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
             } else {
                 Ordering::Greater
             }
@@ -390,7 +396,7 @@ mod tests {
             software_version_id: None,
             created_before: None,
             created_after: None,
-            sort: Some(String::from("desc(run_id)")),
+            sort: Some(String::from("desc(run_id),software_version_id")),
             limit: Some(2),
             offset: Some(0),
         };
@@ -399,7 +405,7 @@ mod tests {
             RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 2);
-        assert_eq!(found_run_software_versions[0], test_run_software_versions[2]);
+        assert_eq!(found_run_software_versions[0], test_run_software_versions[0]);
         assert_eq!(found_run_software_versions[1], test_run_software_versions[1]);
 
         let test_query = RunSoftwareVersionQuery {
@@ -407,7 +413,7 @@ mod tests {
             software_version_id: None,
             created_before: None,
             created_after: None,
-            sort: Some(String::from("desc(run_id)")),
+            sort: Some(String::from("desc(run_id),software_version_id")),
             limit: Some(2),
             offset: Some(2),
         };
@@ -416,7 +422,7 @@ mod tests {
             RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 1);
-        assert_eq!(found_run_software_versions[0], test_run_software_versions[0]);
+        assert_eq!(found_run_software_versions[0], test_run_software_versions[2]);
     }
 
     #[test]

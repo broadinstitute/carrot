@@ -102,6 +102,7 @@ pub struct NewRun {
 pub struct RunChangeset {
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
+    pub cromwell_job_id: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
 }
 
@@ -1175,6 +1176,7 @@ mod tests {
         let changes = RunChangeset {
             name: Some(String::from("TestTestTestTest")),
             status: Some(RunStatusEnum::Failed),
+            cromwell_job_id: None,
             finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
         };
 
@@ -1198,6 +1200,7 @@ mod tests {
         let changes = RunChangeset {
             name: Some(test_runs[0].name.clone()),
             status: None,
+            cromwell_job_id: None,
             finished_at: None,
         };
 

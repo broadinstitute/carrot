@@ -23,6 +23,7 @@ pub enum RunStatusEnum {
     QueuedInCromwell,
     WaitingForQueueSpace,
     Building,
+    Created,
 }
 
 impl fmt::Display for RunStatusEnum {
@@ -37,6 +38,7 @@ impl fmt::Display for RunStatusEnum {
             RunStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
             RunStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
             RunStatusEnum::Building => write!(f, "building"),
+            RunStatusEnum::Created => write!(f, "created"),
         }
     }
 }
@@ -57,6 +59,7 @@ pub enum BuildStatusEnum {
     QueuedInCromwell,
     WaitingForQueueSpace,
     Expired,
+    Created,
 }
 
 impl fmt::Display for BuildStatusEnum {
@@ -71,6 +74,7 @@ impl fmt::Display for BuildStatusEnum {
             BuildStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
             BuildStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
             BuildStatusEnum::Expired => write!(f, "expired"),
+            BuildStatusEnum::Created => write!(f, "created"),
         }
     }
 }

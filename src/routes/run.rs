@@ -22,6 +22,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
+use crate::manager::test_runner;
+use actix_web::http::StatusCode;
+use actix_web::dev::HttpResponseBuilder;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -394,6 +397,21 @@ async fn run_for_test(
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
 ) -> Result<HttpResponse, actix_web::Error> {
+    // Get DB connection
+    let conn = pool
+        .get()
+        .expect("Failed to get DB connection from pool");
+    // TODO: Put this in a web::block
+    // Create run
+    let run = match test_runner::create_run(&conn, &*id, run_inputs).await{
+        Ok(run) => run,
+        Err(e) => {
+            // If we got an error, return an appropriate error message
+            let error_body = get_run_for_test_error_message(e);
+            return Ok(HttpResponseBuilder::new(StatusCode::from_u16(error_body.status)?).json(error_body));
+        }
+    };
+
     // Try to get run by name to see if a run with that name already exists
     if let Some(name) = &run_inputs.name {
         let run_name_query = RunQuery {
@@ -697,10 +715,60 @@ async fn run_for_test(
     Ok(HttpResponse::Ok().json(run))
 }
 
+/// Returns an ErrorBody with an appropriate error message for `err`
+fn get_run_for_test_error_message(err: test_runner::Error) -> ErrorBody {
+    match err {
+        test_runner::Error::WrapperWdl(_) => ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
+        },
+        test_runner::Error::DuplicateName => ErrorBody {
+            title: "Run with specified name already exists",
+            status: 400,
+            detail: "If a custom run name is specified, it must be unique.",
+        },
+        test_runner::Error::Cromwell(e) => ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: &format!("Submitting job to Cromwell failed with error: {}", e),
+        },
+        test_runner::Error::TempFile(_) => ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: "Encountered error while attempting to create temp file for submitting test to cromwell",
+        },
+        test_runner::Error::Uuid(_) => ErrorBody {
+            title: "ID formatted incorrectly",
+            status: 400,
+            detail: "ID must be formatted as a Uuid",
+        },
+        test_runner::Error::DB(_) => ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: "Error while attempting to query the database",
+        },
+        test_runner::Error::Json => ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: "Encountered error while attempting to parse input json",
+        },
+        test_runner::Error::WdlRequest(_, m) => ErrorBody {
+            title: "Server error",
+            status: 500,
+            detail: &format!(
+                "Error while attempting to retrieve  WDL from {}",
+                m
+            ),
+        }
+
+    }
+}
+
 /// Returns `object` with necessary changes applied for submitting to cromwell as an input json
 ///
 /// Input submitted in an input json to cromwell must be prefixed with `{workflow_name}.`
-/// This function returns a new json matchin `object` but with all the keys prefixed with
+/// This function returns a new json matching `object` but with all the keys prefixed with
 /// `merged_workflow.` (the name used in crate::wdl::combiner for the workflow that runs the test
 /// wdl and then the eval wdl)
 fn format_json_for_cromwell(object: &Value) -> Result<Value, HttpResponse>{
