@@ -71,14 +71,14 @@ pub fn setup() {
     lazy_static::initialize(&IMAGE_REGISTRY_HOST);
 }
 
-fn get_or_create_software_version_in_transaction(conn: &PgConnection, software_id: Uuid, commit: &str) -> Result<SoftwareVersionData, Error> {
+pub fn get_or_create_software_version_in_transaction(conn: &PgConnection, software_id: Uuid, commit: &str) -> Result<SoftwareVersionData, Error> {
     // Call get_software_version within a transaction
     conn.build_transaction().run(|| {
         get_or_create_software_version(conn, software_id, commit)
     })
 }
 
-fn get_or_create_software_version(conn: &PgConnection, software_id: Uuid, commit: &str) -> Result<SoftwareVersionData, Error> {
+pub fn get_or_create_software_version(conn: &PgConnection, software_id: Uuid, commit: &str) -> Result<SoftwareVersionData, Error> {
 
     // Try to find a software version row for this software and commit hash to see if we've ever
     // built this version before
@@ -108,14 +108,14 @@ fn get_or_create_software_version(conn: &PgConnection, software_id: Uuid, commit
     Ok(SoftwareVersionData::create(conn, new_software_version)?)
 }
 
-fn get_or_create_software_build_in_transaction(conn: &PgConnection, software_version_id: Uuid, software_name: &str, commit: &str, repo_url: &str) -> Result<SoftwareBuildData, Error> {
+pub fn get_or_create_software_build_in_transaction(conn: &PgConnection, software_version_id: Uuid) -> Result<SoftwareBuildData, Error> {
     // Call get_software_build within a transaction
     conn.build_transaction().run(|| {
-        get_or_create_software_build(conn, software_version_id, software_name, commit, repo_url)
+        get_or_create_software_build(conn, software_version_id)
     })
 }
 
-fn get_or_create_software_build(conn: &PgConnection, software_version_id: Uuid, software_name: &str, commit: &str, repo_url: &str) -> Result<SoftwareBuildData, Error> {
+pub fn get_or_create_software_build(conn: &PgConnection, software_version_id: Uuid) -> Result<SoftwareBuildData, Error> {
 
     // Try to find a software build row for this software version to see if we have a current build
     // of it.  Getting just the most recent so we can see its status

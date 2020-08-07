@@ -87,6 +87,15 @@ impl SoftwareBuildData {
         software_build.filter(software_build_id.eq(id)).first::<Self>(conn)
     }
 
+    /// Queries the DB for software_builds that haven't finished yet
+    ///
+    /// Returns result containing either a vector of the retrieved software_builds (which have a
+    /// null value in the `finished_at` column) or a diesel error if retrieving the runs fails for
+    /// some reason
+    pub fn find_unfinished(conn: &PgConnection) -> Result<Vec<Self>, diesel::result::Error> {
+        software_build.filter(finished_at.is_null()).load::<Self>(conn)
+    }
+
     /// Queries the DB for software_builds matching the specified query criteria
     ///
     /// Queries the DB using `conn` to retrieve software_builds matching the crieria in `params`

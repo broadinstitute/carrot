@@ -113,14 +113,46 @@ pub async fn manage(
                     if let Some(_) = check_for_terminate_message(&channel_recv) {
                         return Ok(());
                     };
-                    // If this run has a status of 'Created', skip it, because it's still getting started
-                    if matches!(run.status, RunStatusEnum::Created) {
-                        continue;
-                    }
                     // Check and update status
                     debug!("Checking status of run with id: {}", run.run_id);
                     if let Err(e) =
                         check_and_update_status(&run, &client, &db_pool.get().unwrap()).await
+                    {
+                        error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
+                    }
+                }
+            }
+            // If we failed, panic if there are too many failures
+            Err(e) => {
+                consecutive_failures += 1;
+                error!(
+                    "Failed to retrieve run statuses from the DB {} time(s), this time due to: {}",
+                    consecutive_failures, e
+                );
+                if consecutive_failures > *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
+                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+                    return Err(StatusManagerError {
+                        msg: String::from("Exceed allowed consecutive failures"),
+                    });
+                }
+            }
+        }
+
+        // Query DB for unfinished builds
+        let unfinished_runs = RunData::find_unfinished(&db_pool.get().unwrap());
+        match unfinished_runs {
+            // If we got them successfully, check and update their statuses
+            Ok(runs) => {
+                debug!("Checking status of {} runs", runs.len());
+                for run in runs {
+                    // Check for message from main thread to exit
+                    if let Some(_) = check_for_terminate_message(&channel_recv) {
+                        return Ok(());
+                    };
+                    // Check and update status
+                    debug!("Checking status of run with id: {}", run.run_id);
+                    if let Err(e) =
+                    check_and_update_status(&run, &client, &db_pool.get().unwrap()).await
                     {
                         error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
                     }
@@ -186,6 +218,10 @@ async fn check_and_update_status(
     client: &Client,
     conn: &PgConnection,
 ) -> Result<(), UpdateStatusError> {
+    // If this run has a status of 'Created', skip it, because it's still getting started
+    if matches!(run.status, RunStatusEnum::Created) {
+        return Ok(());
+    }
     // Get metadata
     let params = cromwell_requests::MetadataParams {
         exclude_key: None,

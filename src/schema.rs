@@ -137,17 +137,6 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    template_software(template_id, software_id) {
-        template_id -> Uuid,
-        software_id -> Uuid,
-        image_key -> Text,
-        created_at -> Timestamptz,
-        created_by -> Nullable<Text>,
-    }
-}
-
-table! {
-    use diesel::sql_types::*;
 
     software_version(software_version_id) {
         software_version_id -> Uuid,
@@ -185,7 +174,6 @@ table! {
 
 joinable!(run -> run_id_with_results(run_id));
 joinable!(test -> template(template_id));
-joinable!(template_software -> software(software_id));
 
 allow_tables_to_appear_in_same_query!(
     pipeline,
@@ -199,7 +187,6 @@ allow_tables_to_appear_in_same_query!(
     software,
     software_version,
     software_build,
-    template_software,
     run_software_version,
     subscription,
 );

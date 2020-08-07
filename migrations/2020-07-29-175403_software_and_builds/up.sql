@@ -17,14 +17,6 @@ create table software(
     created_by text
 );
 
-create table template_software(
-    template_id uuid not null references template(template_id),
-    software_id uuid not null references software(software_id),
-    image_key text not null,
-    created_at timestamptz not null default current_timestamp,
-    created_by text,
-    primary key (template_id, software_id)
-);
 
 create table software_version(
       software_version_id uuid primary key default uuid_generate_v4(),

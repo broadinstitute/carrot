@@ -22,8 +22,13 @@ use crate::custom_sql_types::RunStatusEnum;
 use crate::routes::run::NewRunIncomplete;
 use std::fmt;
 use std::io::Write;
-use crate::manager::util;
+use crate::manager::{util, software_builder};
 use crate::models::template_software::TemplateSoftwareData;
+use std::collections::HashMap;
+use crate::models::software_version::SoftwareVersionData;
+use crate::models::software::SoftwareData;
+use crate::models::run_software_version::{RunSoftwareVersionData, NewRunSoftwareVersion};
+use openssl::version::version;
 
 /// Error type for possible errors returned by running a test
 #[derive(Debug)]
@@ -36,6 +41,8 @@ pub enum Error {
     TempFile(std::io::Error),
     Cromwell(CromwellRequestError),
     Json,
+    SoftwareNotFound(String),
+    Build(software_builder::Error)
 }
 
 impl std::error::Error for Error {}
@@ -51,6 +58,8 @@ impl fmt::Display for Error {
             Error::TempFile(e) => write!(f, "Error TempFile {}", e),
             Error::Cromwell(e) => write!(f, "Error Cromwell {}", e),
             Error::Json => write!(f, "Error Json Parsing"),
+            Error::SoftwareNotFound(name) => write!(f, "Error SoftwareNotFound: {}", name),
+            Error::Build(e) => write!(f, "Error Build: {}", e),
         }
     }
 }
@@ -68,6 +77,11 @@ impl From<uuid::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
         Error::TempFile(e)
+    }
+}
+impl From<software_builder::Error> for Error {
+    fn from(e: software_builder::Error) -> Error {
+        Error::Build(e)
     }
 }
 
@@ -120,8 +134,8 @@ pub async fn create_run(
         conn,
         test_id,
         run_name,
-        test_json,
-        eval_json,
+        test_json.clone(),
+        eval_json.clone(),
         created_by,
     )?;
 
@@ -136,14 +150,26 @@ pub async fn create_run(
         conn,
         test_id,
         run_name,
-        test_json,
-        eval_json,
+        test_json.clone(),
+        eval_json.clone(),
         created_by,
     )?;
 
+    // Find software version mappings associated with this run
+    let mut version_map = process_software_version_mappings(conn, run.run_id, &test_json)?;
+    version_map.extend(process_software_version_mappings(conn, run.run_id, &test_json));
 
-    // Find software mappings associated with this run
+    // If there are keys that map to software versions, get builds
+    if !version_map.is_empty() {
+        for (key, version) in version_map {
+            // Get or create a build for this software version
+            let build = software_builder::get_or_create_software_build_in_transaction(conn, version.software_version_id)?;
+            // If this build is finished,
+            if matches!(build.finished_at, Some(_)) {
 
+            }
+        }
+    }
 
 
     // If not, start the test run
@@ -212,19 +238,87 @@ pub async fn start_run_with_template_id(conn: &PgConnection, client: &Client, ru
     Ok(RunData::update(conn, run.run_id, run_update)?)
 }
 
-/// Retrieves mappings from
-fn get_filtered_software_mappings(conn: &PgConnection, template_id: Uuid, test_json: Value, eval_json: Value) -> Result<(), Error> {
+/// Returns a map of keys from the `inputs_json` that contain values formatted to indicate that they
+/// should be filled with a custom docker image, to a SoftwareVersionData object for that version of
+/// the specified software
+///
+/// Loops through keys in `inputs_json` to find values that match the format
+/// `carrot_build:[software_name]|[commit_hash]`, retrieves or creates entries in the
+/// SOFTWARE_VERSION table matching those specifications, and also creates RUN_SOFTWARE_VERSION rows
+/// in the database connecting `run_id` to the created software versions. Returns a map from the
+/// keys to the SoftwareVersionData objects created/retrieved for those keys
+fn process_software_version_mappings(conn: &PgConnection, run_id: Uuid, inputs_json: &Value) -> Result<HashMap<String, SoftwareVersionData> , Error> {
+    // Build regex for matching values specifying custom builds
+    lazy_static! {
+        static ref IN_REGEX: Regex =
+            Regex::new(r"image_build:\w[^\|]*\|[0-9a-f]{40}").unwrap();
+    }
 
-    // Get mappings so we can filter them
-    let mappings = match TemplateSoftwareData::find_mappings_for_template(conn, template_id){
-        Ok(mappings) => mappings,
-        Err(e) => {
-            error!("Encountered an error trying to retrieve template_software mappings from the DB: {}", e);
+    // Map to return
+    let mut version_map: HashMap<String, SoftwareVersionData> = HashMap::new();
+
+    // Get the inputs_json as an object, and return an error if it's not
+    let json_object = match inputs_json.as_object() {
+        Some(object) => object,
+        None => {
+            error!("Failed to parse input json as object. This should not happen because the json parsing before this should ensure it's an object.");
+            return Err(Error::Json);
         }
     };
 
+    // Loop through entries in object and get/create software versions for ones that specify custom
+    // docker image builds
+    for key in json_object.keys() {
+        // Get value as &str for this key; ignore if it's not a string
+        let value = match json_object.get(key).unwrap().as_str() {
+            Some(val) => val,
+            None => {continue;}
+        };
+        // If it's specifying a custom build, get the software version and add it to the version map
+        if *IN_REGEX.is_match(value) {
+            // Pull software name and commit from value
+            let name_and_commit: Vec<&str> = value.trim_start_matches("image_build").split("|").collect();
+            // Try to get software, return error if unsuccessful
+            let software =  match SoftwareData::find_by_name_ignore_case(conn,name_and_commit[0]){
+                Ok(software) => software,
+                Err(e) => {
+                    match e {
+                        diesel::result::Error::NotFound => {
+                            error!("Failed to find software with name: {}", name_and_commit[0]);
+                            return Err(Error::SoftwareNotFound(String::from(name_and_commit[0])));
+                        },
+                        _ => {
+                            error!("Encountered an error trying to retrieve software from DB: {}", e);
+                            return Err(Error::DB(e))
+                        }
+                    }
+                }
+            };
+            // Get or create software version for this software&commit and add to map
+            let software_version = software_builder::get_or_create_software_version_in_transaction(conn, software.software_id, name_and_commit[1])?;
+            version_map.insert(String::from(key), software_version);
+            // Also add run_software_version mapping
+            for (key, value) in &*version_map {
+                map_run_to_software_version(conn, value.software_version_id, run_id)?;
+            }
+
+        }
+    }
+
+    Ok(version_map)
 
 
+}
+
+/// Maps the run specified by `run_id` to the software_version specified by `software_version_id` in
+/// the database
+fn map_run_to_software_version(conn: &PgConnection, software_version_id: Uuid, run_id: Uuid) -> Result<RunSoftwareVersionData, diesel::result::Error> {
+    let new_mapping = NewRunSoftwareVersion {
+        run_id,
+        software_version_id
+    };
+
+    RunSoftwareVersionData::create(conn, new_mapping)
 }
 
 /// Checks if there is already a run in the DB with the specified name

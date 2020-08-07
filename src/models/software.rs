@@ -80,6 +80,17 @@ impl SoftwareData {
         software.filter(software_id.eq(id)).first::<Self>(conn)
     }
 
+    /// Queries the DB for a software with the specified name, ignoring case
+    ///
+    /// Queries the DB using `conn` to retrieve the first row with a name value lowercased matching
+    /// `name` lowercased
+    /// Returns a result containing either the retrieved software as a SoftwareData instance
+    /// or an error if the query fails for some reason or if no software is found matching the
+    /// criteria
+    pub fn find_by_name_ignore_case(conn: &PgConnection, software_name: &str) -> Result<Self, diesel::result::Error> {
+        software.filter(sql_functions::lower(name).eq(software_name.to_lowercase())).first::<Self>(conn)
+    }
+
     /// Queries the DB for software matching the specified query criteria
     ///
     /// Queries the DB using `conn` to retrieve software matching the criteria in `params`
