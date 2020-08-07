@@ -4,7 +4,6 @@
 //! their URI mappings
 
 use crate::db;
-use crate::error_body::ErrorBody;
 use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
@@ -13,6 +12,7 @@ use crate::wdl::combiner;
 use crate::requests::test_resource_requests;
 use crate::models::template::TemplateData;
 use actix_web::client::Client;
+use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
 ///
@@ -33,9 +33,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -62,15 +62,15 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         match e {
             // If no test is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No test found",
+                title: "No test found".to_string(),
                 status: 404,
-                detail: "No test found with the specified ID",
+                detail: "No test found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested test from DB",
+                detail: "Error while attempting to retrieve requested test from DB".to_string(),
             }),
         }
     })
@@ -106,9 +106,9 @@ async fn find(
         if results.len() < 1 {
             // If no test is found, return a 404
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No test found",
+                title: "No test found".to_string(),
                 status: 404,
-                detail: "No tests found with the specified parameters",
+                detail: "No tests found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -119,9 +119,9 @@ async fn find(
         error!("{}", e);
         // For any errors, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested test(s) from DB",
+            detail: "Error while attempting to retrieve requested test(s) from DB".to_string(),
         })
     })
 }
@@ -158,9 +158,9 @@ async fn create(
         error!("{}", e);
         // For any errors, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new test",
+            detail: "Error while attempting to insert new test".to_string(),
         })
     })
 }
@@ -186,9 +186,9 @@ async fn update(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -212,9 +212,9 @@ async fn update(
         error!("{}", e);
         // For any errors, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to update test",
+            detail: "Error while attempting to update test".to_string(),
         })
     })
 }
@@ -240,9 +240,9 @@ async fn get_wrapper_wdl(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -256,16 +256,16 @@ async fn get_wrapper_wdl(
                 // If no test is found, return a 404
                 BlockingError::Error(diesel::NotFound) => {
                     HttpResponse::NotFound().json(ErrorBody {
-                        title: "No test found",
+                        title: "No test found".to_string(),
                         status: 404,
-                        detail: "No test found with the specified ID",
+                        detail: "No test found with the specified ID".to_string(),
                     })
                 }
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve test data",
+                    detail: "Error while attempting to retrieve test data".to_string(),
                 }),
             });
         }
@@ -285,16 +285,16 @@ async fn get_wrapper_wdl(
                 // If no test is found, return a 404
                 BlockingError::Error(diesel::NotFound) => {
                     HttpResponse::NotFound().json(ErrorBody {
-                        title: "No template found",
+                        title: "No template found".to_string(),
                         status: 404,
-                        detail: "No template found for the specified test",
+                        detail: "No template found for the specified test".to_string(),
                     })
                 }
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve template data",
+                    detail: "Error while attempting to retrieve template data".to_string(),
                 }),
             });
         }
@@ -307,9 +307,9 @@ async fn get_wrapper_wdl(
             Err(e) => {
                 error!("{}", e);
                 return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: &format!(
+                    detail: format!(
                         "Error while attempting to retrieve test WDL from {}",
                         template.test_wdl
                     ),
@@ -323,9 +323,9 @@ async fn get_wrapper_wdl(
             Err(e) => {
                 error!("{}", e);
                 return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: &format!(
+                    detail: format!(
                         "Error while attempting to retrieve eval WDL from {}",
                         template.eval_wdl
                     ),
@@ -345,9 +345,9 @@ async fn get_wrapper_wdl(
         Err(e) => {
             error!("{}", e);
             return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
+                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation".to_string(),
             }));
         }
     };
@@ -366,9 +366,9 @@ async fn get_wrapper_wdl(
         Err(e) => {
             error!("{}", e);
             return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
+                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation".to_string(),
             }));
         }
     };

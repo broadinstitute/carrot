@@ -4,11 +4,11 @@
 //! their URI mappings
 
 use crate::db;
-use crate::error_body::ErrorBody;
 use crate::models::pipeline::{NewPipeline, PipelineChangeset, PipelineData, PipelineQuery};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use uuid::Uuid;
+use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /pipelines/{id} for retrieving pipeline info by pipeline_id
 ///
@@ -33,9 +33,9 @@ async fn find_by_id(
         Err(e) => {
             error!("{}", e);
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -57,15 +57,15 @@ async fn find_by_id(
         match e {
             // If no pipeline is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipeline found",
+                title: "No pipeline found".to_string(),
                 status: 404,
-                detail: "No pipeline found with the specified ID",
+                detail: "No pipeline found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested pipeline from DB",
+                detail: "Error while attempting to retrieve requested pipeline from DB".to_string(),
             }),
         }
     })?;
@@ -103,9 +103,9 @@ async fn find(
         // If there are no results, return a 404
         if results.len() < 1 {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipelines found",
+                title: "No pipelines found".to_string(),
                 status: 404,
-                detail: "No pipelines found with the specified parameters",
+                detail: "No pipelines found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -116,9 +116,9 @@ async fn find(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested pipeline(s) from DB",
+            detail: "Error while attempting to retrieve requested pipeline(s) from DB".to_string(),
         })
     })?;
 
@@ -157,9 +157,9 @@ async fn create(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new pipeline",
+            detail: "Error while attempting to insert new pipeline".to_string(),
         })
     })?;
     Ok(res)
@@ -186,9 +186,9 @@ async fn update(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -212,9 +212,9 @@ async fn update(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to update pipeline",
+            detail: "Error while attempting to update pipeline".to_string(),
         })
     })?;
 

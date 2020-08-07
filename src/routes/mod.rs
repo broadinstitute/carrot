@@ -10,3 +10,5 @@ pub mod template;
 pub mod template_result;
 pub mod template_software;
 pub mod test;
+
+mod error_body;

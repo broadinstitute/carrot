@@ -13,8 +13,8 @@ task build_and_push {
         git clone ${repo_url} .
         git checkout ${commit_hash}
         docker build -t ${software_name}:${commit_hash} .
-        docker tag ${software_name}:${commit_hash} ${registry_host}/${software_name}
-        docker push ${registry_host}/${software_name}
+        docker tag ${software_name}:${commit_hash} ${registry_host}/${software_name}:${commit_hash}
+        docker push ${registry_host}/${software_name}:${commit_hash}
     }
     runtime {
         docker: "docker:latest"

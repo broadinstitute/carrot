@@ -3,6 +3,7 @@
 //! A template_software a mapping from a software to a template that uses it, along with
 //! associated metadata.  Represented in the database by the TEMPLATE_SOFTWARE table.
 
+use crate::schema::software;
 use crate::schema::template_software;
 use crate::schema::template_software::dsl::*;
 use crate::schema::test;
@@ -11,6 +12,7 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use std::collections::HashMap;
 
 /// Mapping to a template_software mapping as it exists in the TEMPLATE_SOFTWARE table in the
 /// database.
@@ -93,6 +95,37 @@ impl TemplateSoftwareData {
         template_software
             .filter(template_id.eq_any(template_subquery))
             .load::<Self>(conn)
+    }
+
+    /// Queries the DB for software that are associated with the template specified by `id`
+    ///
+    /// Returns as map from the mapping key that would be used in an input JSON to specify the
+    /// software to a list of (software_id,name) tuples for each software mapped to that key in the
+    /// TEMPLATE_SOFTWARE table
+    pub fn find_mappings_for_template(conn: &PgConnection, id: Uuid) -> Result<HashMap<String, Vec<(Uuid, String)>>, diesel::result::Error> {
+        let rows = software::table
+            .inner_join(template_software::table)
+            .filter(template_software::template_id.eq(id))
+            .select((
+                template_software::image_key,
+                software::software_id,
+                software::name
+            ))
+            .order_by(template_software::image_key)
+            .load::<(String, Uuid, String)>(conn)?;
+
+        let mut map: HashMap<String, Vec<(Uuid, String)>> = HashMap::new();
+
+        for row in rows {
+            if map.contains_key(&row.0) {
+                map.get_mut(&row.0).unwrap().push((row.1, row.2))
+            }
+            else {
+                map.insert(row.0, vec![(row.1, row.2)]);
+            }
+        }
+
+        Ok(map)
     }
 
     /// Queries the DB for template_software mappings matching the specified query criteria
@@ -381,6 +414,22 @@ mod tests {
 
         assert_eq!(found_template_softwares.len(), 1);
         assert_eq!(found_template_softwares[0], test_template_software);
+    }
+
+
+    #[test]
+    fn find_mappings_for_template_success() {
+        let conn = get_test_db_connection();
+
+        let test_template_softwares = insert_test_template_softwares(&conn);
+
+        let found_mappings = TemplateSoftwareData::find_mappings_for_template(&conn, test_template_softwares.get(1).unwrap().template_id).unwrap();
+
+        let mut expected_map: HashMap<String, Vec<(Uuid, String)>> = HashMap::new();
+        expected_map.insert(String::from("TestKey2"), vec![(test_template_softwares.get(1).unwrap().software_id, String::from("Kevin's Software2"))]);
+        expected_map.insert(String::from("TestKey3"), vec![(test_template_softwares.get(2).unwrap().software_id, String::from("Kevin's Software3"))]);
+
+        assert_eq!(found_mappings, expected_map);
     }
 
     #[test]

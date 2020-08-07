@@ -5,26 +5,17 @@
 
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
-use crate::error_body::ErrorBody;
-use crate::models::run::{NewRun, RunData, RunQuery, RunWithResultData};
-use crate::models::template::TemplateData;
-use crate::models::test::TestData;
-use crate::requests::cromwell_requests;
-use crate::requests::cromwell_requests::WorkflowTypeEnum;
-use crate::requests::test_resource_requests;
-use crate::wdl::combiner;
+use crate::models::run::{RunQuery, RunWithResultData};
 use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
-use chrono::{NaiveDateTime, Utc};
+use chrono::NaiveDateTime;
 use log::error;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value, map::Map};
-use std::io::Write;
-use std::path::PathBuf;
-use tempfile::NamedTempFile;
+use serde_json::Value;
 use uuid::Uuid;
 use crate::manager::test_runner;
 use actix_web::http::StatusCode;
 use actix_web::dev::HttpResponseBuilder;
+use crate::routes::error_body::ErrorBody;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -82,9 +73,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -109,15 +100,15 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         match e {
             // If no run is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found",
+                title: "No run found".to_string(),
                 status: 404,
-                detail: "No run found with the specified ID",
+                detail: "No run found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested run from DB",
+                detail: "Error while attempting to retrieve requested run from DB".to_string(),
             }),
         }
     })
@@ -144,9 +135,9 @@ async fn find_for_test(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -188,9 +179,9 @@ async fn find_for_test(
         // If no run is found, return a 404
         if results.len() < 1 {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found",
+                title: "No run found".to_string(),
                 status: 404,
-                detail: "No runs found with the specified parameters",
+                detail: "No runs found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -201,9 +192,9 @@ async fn find_for_test(
         // If there is an error, return a 500
         error!("{}", e);
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested run(s) from DB",
+            detail: "Error while attempting to retrieve requested run(s) from DB".to_string(),
         })
     })
 }
@@ -231,9 +222,9 @@ async fn find_for_template(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -275,9 +266,9 @@ async fn find_for_template(
         // If no run is found, return a 404
         if results.len() < 1 {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found",
+                title: "No run found".to_string(),
                 status: 404,
-                detail: "No runs found with the specified parameters",
+                detail: "No runs found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -288,9 +279,9 @@ async fn find_for_template(
         // If there is an error, return a 500
         error!("{}", e);
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested run(s) from DB",
+            detail: "Error while attempting to retrieve requested run(s) from DB".to_string(),
         })
     })
 }
@@ -318,9 +309,9 @@ async fn find_for_pipeline(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -362,9 +353,9 @@ async fn find_for_pipeline(
         // If no run is found, return a 404
         if results.len() < 1 {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found",
+                title: "No run found".to_string(),
                 status: 404,
-                detail: "No runs found with the specified parameters",
+                detail: "No runs found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -375,9 +366,9 @@ async fn find_for_pipeline(
         // If there is an error, return a 500
         error!("{}", e);
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested run(s) from DB",
+            detail: "Error while attempting to retrieve requested run(s) from DB".to_string(),
         })
     })
 }
@@ -396,402 +387,63 @@ async fn run_for_test(
     web::Json(run_inputs): web::Json<NewRunIncomplete>,
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Get DB connection
     let conn = pool
         .get()
         .expect("Failed to get DB connection from pool");
-    // TODO: Put this in a web::block
     // Create run
-    let run = match test_runner::create_run(&conn, &*id, run_inputs).await{
-        Ok(run) => run,
-        Err(e) => {
-            // If we got an error, return an appropriate error message
-            let error_body = get_run_for_test_error_message(e);
-            return Ok(HttpResponseBuilder::new(StatusCode::from_u16(error_body.status)?).json(error_body));
-        }
-    };
-
-    // Try to get run by name to see if a run with that name already exists
-    if let Some(name) = &run_inputs.name {
-        let run_name_query = RunQuery {
-            pipeline_id: None,
-            template_id: None,
-            test_id: None,
-            name: Some(name.clone()),
-            status: None,
-            test_input: None,
-            eval_input: None,
-            cromwell_job_id: None,
-            created_before: None,
-            created_after: None,
-            created_by: None,
-            finished_before: None,
-            finished_after: None,
-            sort: None,
-            limit: None,
-            offset: None,
-        };
-        let conn = pool
-            .get()
-            .expect("Failed to get DB connection from pool");
-        match web::block(move || RunData::find(&conn, run_name_query)).await {
-            Ok(run_data) => {
-                // If we got a result, return an error message to the user
-                if run_data.len() > 0 {
-                    error!("Found existing run with name: {}", name);
-                    return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                        title: "Run with specified name already exists",
-                        status: 400,
-                        detail: "If a custom run name is specified, it must be unique.",
-                    }))
-                }
-            },
-            Err(e) => {
-                error!("{}", e);
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+    match test_runner::create_run(&conn, client.get_ref(), &*id, run_inputs.name, run_inputs.test_input, run_inputs.eval_input, run_inputs.created_by).await {
+        Ok(run) => HttpResponse::Ok().json(run),
+        Err(err) => {
+            let error_body = match err {
+                test_runner::Error::WrapperWdl(_) => ErrorBody {
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve template data",
-                }));
-            }
-        };
-    }
-    // Parse test id into UUID
-    let test_id = match Uuid::parse_str(&*id) {
-        Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
-                status: 400,
-                detail: "ID must be formatted as a Uuid",
-            }));
-        }
-    };
-    // Retrieve test for id or return error
-    let conn = pool.clone().get().expect("Failed to get DB connection from pool");
-    let test = match web::block(move || TestData::find_by_id(&conn, test_id)).await {
-        Ok(test_data) => test_data,
-        Err(e) => {
-            error!("{}", e);
-            return Ok(match e {
-                // If no test is found, return a 404
-                BlockingError::Error(diesel::NotFound) => {
-                    HttpResponse::NotFound().json(ErrorBody {
-                        title: "No test found",
-                        status: 404,
-                        detail: "No test found with the specified ID",
-                    })
-                }
-                // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation".to_string(),
+                },
+                test_runner::Error::DuplicateName => ErrorBody {
+                    title: "Run with specified name already exists".to_string(),
+                    status: 400,
+                    detail: "If a custom run name is specified, it must be unique.".to_string(),
+                },
+                test_runner::Error::Cromwell(e) => ErrorBody {
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve test data",
-                }),
-            });
-        }
-    };
-
-    // Merge input JSONs
-    let mut test_json = json!("{}");
-    if let Some(defaults) = &test.test_input_defaults {
-        json_patch::merge(&mut test_json, defaults);
-    }
-    if let Some(inputs) = &run_inputs.test_input {
-        json_patch::merge(&mut test_json, inputs);
-    }
-    let mut eval_json = json!("{}");
-    if let Some(defaults) = &test.eval_input_defaults {
-        json_patch::merge(&mut eval_json, defaults);
-    }
-    if let Some(inputs) = &run_inputs.eval_input {
-        json_patch::merge(&mut eval_json, inputs);
-    }
-
-    // Retrieve template to get WDLs or return error
-    let template_id = test.template_id.clone();
-    let conn = pool
-        .clone()
-        .get()
-        .expect("Failed to get DB connection from pool");
-    let template = match web::block(move || TemplateData::find_by_id(&conn, template_id)).await {
-        Ok(template_data) => template_data,
-        Err(e) => {
-            error!("{}", e);
-            return Ok(match e {
-                // If no test is found, return a 404
-                BlockingError::Error(diesel::NotFound) => {
-                    HttpResponse::NotFound().json(ErrorBody {
-                        title: "No template found",
-                        status: 404,
-                        detail: "No template found for the specified test",
-                    })
-                }
-                // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    detail: format!("Submitting job to Cromwell failed with error: {}", e),
+                },
+                test_runner::Error::TempFile(_) => ErrorBody {
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve template data",
-                }),
-            });
-        }
-    };
-
-    // Retrieve WDLs from their cloud locations
-    let test_wdl =
-        match test_resource_requests::get_resource_as_string(&client, &template.test_wdl).await {
-            Ok(wdl) => wdl,
-            Err(e) => {
-                error!("{}", e);
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    detail: "Encountered error while attempting to create temp file for submitting test to cromwell".to_string(),
+                },
+                test_runner::Error::Uuid(_) => ErrorBody {
+                    title: "ID formatted incorrectly".to_string(),
+                    status: 400,
+                    detail: "ID must be formatted as a Uuid".to_string(),
+                },
+                test_runner::Error::DB(e) => ErrorBody {
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: &format!(
-                        "Error while attempting to retrieve test WDL from {}",
-                        template.test_wdl
+                    detail: format!("Error while attempting to query the database: {}", e),
+                },
+                test_runner::Error::Json => ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: "Encountered error while attempting to parse input json".to_string(),
+                },
+                test_runner::Error::WdlRequest(_, m) => ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: format!(
+                        "Error while attempting to retrieve WDL from {}",
+                        m
                     ),
-                }));
-            }
-        };
-
-    let eval_wdl =
-        match test_resource_requests::get_resource_as_string(&client, &template.eval_wdl).await {
-            Ok(wdl) => wdl,
-            Err(e) => {
-                error!("{}", e);
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: &format!(
-                        "Error while attempting to retrieve eval WDL from {}",
-                        template.eval_wdl
-                    ),
-                }));
-            }
-        };
-
-    // Create WDL that imports the two and pipes outputs from test WDL to inputs of eval WDL
-    let combined_wdl = match combiner::combine_wdls(
-        &test_wdl,
-        &template.test_wdl,
-        &eval_wdl,
-        &template.eval_wdl,
-    ) {
-        Ok(wdl) => wdl,
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
-            }));
+                }
+            };
+            HttpResponseBuilder::new(StatusCode::from_u16(error_body.status).expect("Failed to parse status code. This shouldn't happen")).json(error_body)
         }
-    };
-
-    // Write combined wdl and jsons to temp files so they can be submitted to cromwell
-    let wdl_file = match NamedTempFile::new() {
-        Ok(mut file) => {
-            if let Err(e) = write!(file, "{}", combined_wdl) {
-                error!("{}", e);
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: "Encountered error while attempting to create temp file for submitting WDL to cromwell",
-                }));
-            }
-            file
-        }
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: "Encountered error while attempting to create temp file for submitting WDL to cromwell",
-            }));
-        }
-    };
-    let json_file = match NamedTempFile::new() {
-        Ok(mut file) => {
-            let mut json_to_submit = test_json.clone();
-            json_patch::merge(&mut json_to_submit, &eval_json);
-            let json_to_submit = format_json_for_cromwell(&json_to_submit)?;
-            if let Err(e) = write!(file, "{}", json_to_submit.to_string()) {
-                error!("{}", e);
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
-                    status: 500,
-                    detail: "Encountered error while attempting to create temp file for submitting test params to cromwell",
-                }));
-            }
-            file
-        }
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: "Encountered error while attempting to create temp file for submitting test params to cromwell",
-            }));
-        }
-    };
-
-    // Send job request to cromwell
-    let cromwell_params = cromwell_requests::StartJobParams {
-        labels: None,
-        workflow_dependencies: None,
-        workflow_inputs: Some(PathBuf::from(json_file.path())),
-        workflow_inputs_2: None,
-        workflow_inputs_3: None,
-        workflow_inputs_4: None,
-        workflow_inputs_5: None,
-        workflow_on_hold: None,
-        workflow_options: None,
-        workflow_root: None,
-        workflow_source: Some(PathBuf::from(wdl_file.path())),
-        workflow_type: Some(WorkflowTypeEnum::WDL),
-        workflow_type_version: None,
-        workflow_url: None,
-    };
-    let start_job_response = match cromwell_requests::start_job(&client, cromwell_params).await {
-        Ok(id_and_status) => id_and_status,
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: &format!("Submitting job to Cromwell failed with error: {}", e),
-            }));
-        }
-    };
-
-    // Write to Run table in DB
-    let pool_for_new_thread = pool.clone();
-    let run = match web::block(move || {
-        let conn = pool_for_new_thread
-            .get()
-            .expect("Failed to get DB connection from pool");
-
-        let run_name = match &run_inputs.name {
-            Some(name) => String::from(name),
-            None => format!("{}run{}", test.name, Utc::now()),
-        };
-
-        let new_run = NewRun {
-            test_id: test_id,
-            name: run_name,
-            status: RunStatusEnum::Submitted,
-            test_input: test_json,
-            eval_input: eval_json,
-            cromwell_job_id: Some(start_job_response.id),
-            created_by: run_inputs.created_by,
-            finished_at: None,
-        };
-
-        match RunData::create(&conn, new_run) {
-            Ok(run) => Ok(run),
-            Err(e) => {
-                error!("{}", e);
-                Err(e)
-            }
-        }
-    })
-    .await
-    {
-        Ok(run) => run,
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
-                status: 500,
-                detail: "Encountered error while attempting to insert run record into DB",
-            }));
-        }
-    };
-
-    // Return run to user
-    Ok(HttpResponse::Ok().json(run))
-}
-
-/// Returns an ErrorBody with an appropriate error message for `err`
-fn get_run_for_test_error_message(err: test_runner::Error) -> ErrorBody {
-    match err {
-        test_runner::Error::WrapperWdl(_) => ErrorBody {
-            title: "Server error",
-            status: 500,
-            detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation",
-        },
-        test_runner::Error::DuplicateName => ErrorBody {
-            title: "Run with specified name already exists",
-            status: 400,
-            detail: "If a custom run name is specified, it must be unique.",
-        },
-        test_runner::Error::Cromwell(e) => ErrorBody {
-            title: "Server error",
-            status: 500,
-            detail: &format!("Submitting job to Cromwell failed with error: {}", e),
-        },
-        test_runner::Error::TempFile(_) => ErrorBody {
-            title: "Server error",
-            status: 500,
-            detail: "Encountered error while attempting to create temp file for submitting test to cromwell",
-        },
-        test_runner::Error::Uuid(_) => ErrorBody {
-            title: "ID formatted incorrectly",
-            status: 400,
-            detail: "ID must be formatted as a Uuid",
-        },
-        test_runner::Error::DB(_) => ErrorBody {
-            title: "Server error",
-            status: 500,
-            detail: "Error while attempting to query the database",
-        },
-        test_runner::Error::Json => ErrorBody {
-            title: "Server error",
-            status: 500,
-            detail: "Encountered error while attempting to parse input json",
-        },
-        test_runner::Error::WdlRequest(_, m) => ErrorBody {
-            title: "Server error",
-            status: 500,
-            detail: &format!(
-                "Error while attempting to retrieve  WDL from {}",
-                m
-            ),
-        }
-
     }
-}
-
-/// Returns `object` with necessary changes applied for submitting to cromwell as an input json
-///
-/// Input submitted in an input json to cromwell must be prefixed with `{workflow_name}.`
-/// This function returns a new json matching `object` but with all the keys prefixed with
-/// `merged_workflow.` (the name used in crate::wdl::combiner for the workflow that runs the test
-/// wdl and then the eval wdl)
-fn format_json_for_cromwell(object: &Value) -> Result<Value, HttpResponse>{
-    // Get object as map
-    let object_map = match object.as_object() {
-        Some(map) => map,
-        None => return Err(HttpResponse::InternalServerError().json(ErrorBody{
-            title: "Could not parse json",
-            status: 500,
-            detail: "Could not parse input json as object.  This should not happen."
-        }))
-    };
-
-    let mut formatted_json = Map::new();
-
-    for key in object_map.keys() {
-        formatted_json.insert(
-            format!("merged_workflow.{}", key),
-            object.get(key).expect(&format!("Failed to get value for key {} from input json map.  This should never happen.", key)).to_owned()
-        );
-    }
-
-    Ok(formatted_json.into())
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -814,7 +466,7 @@ mod tests {
     use super::*;
     use crate::custom_sql_types::ResultTypeEnum;
     use crate::models::result::{NewResult, ResultData};
-    use crate::models::run::NewRun;
+    use crate::models::run::{NewRun, RunData};
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
@@ -825,6 +477,7 @@ mod tests {
     use rand::prelude::*;
     use std::fs::read_to_string;
     use uuid::Uuid;
+    use serde_json::json;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
@@ -1327,8 +980,8 @@ mod tests {
     async fn run_test_failure_taken_name() {
         let pool = get_test_db_pool();
 
-        let test_id = Uuid::new_v4();
-        let test_run = create_test_run_with_test_id(&pool.get().unwrap(), test_id);
+        let test_test = create_test_test_with_template_id(&pool.get().unwrap(), Uuid::new_v4());
+        let test_run = create_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
         let test_input = json!({"in_greeted": "Cool Person"});
         let eval_input = json!({"in_output_filename": "test_greeting.txt"});
@@ -1350,7 +1003,7 @@ mod tests {
 
         // Make request
         let req = test::TestRequest::post()
-            .uri(&format!("/tests/{}/runs", test_id))
+            .uri(&format!("/tests/{}/runs", test_test.test_id))
             .set_json(&new_run)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1363,9 +1016,9 @@ mod tests {
         assert_eq!(
             test_error,
             ErrorBody {
-                title: "Run with specified name already exists",
+                title: "Run with specified name already exists".to_string(),
                 status: 400,
-                detail: "If a custom run name is specified, it must be unique.",
+                detail: "If a custom run name is specified, it must be unique.".to_string(),
             }
         );
 

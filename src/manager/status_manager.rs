@@ -113,6 +113,10 @@ pub async fn manage(
                     if let Some(_) = check_for_terminate_message(&channel_recv) {
                         return Ok(());
                     };
+                    // If this run has a status of 'Created', skip it, because it's still getting started
+                    if matches!(run.status, RunStatusEnum::Created) {
+                        continue;
+                    }
                     // Check and update status
                     debug!("Checking status of run with id: {}", run.run_id);
                     if let Err(e) =

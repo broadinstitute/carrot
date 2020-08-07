@@ -5,7 +5,6 @@
 
 use crate::custom_sql_types::EntityTypeEnum;
 use crate::db;
-use crate::error_body::ErrorBody;
 use crate::models::pipeline::PipelineData;
 use crate::models::subscription::{
     NewSubscription, SubscriptionData, SubscriptionDeleteParams, SubscriptionQuery,
@@ -20,6 +19,7 @@ use r2d2::PooledConnection;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
+use crate::routes::error_body::ErrorBody;
 
 /// Represents the part of a subscription that is received as a request body
 ///
@@ -63,15 +63,15 @@ async fn find_by_id(
         match e {
             // If no pipeline is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No subscription found",
+                title: "No subscription found".to_string(),
                 status: 404,
-                detail: "No subscription found with the specified ID",
+                detail: "No subscription found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested subscription from DB",
+                detail: "Error while attempting to retrieve requested subscription from DB".to_string(),
             }),
         }
     })?;
@@ -126,9 +126,9 @@ async fn create(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new subscription",
+            detail: "Error while attempting to insert new subscription".to_string(),
         })
     })?;
     Ok(res)
@@ -248,9 +248,9 @@ async fn delete(
             HttpResponse::Ok().json(json!({ "message": message }))
         } else {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No subscription found",
+                title: "No subscription found".to_string(),
                 status: 404,
-                detail: "No subscription found for the specified parameters",
+                detail: "No subscription found for the specified parameters".to_string(),
             })
         }
     })
@@ -258,9 +258,9 @@ async fn delete(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new subscription",
+            detail: "Error while attempting to insert new subscription".to_string(),
         })
     })?;
     Ok(res)
@@ -365,9 +365,9 @@ async fn find(
         // If there are no results, return a 404
         if results.len() < 1 {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No subscriptions found",
+                title: "No subscriptions found".to_string(),
                 status: 404,
-                detail: "No subscriptions found with the specified parameters",
+                detail: "No subscriptions found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -378,9 +378,9 @@ async fn find(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested subscription(s) from DB",
+            detail: "Error while attempting to retrieve requested subscription(s) from DB".to_string(),
         })
     })?;
 
@@ -483,9 +483,9 @@ fn validate_email(email: &str) -> Result<(), HttpResponse> {
     if !validator::validate_email(email) {
         error!("Invalid email address: {}", email);
         return Err(HttpResponse::BadRequest().json(ErrorBody {
-            title: "Not a valid email address",
+            title: "Not a valid email address".to_string(),
             status: 400,
-            detail: "The value submitted for 'email' is not a valid email address",
+            detail: "The value submitted for 'email' is not a valid email address".to_string(),
         }));
     }
 
@@ -504,9 +504,9 @@ fn parse_id(id: &str) -> Result<Uuid, HttpResponse> {
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Err(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     }
@@ -545,15 +545,15 @@ async fn verify_existence(
             BlockingError::Error(diesel::NotFound) => {
                 let (title, detail) = match entity_type {
                     EntityTypeEnum::Pipeline => (
-                        "No pipeline found",
-                        "No pipeline found with the specified ID",
+                        "No pipeline found".to_string(),
+                        "No pipeline found with the specified ID".to_string(),
                     ),
                     EntityTypeEnum::Template => (
-                        "No template found",
-                        "No template found with the specified ID",
+                        "No template found".to_string(),
+                        "No template found with the specified ID".to_string(),
                     ),
                     EntityTypeEnum::Test => {
-                        ("No test found", "No test found with the specified ID")
+                        ("No test found".to_string(), "No test found with the specified ID".to_string())
                     }
                 };
                 HttpResponse::NotFound().json(ErrorBody {
@@ -565,12 +565,12 @@ async fn verify_existence(
             // For other errors, return a 500
             _ => {
                 let detail = match entity_type {
-                    EntityTypeEnum::Pipeline => "Error attempting to verify existence of pipeline",
-                    EntityTypeEnum::Template => "Error attempting to verify existence of template",
-                    EntityTypeEnum::Test => "Error attempting to verify existence of test",
+                    EntityTypeEnum::Pipeline => "Error attempting to verify existence of pipeline".to_string(),
+                    EntityTypeEnum::Template => "Error attempting to verify existence of template".to_string(),
+                    EntityTypeEnum::Test => "Error attempting to verify existence of test".to_string(),
                 };
                 HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
                     detail,
                 })

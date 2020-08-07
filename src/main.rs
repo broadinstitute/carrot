@@ -2,7 +2,6 @@
 mod app;
 mod custom_sql_types;
 mod db;
-mod error_body;
 mod manager;
 mod models;
 mod notifications;
@@ -55,6 +54,8 @@ fn main() {
 
     // Make sure we have values for necessary email config variables
     notifications::emailer::setup();
+    // Make sure we have values for necessary software build config variables
+    manager::software_builder::setup();
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));

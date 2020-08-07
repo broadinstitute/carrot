@@ -4,12 +4,12 @@
 //! mappings, along with their URI mappings
 
 use crate::db;
-use crate::error_body::ErrorBody;
 use crate::models::template_software::{NewTemplateSoftware, TemplateSoftwareData, TemplateSoftwareQuery};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use crate::routes::error_body::ErrorBody;
 
 /// Represents the part of a new template_software mapping that is received as a request body
 ///
@@ -46,9 +46,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -60,9 +60,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Result ID formatted incorrectly",
+                title: "Result ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "Result ID must be formatted as a Uuid",
+                detail: "Result ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -89,15 +89,15 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             match e {
                 // If no mapping is found, return a 404
                 BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template_software mapping found",
+                    title: "No template_software mapping found".to_string(),
                     status: 404,
-                    detail: "No template_software mapping found with the specified ID",
+                    detail: "No template_software mapping found with the specified ID".to_string(),
                 }),
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve requested template_software from DB",
+                    detail: "Error while attempting to retrieve requested template_software from DB".to_string(),
                 }),
             }
         })
@@ -126,9 +126,9 @@ async fn find(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -153,9 +153,9 @@ async fn find(
             if software.len() < 1 {
                 // If no mapping is found, return a 404
                 HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template_software mapping found",
+                    title: "No template_software mapping found".to_string(),
                     status: 404,
-                    detail: "No template_software mapping found with the specified parameters",
+                    detail: "No template_software mapping found with the specified parameters".to_string(),
                 })
             } else {
                 // If there is no error, return a response with the retrieved data
@@ -166,9 +166,9 @@ async fn find(
             error!("{}", e);
             // For any errors, return a 500
             HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested mapping(s) from DB",
+                detail: "Error while attempting to retrieve requested mapping(s) from DB".to_string(),
             })
         })
 }
@@ -201,9 +201,9 @@ async fn create(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -215,9 +215,9 @@ async fn create(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Result ID formatted incorrectly",
+                title: "Result ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "Result ID must be formatted as a Uuid",
+                detail: "Result ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -249,9 +249,9 @@ async fn create(
             error!("{}", e);
             // For any errors, return a 500
             HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to insert new template result mapping",
+                detail: "Error while attempting to insert new template result mapping".to_string(),
             })
         })
 }

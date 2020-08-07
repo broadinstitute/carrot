@@ -185,6 +185,7 @@ table! {
 
 joinable!(run -> run_id_with_results(run_id));
 joinable!(test -> template(template_id));
+joinable!(template_software -> software(software_id));
 
 allow_tables_to_appear_in_same_query!(
     pipeline,

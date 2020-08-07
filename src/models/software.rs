@@ -5,11 +5,13 @@
 
 use crate::schema::software;
 use crate::schema::software::dsl::*;
+use crate::schema::template_software;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use std::collections::HashMap;
 
 /// Mapping to a software as it exists in the SOFTWARE table in the database.
 ///

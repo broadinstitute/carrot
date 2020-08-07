@@ -4,12 +4,12 @@
 //! their URI mappings
 
 use crate::db;
-use crate::error_body::ErrorBody;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use uuid::Uuid;
 use crate::util::git_repo_exists;
+use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /software/{id} for retrieving software info by software_id
 ///
@@ -34,9 +34,9 @@ async fn find_by_id(
         Err(e) => {
             error!("{}", e);
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -58,15 +58,15 @@ async fn find_by_id(
             match e {
                 // If no software is found, return a 404
                 BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No software found",
+                    title: "No software found".to_string(),
                     status: 404,
-                    detail: "No software found with the specified ID",
+                    detail: "No software found with the specified ID".to_string(),
                 }),
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error",
+                    title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to retrieve requested software from DB",
+                    detail: "Error while attempting to retrieve requested software from DB".to_string(),
                 }),
             }
         })?;
@@ -104,9 +104,9 @@ async fn find(
             // If there are no results, return a 404
             if results.len() < 1 {
                 HttpResponse::NotFound().json(ErrorBody {
-                    title: "No software found",
+                    title: "No software found".to_string(),
                     status: 404,
-                    detail: "No software found with the specified parameters",
+                    detail: "No software found with the specified parameters".to_string(),
                 })
             } else {
                 // If there is no error, return a response with the retrieved data
@@ -117,9 +117,9 @@ async fn find(
             error!("{}", e);
             // If there is an error, return a 500
             HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested software(s) from DB",
+                detail: "Error while attempting to retrieve requested software(s) from DB".to_string(),
             })
         })?;
 
@@ -146,9 +146,9 @@ async fn create(
             if !val {
                 error!("Failed to validate existence of git repo at {}", &new_software.repository_url);
                 return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                    title: "Git Repo does not exist",
+                    title: "Git Repo does not exist".to_string(),
                     status: 400,
-                    detail: "Failed to verify the existence of a git repository at the specified url",
+                    detail: "Failed to verify the existence of a git repository at the specified url".to_string(),
                 }));
             }
         },
@@ -156,9 +156,9 @@ async fn create(
             // If there was some error when attempting to find it, inform the user
             error!("Encountered an error while trying to verify the existence of a git repo at {} : {}", &new_software.repository_url, e);
             return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error",
+                title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to verify the existence of a git repository at the specified url",
+                detail: "Error while attempting to verify the existence of a git repository at the specified url".to_string(),
             }));
         }
     }
@@ -181,9 +181,9 @@ async fn create(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new software",
+            detail: "Error while attempting to insert new software".to_string(),
         })
     })?;
     Ok(res)
@@ -210,9 +210,9 @@ async fn update(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly",
+                title: "ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid",
+                detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -236,9 +236,9 @@ async fn update(
         error!("{}", e);
         // If there is an error, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error",
+            title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to update software",
+            detail: "Error while attempting to update software".to_string(),
         })
     })?;
 
@@ -270,6 +270,7 @@ mod tests {
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
+    use crate::routes::error_body::ErrorBody;
 
     fn create_test_software(conn: &PgConnection) -> SoftwareData {
         let new_software = NewSoftware {
