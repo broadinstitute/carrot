@@ -5,11 +5,12 @@
 //! Cromwell, and then updating accordingly.  It will also pull result data and add that to the DB
 //! for any tests runs that complete
 
-use crate::custom_sql_types::RunStatusEnum;
+use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::db::DbPool;
-use crate::manager::notification_handler;
+use crate::manager::{notification_handler, software_builder, test_runner};
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_result::{NewRunResult, RunResultData};
+use crate::models::software_build::{SoftwareBuildChangeset, SoftwareBuildData};
 use crate::models::template_result::TemplateResultData;
 use crate::requests::cromwell_requests;
 use actix_web::client::Client;
@@ -29,6 +30,8 @@ enum UpdateStatusError {
     DB(String),
     Cromwell(String),
     Notification(notification_handler::Error),
+    Build(software_builder::Error),
+    Run(test_runner::Error),
 }
 
 impl fmt::Display for UpdateStatusError {
@@ -37,6 +40,8 @@ impl fmt::Display for UpdateStatusError {
             UpdateStatusError::DB(e) => write!(f, "UpdateStatusError DB {}", e),
             UpdateStatusError::Cromwell(e) => write!(f, "UpdateStatusError Cromwell {}", e),
             UpdateStatusError::Notification(e) => write!(f, "UpdateStatusError Notification {}", e),
+            UpdateStatusError::Build(e) => write!(f, "UpdateStatusError Build {}", e),
+            UpdateStatusError::Run(e) => write!(f, "UpdateStatusError Run {}", e),
         }
     }
 }
@@ -46,6 +51,16 @@ impl Error for UpdateStatusError {}
 impl From<notification_handler::Error> for UpdateStatusError {
     fn from(e: notification_handler::Error) -> UpdateStatusError {
         UpdateStatusError::Notification(e)
+    }
+}
+impl From<software_builder::Error> for UpdateStatusError {
+    fn from(e: software_builder::Error) -> UpdateStatusError {
+        UpdateStatusError::Build(e)
+    }
+}
+impl From<test_runner::Error> for UpdateStatusError {
+    fn from(e: test_runner::Error) -> UpdateStatusError {
+        UpdateStatusError::Run(e)
     }
 }
 
@@ -116,7 +131,7 @@ pub async fn manage(
                     // Check and update status
                     debug!("Checking status of run with id: {}", run.run_id);
                     if let Err(e) =
-                        check_and_update_status(&run, &client, &db_pool.get().unwrap()).await
+                        check_and_update_run_status(&run, &client, &db_pool.get().unwrap()).await
                     {
                         error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
                     }
@@ -126,7 +141,7 @@ pub async fn manage(
             Err(e) => {
                 consecutive_failures += 1;
                 error!(
-                    "Failed to retrieve run statuses from the DB {} time(s), this time due to: {}",
+                    "Failed to retrieve run/build statuses from the DB {} time(s), this time due to: {}",
                     consecutive_failures, e
                 );
                 if consecutive_failures > *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
@@ -139,22 +154,22 @@ pub async fn manage(
         }
 
         // Query DB for unfinished builds
-        let unfinished_runs = RunData::find_unfinished(&db_pool.get().unwrap());
-        match unfinished_runs {
+        let unfinished_builds = SoftwareBuildData::find_unfinished(&db_pool.get().unwrap());
+        match unfinished_builds {
             // If we got them successfully, check and update their statuses
-            Ok(runs) => {
-                debug!("Checking status of {} runs", runs.len());
-                for run in runs {
+            Ok(builds) => {
+                debug!("Checking status of {} builds", builds.len());
+                for build in builds {
                     // Check for message from main thread to exit
                     if let Some(_) = check_for_terminate_message(&channel_recv) {
                         return Ok(());
                     };
                     // Check and update status
-                    debug!("Checking status of run with id: {}", run.run_id);
+                    debug!("Checking status of build with id: {}", build.software_build_id);
                     if let Err(e) =
-                    check_and_update_status(&run, &client, &db_pool.get().unwrap()).await
+                        check_and_update_build_status(&build, &client, &db_pool.get().unwrap()).await
                     {
-                        error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
+                        error!("Encountered error while trying to update status for build with id {}: {}", build.software_build_id, e);
                     }
                 }
             }
@@ -162,7 +177,7 @@ pub async fn manage(
             Err(e) => {
                 consecutive_failures += 1;
                 error!(
-                    "Failed to retrieve run statuses from the DB {} time(s), this time due to: {}",
+                    "Failed to retrieve run/build statuses from the DB {} time(s), this time due to: {}",
                     consecutive_failures, e
                 );
                 if consecutive_failures > *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
@@ -213,7 +228,7 @@ fn check_for_terminate_message_with_timeout(
 }
 
 /// Gets status for run from cromwell and updates in DB if appropriate
-async fn check_and_update_status(
+async fn check_and_update_run_status(
     run: &RunData,
     client: &Client,
     conn: &PgConnection,
@@ -222,85 +237,57 @@ async fn check_and_update_status(
     if matches!(run.status, RunStatusEnum::Created) {
         return Ok(());
     }
+    // If it's building, check if it's ready to run
+    if matches!(run.status, RunStatusEnum::Building) {
+        // If all the builds associated with this run have completed, start the run
+        if test_runner::run_finished_building(conn, run.run_id)? {
+            return match test_runner::start_run(conn, client, run).await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(UpdateStatusError::Run(e))
+            };
+        }
+        // Otherwise, just return ()
+        return Ok(());
+    }
     // Get metadata
-    let params = cromwell_requests::MetadataParams {
-        exclude_key: None,
-        expand_sub_workflows: None,
-        // We only care about status, outputs, and end since we just want to know if the status has changed, and the end time and outputs if it finished
-        include_key: Some(vec![
-            String::from("status"),
-            String::from("end"),
-            String::from("outputs"),
-        ]),
-        metadata_source: None,
-    };
     let metadata =
-        cromwell_requests::get_metadata(client, &run.cromwell_job_id.as_ref().unwrap(), &params)
-            .await;
-    let metadata = match metadata {
-        Ok(value) => value.as_object().unwrap().to_owned(),
-        Err(e) => return Err(UpdateStatusError::Cromwell(e.to_string())),
-    };
+        get_status_metadata_from_cromwell(client, &run.cromwell_job_id.as_ref().unwrap()).await?;
     // If the status is different from what's stored in the DB currently, update it
     let status = match metadata.get("status") {
-        Some(status) => status.as_str().unwrap().to_lowercase(),
+        Some(status) => {
+            match get_run_status_for_cromwell_status(&status.as_str().unwrap().to_lowercase()) {
+                Some(status) => status,
+                None => {
+                    return Err(UpdateStatusError::Cromwell(format!(
+                        "Cromwell metadata request returned unrecognized status {}",
+                        status
+                    )));
+                }
+            }
+        }
         None => {
             return Err(UpdateStatusError::Cromwell(String::from(
                 "Cromwell metadata request did not return status",
             )))
         }
     };
-    if status != run.status.to_string() {
+    if status != run.status {
         // Set the changes based on the status
-        let run_update: RunChangeset = match &*status {
-            "running" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::Running),
-                cromwell_job_id: None,
-                finished_at: None,
-            },
-            "starting" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::Starting),
-                cromwell_job_id: None,
-                finished_at: None,
-            },
-            "queuedincromwell" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::QueuedInCromwell),
-                cromwell_job_id: None,
-                finished_at: None,
-            },
-            "waitingforqueuespace" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::WaitingForQueueSpace),
-                cromwell_job_id: None,
-                finished_at: None,
-            },
-            "succeeded" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::Succeeded),
-                cromwell_job_id: None,
-                finished_at: Some(get_end(&metadata)?),
-            },
-            "failed" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::Failed),
-                cromwell_job_id: None,
-                finished_at: Some(get_end(&metadata)?),
-            },
-            "aborted" => RunChangeset {
-                name: None,
-                status: Some(RunStatusEnum::Aborted),
-                cromwell_job_id: None,
-                finished_at: Some(get_end(&metadata)?),
-            },
-            _ => {
-                return Err(UpdateStatusError::Cromwell(format!(
-                    "Cromwell metadata request return unrecognized status {}",
-                    status
-                )))
+        let run_update: RunChangeset = match status {
+            RunStatusEnum::Succeeded | RunStatusEnum::Failed | RunStatusEnum::Aborted => {
+                RunChangeset {
+                    name: None,
+                    status: Some(status.clone()),
+                    cromwell_job_id: None,
+                    finished_at: Some(get_end(&metadata)?),
+                }
             }
+            _ => RunChangeset {
+                name: None,
+                status: Some(status.clone()),
+                cromwell_job_id: None,
+                finished_at: None,
+            },
         };
         // Update
         match RunData::update(conn, run.run_id.clone(), run_update) {
@@ -314,7 +301,7 @@ async fn check_and_update_status(
         };
 
         // If it succeeded, fill results in DB also
-        if &*status == "succeeded" {
+        if status == RunStatusEnum::Succeeded {
             let outputs = match metadata.get("outputs") {
                 Some(outputs) => outputs.as_object().unwrap().to_owned(),
                 None => {
@@ -344,13 +331,169 @@ async fn check_and_update_status(
             }
         }
         // If it ended, send notification emails
-        if &*status == "succeeded" || &*status == "failed" || &*status == "aborted" {
+        if status == RunStatusEnum::Succeeded
+            || status == RunStatusEnum::Failed
+            || status == RunStatusEnum::Aborted
+        {
             #[cfg(not(test))] // Skip the email step when testing
             notification_handler::send_run_complete_emails(conn, run.run_id)?;
         }
     }
 
     Ok(())
+}
+
+/// Gets status for software build from cromwell and updates in DB if appropriate
+async fn check_and_update_build_status(
+    build: &SoftwareBuildData,
+    client: &Client,
+    conn: &PgConnection,
+) -> Result<(), UpdateStatusError> {
+    // If this build has a status of 'Created', start it
+    if matches!(build.status, BuildStatusEnum::Created) {
+        software_builder::start_software_build(client, conn, build.software_build_id).await?;
+        return Ok(());
+    }
+    // Get metadata
+    let metadata =
+        get_status_metadata_from_cromwell(client, &build.build_job_id.as_ref().unwrap()).await?;
+    // If the status is different from what's stored in the DB currently, update it
+    let status = match metadata.get("status") {
+        Some(status) => {
+            match get_build_status_for_cromwell_status(&status.as_str().unwrap().to_lowercase()) {
+                Some(status) => status,
+                None => {
+                    return Err(UpdateStatusError::Cromwell(format!(
+                        "Cromwell metadata request returned unrecognized status {}",
+                        status
+                    )));
+                }
+            }
+        }
+        None => {
+            return Err(UpdateStatusError::Cromwell(String::from(
+                "Cromwell metadata request did not return status",
+            )))
+        }
+    };
+    if status != build.status {
+        // Set the changes based on the status
+        let build_update: SoftwareBuildChangeset = match status {
+            BuildStatusEnum::Succeeded => {
+                // Get the outputs so we can get the image_url
+                let outputs = match metadata.get("outputs") {
+                    Some(outputs) => outputs.as_object().unwrap().to_owned(),
+                    None => {
+                        return Err(UpdateStatusError::Cromwell(String::from(
+                            "Cromwell metadata request did not return outputs",
+                        )))
+                    }
+                };
+                // Get the image_url
+                let image_url = match outputs.get("image_url") {
+                    Some(val) => match val.as_str() {
+                        Some(image_url) => image_url.to_owned(),
+                        None => {
+                            return Err(UpdateStatusError::Cromwell(String::from(
+                                "Cromwell metadata outputs image_url isn't a string?",
+                            )))
+                        }
+                    },
+                    None => {
+                        return Err(UpdateStatusError::Cromwell(String::from(
+                            "Cromwell metadata outputs missing image_url",
+                        )))
+                    }
+                };
+
+                SoftwareBuildChangeset {
+                    image_url: Some(image_url),
+                    status: Some(status.clone()),
+                    build_job_id: None,
+                    finished_at: Some(get_end(&metadata)?),
+                }
+            }
+            BuildStatusEnum::Failed | BuildStatusEnum::Aborted => SoftwareBuildChangeset {
+                image_url: None,
+                status: Some(status.clone()),
+                build_job_id: None,
+                finished_at: Some(get_end(&metadata)?),
+            },
+            _ => SoftwareBuildChangeset {
+                image_url: None,
+                status: Some(status.clone()),
+                build_job_id: None,
+                finished_at: None,
+            },
+        };
+        // Update
+        match SoftwareBuildData::update(conn, build.software_build_id.clone(), build_update) {
+            Err(e) => {
+                return Err(UpdateStatusError::DB(format!(
+                    "Updating build in DB failed with error {}",
+                    e
+                )))
+            }
+            _ => {}
+        };
+    }
+
+    Ok(())
+}
+
+/// Gets the metadata from cromwell that we actually care about for `cromwell_job_id`
+///
+/// Gets the status, end, and outputs for the cromwell job specified by `cromwell_job_id` from the
+/// cromwell metadata endpoint using `client` to connect
+async fn get_status_metadata_from_cromwell(
+    client: &Client,
+    cromwell_job_id: &str,
+) -> Result<Map<String, Value>, UpdateStatusError> {
+    // Get metadata
+    let params = cromwell_requests::MetadataParams {
+        exclude_key: None,
+        expand_sub_workflows: None,
+        // We only care about status, outputs, and end since we just want to know if the status has changed, and the end time and outputs if it finished
+        include_key: Some(vec![
+            String::from("status"),
+            String::from("end"),
+            String::from("outputs"),
+        ]),
+        metadata_source: None,
+    };
+    let metadata = cromwell_requests::get_metadata(client, cromwell_job_id, &params).await;
+    match metadata {
+        Ok(value) => Ok(value.as_object().unwrap().to_owned()),
+        Err(e) => Err(UpdateStatusError::Cromwell(e.to_string())),
+    }
+}
+
+/// Returns equivalent RunStatusEnum for `cromwell_status`
+fn get_run_status_for_cromwell_status(cromwell_status: &str) -> Option<RunStatusEnum> {
+    match cromwell_status {
+        "running" => Some(RunStatusEnum::Running),
+        "starting" => Some(RunStatusEnum::Starting),
+        "queuedincromwell" => Some(RunStatusEnum::QueuedInCromwell),
+        "waitingforqueuespace" => Some(RunStatusEnum::WaitingForQueueSpace),
+        "succeeded" => Some(RunStatusEnum::Succeeded),
+        "failed" => Some(RunStatusEnum::Failed),
+        "aborted" => Some(RunStatusEnum::Aborted),
+        _ => None,
+    }
+}
+
+/// Returns equivalent BuildStatusEnum for `cromwell_status`
+fn get_build_status_for_cromwell_status(cromwell_status: &str) -> Option<BuildStatusEnum> {
+    match cromwell_status {
+        "running" => Some(BuildStatusEnum::Running),
+        "starting" => Some(BuildStatusEnum::Starting),
+        "queuedincromwell" => Some(BuildStatusEnum::QueuedInCromwell),
+        "waitingforqueuespace" => Some(BuildStatusEnum::WaitingForQueueSpace),
+        "succeeded" => Some(BuildStatusEnum::Succeeded),
+        "failed" => Some(BuildStatusEnum::Failed),
+        "aborted" => Some(BuildStatusEnum::Aborted),
+        _ => None,
+    }
 }
 
 /// Extracts value for `end` key from `metadata` and parses it into a NaiveDateTime
@@ -454,7 +597,7 @@ fn fill_results(
 mod tests {
 
     use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
-    use crate::manager::status_manager::{check_and_update_status, fill_results};
+    use crate::manager::status_manager::{check_and_update_run_status, fill_results};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
@@ -588,7 +731,7 @@ mod tests {
         ]))
         .create();
         // Check and update status
-        check_and_update_status(&test_run, &Client::default(), &conn)
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
             .await
             .unwrap();
         mock.assert();

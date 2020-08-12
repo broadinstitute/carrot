@@ -5,11 +5,11 @@
 
 use crate::db;
 use crate::models::template_result::{NewTemplateResult, TemplateResultData, TemplateResultQuery};
+use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::routes::error_body::ErrorBody;
 
 /// Represents the part of a new template_result mapping that is received as a request body
 ///
@@ -97,7 +97,8 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested template_result from DB".to_string(),
+                detail: "Error while attempting to retrieve requested template_result from DB"
+                    .to_string(),
             }),
         }
     })
@@ -155,7 +156,8 @@ async fn find(
             HttpResponse::NotFound().json(ErrorBody {
                 title: "No template_result mapping found".to_string(),
                 status: 404,
-                detail: "No template_result mapping found with the specified parameters".to_string(),
+                detail: "No template_result mapping found with the specified parameters"
+                    .to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data

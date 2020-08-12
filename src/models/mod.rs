@@ -12,7 +12,6 @@ pub mod software_version;
 pub mod subscription;
 pub mod template;
 pub mod template_result;
-pub mod template_software;
 pub mod test;
 
 // Utility modules only meant to be used within this module

@@ -158,19 +158,18 @@ impl RunSoftwareVersionData {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::RunStatusEnum;
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
-    use uuid::Uuid;
-    use crate::models::template::{NewTemplate, TemplateData};
-    use crate::models::software::{NewSoftware, SoftwareData};
-    use crate::models::run::{NewRun, RunData};
-    use crate::custom_sql_types::RunStatusEnum;
     use chrono::Utc;
-    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
     use std::cmp::Ordering;
+    use uuid::Uuid;
 
     fn insert_test_run_software_version(conn: &PgConnection) -> RunSoftwareVersionData {
-
         let new_run = NewRun {
             test_id: Uuid::new_v4(),
             name: String::from("Kevin's test run"),
@@ -191,14 +190,16 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let new_software = SoftwareData::create(conn, new_software).expect("Failed to insert software");
+        let new_software =
+            SoftwareData::create(conn, new_software).expect("Failed to insert software");
 
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
         };
 
-        let new_software_version = SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software_version");
+        let new_software_version = SoftwareVersionData::create(conn, new_software_version)
+            .expect("Failed inserting test software_version");
 
         let new_run_software_version = NewRunSoftwareVersion {
             run_id: new_run.run_id.clone(),
@@ -245,21 +246,24 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let new_software = SoftwareData::create(conn, new_software).expect("Failed to insert software");
+        let new_software =
+            SoftwareData::create(conn, new_software).expect("Failed to insert software");
 
         let new_software_version = NewSoftwareVersion {
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
             software_id: new_software.software_id.clone(),
         };
 
-        let new_software_version = SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software_version");
+        let new_software_version = SoftwareVersionData::create(conn, new_software_version)
+            .expect("Failed inserting test software_version");
 
         let new_software_version2 = NewSoftwareVersion {
             commit: String::from("c9d1a4eb7d1c49428b03bee19a72401b02cec466 "),
             software_id: new_software.software_id.clone(),
         };
 
-        let new_software_version2 = SoftwareVersionData::create(conn, new_software_version2).expect("Failed inserting test software_version");
+        let new_software_version2 = SoftwareVersionData::create(conn, new_software_version2)
+            .expect("Failed inserting test software_version");
 
         let new_run_software_version = NewRunSoftwareVersion {
             run_id: new_run.run_id.clone(),
@@ -294,7 +298,6 @@ mod tests {
         run_software_versions
     }
 
-
     #[test]
     fn find_by_run_and_software_version_exists() {
         let conn = get_test_db_connection();
@@ -306,7 +309,7 @@ mod tests {
             test_run_software_version.run_id,
             test_run_software_version.software_version_id,
         )
-            .expect("Failed to retrieve test run_software_version by id.");
+        .expect("Failed to retrieve test run_software_version by id.");
 
         assert_eq!(found_run_software_version, test_run_software_version);
     }
@@ -316,7 +319,11 @@ mod tests {
         let conn = get_test_db_connection();
 
         let nonexistent_run_software_version =
-            RunSoftwareVersionData::find_by_run_and_software_version(&conn, Uuid::new_v4(), Uuid::new_v4());
+            RunSoftwareVersionData::find_by_run_and_software_version(
+                &conn,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+            );
 
         assert!(matches!(
             nonexistent_run_software_version,
@@ -340,11 +347,14 @@ mod tests {
             offset: None,
         };
 
-        let found_run_software_versions =
-            RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
+        let found_run_software_versions = RunSoftwareVersionData::find(&conn, test_query)
+            .expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 1);
-        assert_eq!(found_run_software_versions[0], test_run_software_versions[0]);
+        assert_eq!(
+            found_run_software_versions[0],
+            test_run_software_versions[0]
+        );
     }
 
     #[test]
@@ -363,11 +373,14 @@ mod tests {
             offset: None,
         };
 
-        let found_run_software_versions =
-            RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
+        let found_run_software_versions = RunSoftwareVersionData::find(&conn, test_query)
+            .expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 1);
-        assert_eq!(found_run_software_versions[0], test_run_software_versions[2]);
+        assert_eq!(
+            found_run_software_versions[0],
+            test_run_software_versions[2]
+        );
     }
 
     #[test]
@@ -377,7 +390,7 @@ mod tests {
         let mut test_run_software_versions = insert_test_run_software_versions(&conn);
 
         // Sort test data by run_id so we know the order to compare
-        test_run_software_versions.sort_by(|a, b|  {
+        test_run_software_versions.sort_by(|a, b| {
             return if a.run_id > b.run_id {
                 Ordering::Less
             } else if a.run_id == b.run_id {
@@ -388,7 +401,7 @@ mod tests {
                 }
             } else {
                 Ordering::Greater
-            }
+            };
         });
 
         let test_query = RunSoftwareVersionQuery {
@@ -401,12 +414,18 @@ mod tests {
             offset: Some(0),
         };
 
-        let found_run_software_versions =
-            RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
+        let found_run_software_versions = RunSoftwareVersionData::find(&conn, test_query)
+            .expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 2);
-        assert_eq!(found_run_software_versions[0], test_run_software_versions[0]);
-        assert_eq!(found_run_software_versions[1], test_run_software_versions[1]);
+        assert_eq!(
+            found_run_software_versions[0],
+            test_run_software_versions[0]
+        );
+        assert_eq!(
+            found_run_software_versions[1],
+            test_run_software_versions[1]
+        );
 
         let test_query = RunSoftwareVersionQuery {
             run_id: None,
@@ -418,11 +437,14 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_run_software_versions =
-            RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
+        let found_run_software_versions = RunSoftwareVersionData::find(&conn, test_query)
+            .expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 1);
-        assert_eq!(found_run_software_versions[0], test_run_software_versions[2]);
+        assert_eq!(
+            found_run_software_versions[0],
+            test_run_software_versions[2]
+        );
     }
 
     #[test]
@@ -441,8 +463,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_software_versions =
-            RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
+        let found_run_software_versions = RunSoftwareVersionData::find(&conn, test_query)
+            .expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 0);
 
@@ -456,8 +478,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_software_versions =
-            RunSoftwareVersionData::find(&conn, test_query).expect("Failed to find run_software_versions");
+        let found_run_software_versions = RunSoftwareVersionData::find(&conn, test_query)
+            .expect("Failed to find run_software_versions");
 
         assert_eq!(found_run_software_versions.len(), 3);
     }
@@ -468,11 +490,12 @@ mod tests {
 
         let test_run_software_version = insert_test_run_software_version(&conn);
 
-        let test_run_software_version2 =
-            RunSoftwareVersionData::find_by_run_and_software_version(
-                &conn,test_run_software_version.run_id.clone(),
-                test_run_software_version.software_version_id.clone()
-            ).unwrap();
+        let test_run_software_version2 = RunSoftwareVersionData::find_by_run_and_software_version(
+            &conn,
+            test_run_software_version.run_id.clone(),
+            test_run_software_version.software_version_id.clone(),
+        )
+        .unwrap();
 
         assert_eq!(test_run_software_version, test_run_software_version2);
     }
@@ -488,7 +511,8 @@ mod tests {
             software_version_id: test_run_software_version.software_version_id,
         };
 
-        let new_run_software_version = RunSoftwareVersionData::create(&conn, copy_run_software_version);
+        let new_run_software_version =
+            RunSoftwareVersionData::create(&conn, copy_run_software_version);
 
         assert!(matches!(
             new_run_software_version,

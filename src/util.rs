@@ -57,7 +57,7 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
 /// Uses the `git ls-remote` command to check the specified url for a git repo.  Returns Ok(true)
 /// if the command is successful, and Ok(false) if it fails.  Returns an error if there is some
 /// error trying to execute the command
-pub fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
+pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
     let output = Command::new("sh")
         .arg("-c")
         .arg(format!("git ls-remote {}", url))
@@ -65,11 +65,9 @@ pub fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
 
     if output.status.success() {
         Ok(true)
-    }
-    else {
+    } else {
         Ok(false)
     }
-
 }
 
 #[cfg(test)]
@@ -173,19 +171,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn git_repo_exists_true() {
-        let test = git_repo_exists("git://github.com/broadinstitute/gatk.git")
+    #[actix_rt::test]
+    async fn git_repo_exists_true() {
+        let test = git_repo_exists("git://github.com/broadinstitute/gatk.git").await
             .expect("Error when checking if git repo exists");
 
         assert!(test);
     }
-    #[test]
-    fn git_repo_exists_false() {
-        let test = git_repo_exists("git://example.com/example/project.git")
+    #[actix_rt::test]
+    async fn git_repo_exists_false() {
+        let test = git_repo_exists("git://example.com/example/project.git").await
             .expect("Error when checking if git repo exists");
 
         assert!(!test);
     }
-
 }

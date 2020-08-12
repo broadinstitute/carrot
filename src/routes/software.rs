@@ -5,11 +5,11 @@
 
 use crate::db;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
+use crate::routes::error_body::ErrorBody;
+use crate::util::git_repo_exists;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use uuid::Uuid;
-use crate::util::git_repo_exists;
-use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /software/{id} for retrieving software info by software_id
 ///
@@ -50,26 +50,26 @@ async fn find_by_id(
             Err(e) => Err(e),
         }
     })
-        .await
-        // If there is no error, return a response with the retrieved data
-        .map(|results| HttpResponse::Ok().json(results))
-        .map_err(|e| {
-            error!("{}", e);
-            match e {
-                // If no software is found, return a 404
-                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No software found".to_string(),
-                    status: 404,
-                    detail: "No software found with the specified ID".to_string(),
-                }),
-                // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Error while attempting to retrieve requested software from DB".to_string(),
-                }),
-            }
-        })?;
+    .await
+    // If there is no error, return a response with the retrieved data
+    .map(|results| HttpResponse::Ok().json(results))
+    .map_err(|e| {
+        error!("{}", e);
+        match e {
+            // If no software is found, return a 404
+            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                title: "No software found".to_string(),
+                status: 404,
+                detail: "No software found with the specified ID".to_string(),
+            }),
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: "Error while attempting to retrieve requested software from DB".to_string(),
+            }),
+        }
+    })?;
 
     Ok(res)
 }
@@ -99,29 +99,29 @@ async fn find(
             }
         }
     })
-        .await
-        .map(|results| {
-            // If there are no results, return a 404
-            if results.len() < 1 {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No software found".to_string(),
-                    status: 404,
-                    detail: "No software found with the specified parameters".to_string(),
-                })
-            } else {
-                // If there is no error, return a response with the retrieved data
-                HttpResponse::Ok().json(results)
-            }
-        })
-        .map_err(|e| {
-            error!("{}", e);
-            // If there is an error, return a 500
-            HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested software(s) from DB".to_string(),
+    .await
+    .map(|results| {
+        // If there are no results, return a 404
+        if results.len() < 1 {
+            HttpResponse::NotFound().json(ErrorBody {
+                title: "No software found".to_string(),
+                status: 404,
+                detail: "No software found with the specified parameters".to_string(),
             })
-        })?;
+        } else {
+            // If there is no error, return a response with the retrieved data
+            HttpResponse::Ok().json(results)
+        }
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        // If there is an error, return a 500
+        HttpResponse::InternalServerError().json(ErrorBody {
+            title: "Server error".to_string(),
+            status: 500,
+            detail: "Error while attempting to retrieve requested software(s) from DB".to_string(),
+        })
+    })?;
 
     Ok(res)
 }
@@ -140,18 +140,23 @@ async fn create(
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Verify the repository_url points to a valid git repo
-    match git_repo_exists(&new_software.repository_url) {
+    match git_repo_exists(&new_software.repository_url).await {
         Ok(val) => {
             // If we didn't find it, tell the user we couldn't find it
             if !val {
-                error!("Failed to validate existence of git repo at {}", &new_software.repository_url);
+                error!(
+                    "Failed to validate existence of git repo at {}",
+                    &new_software.repository_url
+                );
                 return Ok(HttpResponse::BadRequest().json(ErrorBody {
                     title: "Git Repo does not exist".to_string(),
                     status: 400,
-                    detail: "Failed to verify the existence of a git repository at the specified url".to_string(),
+                    detail:
+                        "Failed to verify the existence of a git repository at the specified url"
+                            .to_string(),
                 }));
             }
-        },
+        }
         Err(e) => {
             // If there was some error when attempting to find it, inform the user
             error!("Encountered an error while trying to verify the existence of a git repo at {} : {}", &new_software.repository_url, e);
@@ -266,11 +271,11 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 mod tests {
 
     use super::*;
+    use crate::routes::error_body::ErrorBody;
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
-    use crate::routes::error_body::ErrorBody;
 
     fn create_test_software(conn: &PgConnection) -> SoftwareData {
         let new_software = NewSoftware {

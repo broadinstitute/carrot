@@ -4,15 +4,15 @@
 //! their URI mappings
 
 use crate::db;
+use crate::models::template::TemplateData;
 use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery};
+use crate::requests::test_resource_requests;
+use crate::routes::error_body::ErrorBody;
+use crate::wdl::combiner;
+use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;
-use crate::wdl::combiner;
-use crate::requests::test_resource_requests;
-use crate::models::template::TemplateData;
-use actix_web::client::Client;
-use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
 ///
@@ -391,23 +391,20 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route(web::get().to(find))
             .route(web::post().to(create)),
     );
-    cfg.service(
-        web::resource("/tests/{id}/wrapper")
-            .route(web::get().to(get_wrapper_wdl))
-    );
+    cfg.service(web::resource("/tests/{id}/wrapper").route(web::get().to(get_wrapper_wdl)));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::template::NewTemplate;
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
-    use uuid::Uuid;
-    use crate::models::template::NewTemplate;
-    use std::fs::read_to_string;
     use serde_json::json;
+    use std::fs::read_to_string;
     use std::str::from_utf8;
+    use uuid::Uuid;
 
     fn create_test_test(conn: &PgConnection) -> TestData {
         let new_test = NewTest {
@@ -775,7 +772,7 @@ mod tests {
                 .data(Client::default())
                 .configure(init_routes),
         )
-            .await;
+        .await;
 
         // Make request
         let req = test::TestRequest::get()
@@ -793,6 +790,5 @@ mod tests {
         let truth_wdl = read_to_string("testdata/routes/test/combined_wdl.wdl").unwrap();
 
         assert_eq!(wrapper_wdl, truth_wdl);
-
     }
 }

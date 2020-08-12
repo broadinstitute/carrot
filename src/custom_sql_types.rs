@@ -10,7 +10,7 @@ use std::fmt;
 /// Maps to the custom type `run_status_enum` in the DB
 ///
 /// Represents the enum used in the DB for storing the status of a run
-#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 #[DieselType = "Run_status_enum"]
 pub enum RunStatusEnum {

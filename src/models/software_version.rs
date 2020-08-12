@@ -61,7 +61,27 @@ impl SoftwareVersionData {
     /// or an error if the query fails for some reason or if no software_version is found matching the
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
-        software_version.filter(software_version_id.eq(id)).first::<Self>(conn)
+        software_version
+            .filter(software_version_id.eq(id))
+            .first::<Self>(conn)
+    }
+
+    /// Queries the DB for the software name, repo url, and commit hash for the specified
+    /// software_version_id
+    ///
+    /// Queries the DB using `conn` to retrieve the first row with the `name` and `repository_url`
+    /// columns from the SOFTWARE table and the `commit` column for the SOFTWARE_VERSION table for
+    /// the software_version with the software_version_id of `id`, or returns an error if thw query
+    /// fails for some reason or if no record is found for those parameters
+    pub fn find_name_repo_url_and_commit_by_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<(String, String, String), diesel::result::Error> {
+        software_version::table
+            .inner_join(software::table)
+            .filter(software_version_id.eq(id))
+            .select((software::name, software::repository_url, commit))
+            .first::<(String, String, String)>(conn)
     }
 
     /// Queries the DB for software_versions matching the specified query criteria
@@ -166,12 +186,14 @@ impl SoftwareVersionData {
     /// Creates a new software_version row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new software_version that was created or an error if the
     /// insert fails for some reason
-    pub fn create(conn: &PgConnection, params: NewSoftwareVersion) -> Result<Self, diesel::result::Error> {
+    pub fn create(
+        conn: &PgConnection,
+        params: NewSoftwareVersion,
+    ) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(software_version)
             .values(&params)
             .get_result(conn)
     }
-
 }
 
 #[cfg(test)]
@@ -198,13 +220,19 @@ mod tests {
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
         };
 
-        SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software_version")
+        SoftwareVersionData::create(conn, new_software_version)
+            .expect("Failed inserting test software_version")
     }
 
-    fn insert_software_versions_with_software(conn: &PgConnection) -> (Vec<SoftwareData>, Vec<SoftwareVersionData>) {
+    fn insert_software_versions_with_software(
+        conn: &PgConnection,
+    ) -> (Vec<SoftwareData>, Vec<SoftwareVersionData>) {
         let new_softwares = insert_test_softwares(conn);
 
-        let ids = vec![new_softwares.get(0).unwrap().software_id.clone(), new_softwares.get(1).unwrap().software_id.clone()];
+        let ids = vec![
+            new_softwares.get(0).unwrap().software_id.clone(),
+            new_softwares.get(1).unwrap().software_id.clone(),
+        ];
 
         let new_software_versions = insert_test_software_versions_with_software_id(conn, ids);
 
@@ -221,7 +249,9 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        softwares.push(SoftwareData::create(conn, new_software).expect("Failed inserting test software"));
+        softwares.push(
+            SoftwareData::create(conn, new_software).expect("Failed inserting test software"),
+        );
 
         let new_software = NewSoftware {
             name: String::from("Kevin's Other Other Software"),
@@ -230,12 +260,17 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        softwares.push(SoftwareData::create(conn, new_software).expect("Failed inserting test software"));
+        softwares.push(
+            SoftwareData::create(conn, new_software).expect("Failed inserting test software"),
+        );
 
         softwares
     }
 
-    fn insert_test_software_versions_with_software_id(conn: &PgConnection, ids: Vec<Uuid>) -> Vec<SoftwareVersionData> {
+    fn insert_test_software_versions_with_software_id(
+        conn: &PgConnection,
+        ids: Vec<Uuid>,
+    ) -> Vec<SoftwareVersionData> {
         let mut software_versions = Vec::new();
 
         let new_software_version = NewSoftwareVersion {
@@ -244,7 +279,8 @@ mod tests {
         };
 
         software_versions.push(
-            SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software_version"),
+            SoftwareVersionData::create(conn, new_software_version)
+                .expect("Failed inserting test software_version"),
         );
 
         let new_software_version = NewSoftwareVersion {
@@ -253,7 +289,8 @@ mod tests {
         };
 
         software_versions.push(
-            SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software_version"),
+            SoftwareVersionData::create(conn, new_software_version)
+                .expect("Failed inserting test software_version"),
         );
 
         let new_software_version = NewSoftwareVersion {
@@ -262,7 +299,8 @@ mod tests {
         };
 
         software_versions.push(
-            SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software_version"),
+            SoftwareVersionData::create(conn, new_software_version)
+                .expect("Failed inserting test software_version"),
         );
 
         software_versions
@@ -274,8 +312,9 @@ mod tests {
 
         let test_software_version = insert_test_software_version(&conn);
 
-        let found_software_version = SoftwareVersionData::find_by_id(&conn, test_software_version.software_version_id)
-            .expect("Failed to retrieve test software_version by id.");
+        let found_software_version =
+            SoftwareVersionData::find_by_id(&conn, test_software_version.software_version_id)
+                .expect("Failed to retrieve test software_version by id.");
 
         assert_eq!(found_software_version, test_software_version);
     }
@@ -290,6 +329,28 @@ mod tests {
             nonexistent_software_version,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_name_repo_url_and_commit_by_id_success() {
+        let conn = get_test_db_connection();
+
+        let test_software_version = insert_test_software_version(&conn);
+
+        let results = SoftwareVersionData::find_name_repo_url_and_commit_by_id(
+            &conn,
+            test_software_version.software_version_id,
+        )
+        .unwrap();
+
+        assert_eq!(
+            results,
+            (
+                "Kevin's Software".to_string(),
+                "https://example.com/organization/project".to_string(),
+                "9aac5e85f34921b2642beded8b3891b97c5a6dc7".to_string()
+            )
+        );
     }
 
     #[test]
@@ -395,7 +456,6 @@ mod tests {
         assert_eq!(found_software_versions[0], test_software_versions[0]);
     }
 
-
     #[test]
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
@@ -487,6 +547,9 @@ mod tests {
 
         let test_software_version = insert_test_software_version(&conn);
 
-        assert_eq!(test_software_version.commit, "9aac5e85f34921b2642beded8b3891b97c5a6dc7");
+        assert_eq!(
+            test_software_version.commit,
+            "9aac5e85f34921b2642beded8b3891b97c5a6dc7"
+        );
     }
 }

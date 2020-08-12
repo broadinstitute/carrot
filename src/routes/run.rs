@@ -5,17 +5,17 @@
 
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
+use crate::manager::test_runner;
 use crate::models::run::{RunQuery, RunWithResultData};
+use crate::routes::error_body::ErrorBody;
+use actix_web::dev::HttpResponseBuilder;
+use actix_web::http::StatusCode;
 use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use chrono::NaiveDateTime;
 use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::manager::test_runner;
-use actix_web::http::StatusCode;
-use actix_web::dev::HttpResponseBuilder;
-use crate::routes::error_body::ErrorBody;
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -389,11 +389,19 @@ async fn run_for_test(
     client: web::Data<Client>,
 ) -> HttpResponse {
     // Get DB connection
-    let conn = pool
-        .get()
-        .expect("Failed to get DB connection from pool");
+    let conn = pool.get().expect("Failed to get DB connection from pool");
     // Create run
-    match test_runner::create_run(&conn, client.get_ref(), &*id, run_inputs.name, run_inputs.test_input, run_inputs.eval_input, run_inputs.created_by).await {
+    match test_runner::create_run(
+        &conn,
+        client.get_ref(),
+        &*id,
+        run_inputs.name,
+        run_inputs.test_input,
+        run_inputs.eval_input,
+        run_inputs.created_by,
+    )
+    .await
+    {
         Ok(run) => HttpResponse::Ok().json(run),
         Err(err) => {
             let error_body = match err {
@@ -439,9 +447,23 @@ async fn run_for_test(
                         "Error while attempting to retrieve WDL from {}",
                         m
                     ),
+                },
+                test_runner::Error::SoftwareNotFound(name) => ErrorBody {
+                    title: "No such software exists".to_string(),
+                    status: 400,
+                    detail: format!("No software registered with the name: {}", name),
+                },
+                test_runner::Error::Build(e) => ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to build software docker image: {}", e),
                 }
             };
-            HttpResponseBuilder::new(StatusCode::from_u16(error_body.status).expect("Failed to parse status code. This shouldn't happen")).json(error_body)
+            HttpResponseBuilder::new(
+                StatusCode::from_u16(error_body.status)
+                    .expect("Failed to parse status code. This shouldn't happen"),
+            )
+            .json(error_body)
         }
     }
 }
@@ -475,9 +497,9 @@ mod tests {
     use diesel::PgConnection;
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
+    use serde_json::json;
     use std::fs::read_to_string;
     use uuid::Uuid;
-    use serde_json::json;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
@@ -1021,6 +1043,5 @@ mod tests {
                 detail: "If a custom run name is specified, it must be unique.".to_string(),
             }
         );
-
     }
 }

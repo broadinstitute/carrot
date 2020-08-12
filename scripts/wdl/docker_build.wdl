@@ -38,4 +38,8 @@ workflow docker_build {
             registry_host = registry_host
     }
 
+    output {
+        String image_url = registry_host + '/' + software_name + ':' + commit_hash
+    }
+
 }

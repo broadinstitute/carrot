@@ -1,9 +1,11 @@
 //! Contains structs and functions for doing operations on Software Versions.
 //!
 //! A software_build represents build of a specific commit of a software, with a status showing the
-//! status of the build process and a url pointing to the image location. Represented in the 
+//! status of the build process and a url pointing to the image location. Represented in the
 //! database by the SOFTWARE_BUILD table.
 
+use crate::custom_sql_types::BuildStatusEnum;
+use crate::schema::run_software_version;
 use crate::schema::software_build;
 use crate::schema::software_build::dsl::*;
 use crate::util;
@@ -11,7 +13,6 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::custom_sql_types::BuildStatusEnum;
 
 /// Mapping to a software_build as it exists in the SOFTWARE_BUILD table in the database.
 ///
@@ -84,16 +85,41 @@ impl SoftwareBuildData {
     /// or an error if the query fails for some reason or if no software_build is found matching the
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
-        software_build.filter(software_build_id.eq(id)).first::<Self>(conn)
+        software_build
+            .filter(software_build_id.eq(id))
+            .first::<Self>(conn)
     }
 
     /// Queries the DB for software_builds that haven't finished yet
     ///
     /// Returns result containing either a vector of the retrieved software_builds (which have a
-    /// null value in the `finished_at` column) or a diesel error if retrieving the runs fails for
+    /// null value in the `finished_at` column) or a diesel error if retrieving the rows fails for
     /// some reason
     pub fn find_unfinished(conn: &PgConnection) -> Result<Vec<Self>, diesel::result::Error> {
-        software_build.filter(finished_at.is_null()).load::<Self>(conn)
+        software_build
+            .filter(finished_at.is_null())
+            .load::<Self>(conn)
+    }
+
+    /// Queries the DB for unfinished software builds for each software version associated with the
+    /// run specified by `id`
+    ///
+    /// Returns result containing either a vector of the retrieved software_builds (which have a
+    /// null value in the `finished_at` column and are related to a software_version for which
+    /// there is a relation to the run with run_id = `id`), or a diesel error if retrieving the
+    /// rows fails for some reason
+    pub fn find_unfinished_for_run(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        let run_software_version_subquery = run_software_version::dsl::run_software_version
+            .filter(run_software_version::dsl::run_id.eq(id))
+            .select(run_software_version::dsl::software_version_id);
+
+        software_build
+            .filter(software_version_id.eq_any(run_software_version_subquery))
+            .filter(finished_at.is_null())
+            .load::<Self>(conn)
     }
 
     /// Queries the DB for software_builds matching the specified query criteria
@@ -213,7 +239,10 @@ impl SoftwareBuildData {
     /// Creates a new software_build row in the DB using `conn` with the values specified in `params`
     /// Returns a result containing either the new software_build that was created or an error if the
     /// insert fails for some reason
-    pub fn create(conn: &PgConnection, params: NewSoftwareBuild) -> Result<Self, diesel::result::Error> {
+    pub fn create(
+        conn: &PgConnection,
+        params: NewSoftwareBuild,
+    ) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(software_build)
             .values(&params)
             .get_result(conn)
@@ -234,18 +263,20 @@ impl SoftwareBuildData {
             .set(params)
             .get_result(conn)
     }
-
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::RunStatusEnum;
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
-    use crate::unit_test_util::*;
-    use uuid::Uuid;
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::unit_test_util::*;
     use chrono::Utc;
+    use uuid::Uuid;
 
     fn insert_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
         let new_software = NewSoftware {
@@ -272,13 +303,27 @@ mod tests {
             finished_at: None,
         };
 
-        SoftwareBuildData::create(conn, new_software_build).expect("Failed inserting test software_build")
+        SoftwareBuildData::create(conn, new_software_build)
+            .expect("Failed inserting test software_build")
     }
 
-    fn insert_software_builds_with_versions(conn: &PgConnection) -> (Vec<SoftwareVersionData>, Vec<SoftwareBuildData>) {
+    fn insert_software_builds_with_versions(
+        conn: &PgConnection,
+    ) -> (Vec<SoftwareVersionData>, Vec<SoftwareBuildData>) {
         let new_software_versions = insert_test_software_versions(conn);
 
-        let ids = vec![new_software_versions.get(0).unwrap().software_version_id.clone(), new_software_versions.get(1).unwrap().software_version_id.clone()];
+        let ids = vec![
+            new_software_versions
+                .get(0)
+                .unwrap()
+                .software_version_id
+                .clone(),
+            new_software_versions
+                .get(1)
+                .unwrap()
+                .software_version_id
+                .clone(),
+        ];
 
         let new_software_builds = insert_test_software_builds_with_software_version_id(conn, ids);
 
@@ -302,19 +347,28 @@ mod tests {
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
         };
 
-        software_versions.push(SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software"));
+        software_versions.push(
+            SoftwareVersionData::create(conn, new_software_version)
+                .expect("Failed inserting test software"),
+        );
 
         let new_software_version = NewSoftwareVersion {
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
             software_id: new_software.software_id,
         };
 
-        software_versions.push(SoftwareVersionData::create(conn, new_software_version).expect("Failed inserting test software"));
+        software_versions.push(
+            SoftwareVersionData::create(conn, new_software_version)
+                .expect("Failed inserting test software"),
+        );
 
         software_versions
     }
 
-    fn insert_test_software_builds_with_software_version_id(conn: &PgConnection, ids: Vec<Uuid>) -> Vec<SoftwareBuildData> {
+    fn insert_test_software_builds_with_software_version_id(
+        conn: &PgConnection,
+        ids: Vec<Uuid>,
+    ) -> Vec<SoftwareBuildData> {
         let mut software_builds = Vec::new();
 
         let new_software_build = NewSoftwareBuild {
@@ -326,7 +380,8 @@ mod tests {
         };
 
         software_builds.push(
-            SoftwareBuildData::create(conn, new_software_build).expect("Failed inserting test software_build"),
+            SoftwareBuildData::create(conn, new_software_build)
+                .expect("Failed inserting test software_build"),
         );
 
         let new_software_build = NewSoftwareBuild {
@@ -334,11 +389,12 @@ mod tests {
             build_job_id: Some(String::from("75845b99-664f-4ec8-8922-7ac5e5e21354")),
             status: BuildStatusEnum::Starting,
             image_url: None,
-            finished_at: None,
+            finished_at: Some(Utc::now().naive_utc()),
         };
 
         software_builds.push(
-            SoftwareBuildData::create(conn, new_software_build).expect("Failed inserting test software_build"),
+            SoftwareBuildData::create(conn, new_software_build)
+                .expect("Failed inserting test software_build"),
         );
 
         let new_software_build = NewSoftwareBuild {
@@ -350,10 +406,37 @@ mod tests {
         };
 
         software_builds.push(
-            SoftwareBuildData::create(conn, new_software_build).expect("Failed inserting test software_build"),
+            SoftwareBuildData::create(conn, new_software_build)
+                .expect("Failed inserting test software_build"),
         );
 
         software_builds
+    }
+
+    fn insert_run_software_version_with_software_version_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunSoftwareVersionData {
+        let new_run = NewRun {
+            test_id: Uuid::new_v4(),
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            cromwell_job_id: Some(String::from("123456789")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let new_run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_run_software_version = NewRunSoftwareVersion {
+            run_id: new_run.run_id.clone(),
+            software_version_id: id,
+        };
+
+        RunSoftwareVersionData::create(conn, new_run_software_version)
+            .expect("Failed inserting test run_software_version")
     }
 
     #[test]
@@ -362,8 +445,9 @@ mod tests {
 
         let test_software_build = insert_test_software_build(&conn);
 
-        let found_software_build = SoftwareBuildData::find_by_id(&conn, test_software_build.software_build_id)
-            .expect("Failed to retrieve test software_build by id.");
+        let found_software_build =
+            SoftwareBuildData::find_by_id(&conn, test_software_build.software_build_id)
+                .expect("Failed to retrieve test software_build by id.");
 
         assert_eq!(found_software_build, test_software_build);
     }
@@ -378,6 +462,39 @@ mod tests {
             nonexistent_software_build,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_unfinished_success() {
+        let conn = get_test_db_connection();
+
+        let (_, test_software_builds) = insert_software_builds_with_versions(&conn);
+
+        let found_software_builds =
+            SoftwareBuildData::find_unfinished(&conn).expect("Failed to find software_builds");
+
+        assert_eq!(found_software_builds.len(), 1);
+        assert_eq!(found_software_builds[0], test_software_builds[2]);
+    }
+
+    #[test]
+    fn find_unfinished_for_run_success() {
+        let conn = get_test_db_connection();
+
+        insert_test_software_build(&conn);
+        let (_, test_software_builds) = insert_software_builds_with_versions(&conn);
+
+        let test_run_software_version = insert_run_software_version_with_software_version_id(
+            &conn,
+            test_software_builds[2].software_version_id,
+        );
+
+        let found_software_builds =
+            SoftwareBuildData::find_unfinished_for_run(&conn, test_run_software_version.run_id)
+                .expect("Failed to find software_builds");
+
+        assert_eq!(found_software_builds.len(), 1);
+        assert_eq!(found_software_builds[0], test_software_builds[2]);
     }
 
     #[test]
@@ -522,7 +639,6 @@ mod tests {
         assert_eq!(found_software_builds[0], test_software_builds[0]);
     }
 
-
     #[test]
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
@@ -626,7 +742,10 @@ mod tests {
 
         let test_software_build = insert_test_software_build(&conn);
 
-        assert_eq!(test_software_build.build_job_id.unwrap(), "ca92ed46-cb1e-4486-b8ff-fc48d7771e67");
+        assert_eq!(
+            test_software_build.build_job_id.unwrap(),
+            "ca92ed46-cb1e-4486-b8ff-fc48d7771e67"
+        );
         assert_eq!(test_software_build.status, BuildStatusEnum::Submitted);
     }
 
@@ -643,10 +762,14 @@ mod tests {
             status: Some(BuildStatusEnum::Succeeded),
         };
 
-        let updated_software_build = SoftwareBuildData::update(&conn, test_software_build.software_build_id, changes)
-            .expect("Failed to update software build");
+        let updated_software_build =
+            SoftwareBuildData::update(&conn, test_software_build.software_build_id, changes)
+                .expect("Failed to update software build");
 
-        assert_eq!(updated_software_build.image_url, Some(String::from("example.com/kevin")));
+        assert_eq!(
+            updated_software_build.image_url,
+            Some(String::from("example.com/kevin"))
+        );
         assert_eq!(updated_software_build.status, BuildStatusEnum::Succeeded);
     }
 }

@@ -5,10 +5,10 @@
 
 use crate::db;
 use crate::models::result::{NewResult, ResultChangeset, ResultData, ResultQuery};
+use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;
-use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /results/{id} for retrieving result info by result_id
 ///

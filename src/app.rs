@@ -52,4 +52,5 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     routes::result::init_routes(cfg);
     routes::template_result::init_routes(cfg);
     routes::subscription::init_routes(cfg);
+    routes::software::init_routes(cfg);
 }

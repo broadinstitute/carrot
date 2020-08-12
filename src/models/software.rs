@@ -3,15 +3,14 @@
 //! A software represents a specific application stored in a code repository, such as GATK4.
 //! Represented in the database by the SOFTWARE table.
 
+use crate::models::sql_functions;
 use crate::schema::software;
 use crate::schema::software::dsl::*;
-use crate::schema::template_software;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use std::collections::HashMap;
 
 /// Mapping to a software as it exists in the SOFTWARE table in the database.
 ///
@@ -87,8 +86,13 @@ impl SoftwareData {
     /// Returns a result containing either the retrieved software as a SoftwareData instance
     /// or an error if the query fails for some reason or if no software is found matching the
     /// criteria
-    pub fn find_by_name_ignore_case(conn: &PgConnection, software_name: &str) -> Result<Self, diesel::result::Error> {
-        software.filter(sql_functions::lower(name).eq(software_name.to_lowercase())).first::<Self>(conn)
+    pub fn find_by_name_ignore_case(
+        conn: &PgConnection,
+        software_name: &str,
+    ) -> Result<Self, diesel::result::Error> {
+        software
+            .filter(sql_functions::lower(name).eq(software_name.to_lowercase()))
+            .first::<Self>(conn)
     }
 
     /// Queries the DB for software matching the specified query criteria

@@ -5,10 +5,10 @@
 
 use crate::db;
 use crate::models::pipeline::{NewPipeline, PipelineChangeset, PipelineData, PipelineQuery};
+use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use uuid::Uuid;
-use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /pipelines/{id} for retrieving pipeline info by pipeline_id
 ///

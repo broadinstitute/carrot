@@ -5,10 +5,10 @@
 
 use crate::db;
 use crate::models::template::{NewTemplate, TemplateChangeset, TemplateData, TemplateQuery};
+use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;
-use crate::routes::error_body::ErrorBody;
 
 /// Handles requests to /templates/{id} for retrieving template info by template_id
 ///

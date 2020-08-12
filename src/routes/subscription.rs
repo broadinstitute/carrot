@@ -11,6 +11,7 @@ use crate::models::subscription::{
 };
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
+use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpResponse};
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
@@ -19,7 +20,6 @@ use r2d2::PooledConnection;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
-use crate::routes::error_body::ErrorBody;
 
 /// Represents the part of a subscription that is received as a request body
 ///
@@ -71,7 +71,8 @@ async fn find_by_id(
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested subscription from DB".to_string(),
+                detail: "Error while attempting to retrieve requested subscription from DB"
+                    .to_string(),
             }),
         }
     })?;
@@ -380,7 +381,8 @@ async fn find(
         HttpResponse::InternalServerError().json(ErrorBody {
             title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested subscription(s) from DB".to_string(),
+            detail: "Error while attempting to retrieve requested subscription(s) from DB"
+                .to_string(),
         })
     })?;
 
@@ -552,9 +554,10 @@ async fn verify_existence(
                         "No template found".to_string(),
                         "No template found with the specified ID".to_string(),
                     ),
-                    EntityTypeEnum::Test => {
-                        ("No test found".to_string(), "No test found with the specified ID".to_string())
-                    }
+                    EntityTypeEnum::Test => (
+                        "No test found".to_string(),
+                        "No test found with the specified ID".to_string(),
+                    ),
                 };
                 HttpResponse::NotFound().json(ErrorBody {
                     title,
@@ -565,9 +568,15 @@ async fn verify_existence(
             // For other errors, return a 500
             _ => {
                 let detail = match entity_type {
-                    EntityTypeEnum::Pipeline => "Error attempting to verify existence of pipeline".to_string(),
-                    EntityTypeEnum::Template => "Error attempting to verify existence of template".to_string(),
-                    EntityTypeEnum::Test => "Error attempting to verify existence of test".to_string(),
+                    EntityTypeEnum::Pipeline => {
+                        "Error attempting to verify existence of pipeline".to_string()
+                    }
+                    EntityTypeEnum::Template => {
+                        "Error attempting to verify existence of template".to_string()
+                    }
+                    EntityTypeEnum::Test => {
+                        "Error attempting to verify existence of test".to_string()
+                    }
                 };
                 HttpResponse::InternalServerError().json(ErrorBody {
                     title: "Server error".to_string(),
