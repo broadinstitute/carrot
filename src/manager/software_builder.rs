@@ -192,6 +192,7 @@ pub fn get_or_create_software_build(
 pub async fn start_software_build(
     client: &Client,
     conn: &PgConnection,
+    software_version_id: Uuid,
     software_build_id: Uuid,
 ) -> Result<SoftwareBuildData, Error> {
     // Create path to wdl that builds docker images
@@ -199,7 +200,7 @@ pub async fn start_software_build(
 
     // Get necessary params for build wdl
     let (software_name, repo_url, commit) =
-        SoftwareVersionData::find_name_repo_url_and_commit_by_id(conn, software_build_id)?;
+        SoftwareVersionData::find_name_repo_url_and_commit_by_id(conn, software_version_id)?;
 
     // Build input json
     let json_to_submit = json!({
@@ -236,9 +237,11 @@ mod tests {
     use crate::models::software_version::{SoftwareVersionData, NewSoftwareVersion};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::unit_test_util::get_test_db_connection;
-    use crate::manager::software_builder::{get_or_create_software_version, get_or_create_software_build};
+    use crate::manager::software_builder::{get_or_create_software_version, get_or_create_software_build, start_software_build};
     use crate::models::software_build::{SoftwareBuildData, NewSoftwareBuild};
     use crate::custom_sql_types::BuildStatusEnum;
+    use actix_web::client::Client;
+    use serde_json::json;
 
     fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
         let new_software = NewSoftware {
@@ -291,6 +294,35 @@ mod tests {
             software_version_id: new_software_version.software_version_id,
             build_job_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
             status: BuildStatusEnum::Submitted,
+            image_url: None,
+            finished_at: None,
+        };
+
+        SoftwareBuildData::create(conn, new_software_build)
+            .expect("Failed inserting test software_build")
+    }
+
+    fn insert_test_software_build_created(conn: &PgConnection) -> SoftwareBuildData {
+        let new_software = NewSoftware {
+            name: String::from("Kevin's Software3"),
+            description: Some(String::from("Kevin even made this software for testing")),
+            repository_url: String::from("https://example.com/organization/project3"),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let new_software = SoftwareData::create(conn, new_software).unwrap();
+
+        let new_software_version = NewSoftwareVersion {
+            software_id: new_software.software_id,
+            commit: String::from("2bb75e67f32721abc420294378b3891b97c5a6dc7"),
+        };
+
+        let new_software_version = SoftwareVersionData::create(conn, new_software_version).unwrap();
+
+        let new_software_build = NewSoftwareBuild {
+            software_version_id: new_software_version.software_version_id,
+            build_job_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
+            status: BuildStatusEnum::Created,
             image_url: None,
             finished_at: None,
         };
@@ -388,5 +420,33 @@ mod tests {
         assert_eq!(result.build_job_id, None);
         assert_eq!(result.image_url, None);
         assert_eq!(result.status, BuildStatusEnum::Created);
+    }
+
+    #[actix_rt::test]
+    async fn test_start_software_build() {
+        std::env::set_var("IMAGE_REGISTRY_HOST", "https://example.com");
+
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        let test_software_build = insert_test_software_build_created(&conn);
+
+        // Define mockito mapping for response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        let response_build = start_software_build(&client, &conn, test_software_build.software_version_id, test_software_build.software_build_id).await.unwrap();
+
+        mock.assert();
+
+        assert_eq!(response_build.status, BuildStatusEnum::Submitted);
+        assert_eq!(response_build.build_job_id, Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")));
     }
 }

@@ -81,3 +81,44 @@ pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
 pub fn get_formatted_image_url(software_name: &str, commit_hash: &str) -> String {
     format!("{}/{}:{}", *IMAGE_REGISTRY_HOST, software_name, commit_hash)
 }
+
+#[cfg(test)]
+mod tests {
+    use actix_web::client::Client;
+    use crate::manager::util::{get_temp_file, start_job};
+    use serde_json::Value;
+    use std::path::PathBuf;
+    use serde_json::json;
+
+    #[actix_rt::test]
+    async fn test_start_job() {
+        // Get client
+        let client = Client::default();
+        // Create job data with simple test workflow
+        let test_path = PathBuf::from("testdata/requests/cromwell_requests/test_workflow.wdl");
+        // Make fake params
+        let params: Value = json!({
+            "myWorkflow.test":"test"
+        });
+        // Write them to a temp file
+        let test_json_file = get_temp_file(&params.to_string()).unwrap();
+        // Define mockito mapping for response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        let response = start_job(&client, test_path.as_path(), test_json_file.path()).await.unwrap();
+
+        mock.assert();
+
+        assert_eq!(response.status, String::from("Submitted"));
+        assert_eq!(response.id, "53709600-d114-4194-a7f7-9e41211ca2ce");
+    }
+
+}

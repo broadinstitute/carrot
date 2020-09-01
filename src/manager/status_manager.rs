@@ -23,6 +23,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use threadpool::ThreadPool;
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
@@ -109,8 +110,20 @@ pub async fn manage(
                 }
             }
         };
+        // Get environment variable value for number of threads to use for updating statuses, or default to 4
+        static ref STATUS_MANAGER_THREADS: usize = {
+            match env::var("STATUS_MANAGER_THREADS") {
+                Ok(s) => s.parse::<usize>().unwrap(),
+                Err(_) => {
+                    info!("No value specified for number of status manager threads.  Defaulting to 4 threads");
+                    4
+                }
+            }
+        };
     }
-    // Track consecutive failures to retrieve runs so we can panic if there are too many
+    // Create a threadpool for checking statuses
+    let pool = ThreadPool::new(*STATUS_MANAGER_THREADS);
+    // Track consecutive failures to retrieve runs/builds so we can panic if there are too many
     let mut consecutive_failures: u32 = 0;
     // Main loop
     loop {
@@ -128,7 +141,7 @@ pub async fn manage(
                     if let Some(_) = check_for_terminate_message(&channel_recv) {
                         return Ok(());
                     };
-                    // Check and update status
+                    // Check and update status in new thread
                     debug!("Checking status of run with id: {}", run.run_id);
                     if let Err(e) =
                         check_and_update_run_status(&run, &client, &db_pool.get().unwrap()).await
@@ -351,7 +364,7 @@ async fn check_and_update_build_status(
 ) -> Result<(), UpdateStatusError> {
     // If this build has a status of 'Created', start it
     if matches!(build.status, BuildStatusEnum::Created) {
-        software_builder::start_software_build(client, conn, build.software_build_id).await?;
+        software_builder::start_software_build(client, conn, build.software_version_id, build.software_build_id).await?;
         return Ok(());
     }
     // Get metadata
@@ -390,7 +403,7 @@ async fn check_and_update_build_status(
                     }
                 };
                 // Get the image_url
-                let image_url = match outputs.get("image_url") {
+                let image_url = match outputs.get("docker_build.image_url") {
                     Some(val) => match val.as_str() {
                         Some(image_url) => image_url.to_owned(),
                         None => {
@@ -596,8 +609,8 @@ fn fill_results(
 #[cfg(test)]
 mod tests {
 
-    use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
-    use crate::manager::status_manager::{check_and_update_run_status, fill_results};
+    use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum, BuildStatusEnum};
+    use crate::manager::status_manager::{check_and_update_run_status, fill_results, check_and_update_build_status};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
@@ -608,6 +621,9 @@ mod tests {
     use diesel::PgConnection;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::software_build::{SoftwareBuildData, NewSoftwareBuild};
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -664,6 +680,35 @@ mod tests {
         RunData::create(conn, new_run).expect("Failed inserting test run")
     }
 
+    fn insert_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
+        let new_software = NewSoftware {
+            name: String::from("Kevin's Software3"),
+            description: Some(String::from("Kevin even made this software for testing")),
+            repository_url: String::from("https://example.com/organization/project3"),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let new_software = SoftwareData::create(conn, new_software).unwrap();
+
+        let new_software_version = NewSoftwareVersion {
+            software_id: new_software.software_id,
+            commit: String::from("2bb75e67f32721abc420294378b3891b97c5a6dc7"),
+        };
+
+        let new_software_version = SoftwareVersionData::create(conn, new_software_version).unwrap();
+
+        let new_software_build = NewSoftwareBuild {
+            software_version_id: new_software_version.software_version_id,
+            build_job_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
+            status: BuildStatusEnum::Submitted,
+            image_url: None,
+            finished_at: None,
+        };
+
+        SoftwareBuildData::create(conn, new_software_build)
+            .expect("Failed inserting test software_build")
+    }
+
     #[test]
     fn test_fill_results() {
         let pool = get_test_db_pool();
@@ -694,7 +739,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_status() {
+    async fn test_check_and_update_run_status() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
@@ -746,5 +791,50 @@ mod tests {
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
         assert_eq!(results.len(), 1);
         assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_build_status() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_build = insert_test_software_build(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Succeeded",
+          "outputs": {
+            "docker_build.image_url": "test.gcr.io/test_project/test_image:test",
+          },
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_build_status(&test_build, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for build to make sure data was filled properly
+        let result_build = SoftwareBuildData::find_by_id(&conn, test_build.software_build_id).unwrap();
+        assert_eq!(result_build.status, BuildStatusEnum::Succeeded);
+        assert_eq!(
+            result_build.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+        assert_eq!(result_build.image_url.unwrap(), "test.gcr.io/test_project/test_image:test");
     }
 }

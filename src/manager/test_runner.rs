@@ -6,7 +6,7 @@
 use crate::custom_sql_types::RunStatusEnum;
 use crate::manager::{software_builder, util};
 use crate::models::run::{NewRun, RunChangeset, RunData, RunQuery};
-use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
+use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData, RunSoftwareVersionQuery};
 use crate::models::software::SoftwareData;
 use crate::models::software_build::SoftwareBuildData;
 use crate::models::software_version::SoftwareVersionData;
@@ -90,8 +90,16 @@ impl From<software_builder::Error> for Error {
 /// Creates a new run and inserts it into the DB
 ///
 /// Creates a new run based on `new_run`, with `test_id`, and inserts it into the DB with status
-/// `Created`.  Returns created run or an error if parsing `test_id` fails, a run already exists
-/// with the name specified in `new_run.name` or there is an error querying or inserting to the DB
+/// `Created`.  If any of the parameters for this run match the format for specifying a software
+/// build, it marks the run as `Building` (after creating the records for the builds, if necessary).
+/// If none of the parameters specify a software build, it starts the run.  Returns created run or
+/// an error if parsing `test_id` fails, a run already exists with the name specified in
+/// `new_run.name` or there is an error querying or inserting to the DB.
+///
+/// Note: In the case that a docker image needs to be built for a run, it does not actually start
+/// the build (i.e. it doesn't submit the build job to Cromwell).  Instead, it marks the build as
+/// `Created`, which will indicate to the `status_manager` that it should be submitted to
+/// Cromwell for building.
 pub async fn create_run(
     conn: &PgConnection,
     client: &Client,
@@ -138,8 +146,8 @@ pub async fn create_run(
     // with other tests. An unfortunate side effect of this is that we can't use transactions in
     // the code being tested, because you can't have a transaction within a transaction.  So, for
     // tests, we don't specify that this be run in a transaction.
-    // Also, if your IDE says we're using moved values here, it's unaware that this block and the
-    // block above it will never exist in the same build, so the values aren't actually moved.
+    // Also, if your IDE says we're using moved values here, it's unaware that this line and the
+    // line above it will never exist in the same build, so the values aren't actually moved.
     #[cfg(test)]
     let run = create_run_in_db(conn, test_id, run_name, test_json, eval_json, created_by)?;
 
@@ -313,7 +321,7 @@ fn process_software_version_mappings(
         if IMAGE_BUILD_REGEX.is_match(value) {
             // Pull software name and commit from value
             let name_and_commit: Vec<&str> =
-                value.trim_start_matches("image_build").split("|").collect();
+                value.trim_start_matches("image_build:").split("|").collect();
             // Try to get software, return error if unsuccessful
             let software = match SoftwareData::find_by_name_ignore_case(conn, name_and_commit[0]) {
                 Ok(software) => software,
@@ -332,15 +340,36 @@ fn process_software_version_mappings(
                 },
             };
             // Get or create software version for this software&commit and add to map
+            #[cfg(not(test))]
             let software_version = software_builder::get_or_create_software_version_in_transaction(
                 conn,
                 software.software_id,
                 name_and_commit[1],
             )?;
+
+            // Tests do all database stuff in transactions that are not committed so they don't interfere
+            // with other tests. An unfortunate side effect of this is that we can't use transactions in
+            // the code being tested, because you can't have a transaction within a transaction.  So, for
+            // tests, we don't specify that this be run in a transaction.
+            // Also, if your IDE says we're using moved values here, it's unaware that this line and the
+            // line above it will never exist in the same build, so the values aren't actually moved.
+            #[cfg(test)]
+            let software_version = software_builder::get_or_create_software_version(
+                conn,
+                software.software_id,
+                name_and_commit[1],
+            )?;
+
             version_map.insert(String::from(key), software_version);
             // Also add run_software_version mapping
             for (_, value) in &version_map {
-                map_run_to_software_version(conn, value.software_version_id, run_id)?;
+
+                #[cfg(not(test))]
+                get_or_create_run_software_version_in_transaction(conn, value.software_version_id, run_id)?;
+
+                // See explanation above about transactions in tests
+                #[cfg(test)]
+                get_or_create_run_software_version(conn, value.software_version_id, run_id)?;
             }
         }
     }
@@ -348,19 +377,48 @@ fn process_software_version_mappings(
     Ok(version_map)
 }
 
-/// Maps the run specified by `run_id` to the software_version specified by `software_version_id` in
-/// the database
-fn map_run_to_software_version(
+/// Attempts to retrieve a run_software_version record with the specified `run_id` and
+/// `software_version_id`, and creates one if unsuccessful, in a transaction
+pub fn get_or_create_run_software_version_in_transaction(
+    conn: &PgConnection,
+    software_version_id: Uuid,
+    run_id: Uuid
+) -> Result<RunSoftwareVersionData, Error> {
+    // Call get_software_version within a transaction
+    conn.build_transaction()
+        .run(|| get_or_create_run_software_version(conn, software_version_id, run_id))
+}
+
+/// Attempts to retrieve a run_software_version record with the specified `run_id` and
+/// `software_version_id`, and creates one if unsuccessful
+pub fn get_or_create_run_software_version(
     conn: &PgConnection,
     software_version_id: Uuid,
     run_id: Uuid,
-) -> Result<RunSoftwareVersionData, diesel::result::Error> {
-    let new_mapping = NewRunSoftwareVersion {
-        run_id,
-        software_version_id,
-    };
+) -> Result<RunSoftwareVersionData, Error> {
+    // Try to find a run software version mapping row for this version and run to see if we've
+    // already created the mapping
+    let mut run_software_version = RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
 
-    RunSoftwareVersionData::create(conn, new_mapping)
+    match run_software_version {
+        // If we found it, return it
+        Ok(run_software_version) => {
+            return Ok(run_software_version);
+        }
+        // If we didn't find it, create it
+        Err(diesel::NotFound) => {
+            let new_run_software_version = NewRunSoftwareVersion {
+                run_id,
+                software_version_id,
+            };
+
+            Ok(RunSoftwareVersionData::create(conn, new_run_software_version)?)
+        }
+        // Otherwise, return error
+        Err(e) => {
+            return Err(Error::DB(e))
+        }
+    }
 }
 
 /// Checks if there is already a run in the DB with the specified name
@@ -527,7 +585,7 @@ fn format_json_for_cromwell(object: &Value) -> Result<Value, Error> {
             if IMAGE_BUILD_REGEX.is_match(val) {
                 // Pull software name and commit from value
                 let name_and_commit: Vec<&str> =
-                    val.trim_start_matches("image_build").split("|").collect();
+                    val.trim_start_matches("image_build:").split("|").collect();
                 new_val = json!(util::get_formatted_image_url(
                     name_and_commit[0],
                     name_and_commit[1]
@@ -627,14 +685,73 @@ fn create_run_in_db(
 
 #[cfg(test)]
 mod tests {
-    use crate::custom_sql_types::RunStatusEnum;
-    use crate::manager::test_runner::{create_run_in_db, format_json_for_cromwell, Error};
+    use crate::custom_sql_types::{RunStatusEnum, BuildStatusEnum};
+    use crate::manager::test_runner::{create_run_in_db, format_json_for_cromwell, Error, check_if_run_with_name_exists, create_run, get_or_create_run_software_version};
     use crate::models::run::{NewRun, RunData};
     use crate::unit_test_util::get_test_db_connection;
     use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::software_version::{SoftwareVersionData, NewSoftwareVersion, SoftwareVersionQuery};
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use actix_web::client::Client;
+    use crate::models::template::{TemplateData, NewTemplate};
+    use crate::models::test::{TestData, NewTest};
+    use std::fs::read_to_string;
+    use std::path::Path;
+    use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
+    use crate::models::run_software_version::RunSoftwareVersionData;
+
+    fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: Uuid::new_v4(),
+            description: None,
+            test_wdl: format!("{}/test_no_software_params", mockito::server_url()),
+            eval_wdl: format!("{}/eval_no_software_params", mockito::server_url()),
+            created_by: None,
+        };
+
+        TemplateData::create(&conn, new_template).expect("Failed to insert test")
+    }
+
+    fn insert_test_template_software_params(conn: &PgConnection) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: Uuid::new_v4(),
+            description: None,
+            test_wdl: format!("{}/test_software_params", mockito::server_url()),
+            eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            created_by: None,
+        };
+
+        TemplateData::create(&conn, new_template).expect("Failed to insert test")
+    }
+
+    fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: id,
+            description: None,
+            test_input_defaults: Some(json!({"in_pleasantry":"Yo"})),
+            eval_input_defaults: Some(json!({"in_verb":"yelled"})),
+            created_by: None,
+        };
+
+        TestData::create(&conn, new_test).expect("Failed to insert test")
+    }
+
+    fn insert_test_software(conn: &PgConnection) -> SoftwareData {
+        let new_software = NewSoftware {
+            name: String::from("TestSoftware"),
+            description: Some(String::from("Kevin made this software for testing")),
+            repository_url: String::from("https://example.com/organization/project"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        SoftwareData::create(conn, new_software).unwrap()
+    }
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_run = NewRun {
@@ -651,16 +768,246 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
+    fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
+        let new_software = NewSoftware {
+            name: String::from("Kevin's Software"),
+            description: Some(String::from("Kevin made this software for testing")),
+            repository_url: String::from("https://example.com/organization/project"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let new_software = SoftwareData::create(conn, new_software).unwrap();
+
+        let new_software_version = NewSoftwareVersion {
+            software_id: new_software.software_id,
+            commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
+        };
+
+        SoftwareVersionData::create(conn, new_software_version)
+            .expect("Failed inserting test software_version")
+    }
+
+    #[actix_rt::test]
+    async fn test_create_run_no_software_params() {
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        let test_template = insert_test_template_no_software_params(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+
+        let test_params = json!({"in_user_name":"Kevin"});
+        let eval_params = json!({"in_user":"Jonn"});
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Define mappings for resource request responses
+        let test_wdl_resource = read_to_string("testdata/manager/test_runner/test_wdl_no_software_params.wdl").unwrap();
+        let test_wdl_mock = mockito::mock("GET", "/test_no_software_params")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl_resource)
+            .create();
+        let eval_wdl_resource = read_to_string("testdata/manager/test_runner/eval_wdl_no_software_params.wdl").unwrap();
+        let eval_wdl_mock = mockito::mock("GET", "/eval_no_software_params")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(eval_wdl_resource)
+            .create();
+
+        let test_run = create_run(
+            &conn,
+            &client,
+            &test_test.test_id.to_string(),
+            Some(String::from("Test run")),
+            Some(test_params.clone()),
+            Some(eval_params.clone()),
+            Some(String::from("Kevin@example.com")),
+        ).await.unwrap();
+
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        cromwell_mock.assert();
+
+        assert_eq!(test_run.test_id, test_test.test_id);
+        assert_eq!(test_run.status, RunStatusEnum::Submitted);
+        assert_eq!(
+            test_run.cromwell_job_id,
+            Some("53709600-d114-4194-a7f7-9e41211ca2ce".to_string())
+        );
+        let mut test_input_to_compare = json!({});
+        json_patch::merge(
+            &mut test_input_to_compare,
+            &test_test.test_input_defaults.unwrap(),
+        );
+        json_patch::merge(&mut test_input_to_compare, &test_params);
+        let mut eval_input_to_compare = json!({});
+        json_patch::merge(
+            &mut eval_input_to_compare,
+            &test_test.eval_input_defaults.unwrap(),
+        );
+        json_patch::merge(&mut eval_input_to_compare, &eval_params);
+        assert_eq!(test_run.test_input, test_input_to_compare);
+        assert_eq!(test_run.eval_input, eval_input_to_compare);
+    }
+
+    #[actix_rt::test]
+    async fn test_create_run_software_params() {
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        let test_template = insert_test_template_no_software_params(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+
+        let test_software = insert_test_software(&conn);
+
+        let test_params = json!({"in_user_name":"Kevin", "in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let eval_params = json!({"in_user":"Jonn", "in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .expect(0)
+            .create();
+
+        // Define mappings for resource request responses
+        let test_wdl_mock = mockito::mock("GET", "/test_software_params")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .expect(0)
+            .create();
+        let eval_wdl_mock = mockito::mock("GET", "/eval_software_params")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .expect(0)
+            .create();
+
+        let test_run = create_run(
+            &conn,
+            &client,
+            &test_test.test_id.to_string(),
+            Some(String::from("Test run")),
+            Some(test_params.clone()),
+            Some(eval_params.clone()),
+            Some(String::from("Kevin@example.com")),
+        ).await.unwrap();
+
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        cromwell_mock.assert();
+
+        assert_eq!(test_run.test_id, test_test.test_id);
+        assert_eq!(test_run.status, RunStatusEnum::Building);
+        let mut test_input_to_compare = json!({});
+        json_patch::merge(
+            &mut test_input_to_compare,
+            &test_test.test_input_defaults.unwrap(),
+        );
+        json_patch::merge(&mut test_input_to_compare, &test_params);
+        let mut eval_input_to_compare = json!({});
+        json_patch::merge(
+            &mut eval_input_to_compare,
+            &test_test.eval_input_defaults.unwrap(),
+        );
+        json_patch::merge(&mut eval_input_to_compare, &eval_params);
+        assert_eq!(test_run.test_input, test_input_to_compare);
+        assert_eq!(test_run.eval_input, eval_input_to_compare);
+
+        let software_version_q = SoftwareVersionQuery{
+            software_version_id: None,
+            software_id: Some(test_software.software_id),
+            commit: Some(String::from("764a00442ddb412eed331655cfd90e151f580518")),
+            software_name: None,
+            created_before: None,
+            created_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let created_software_version = SoftwareVersionData::find(&conn, software_version_q).unwrap();
+        assert_eq!(created_software_version.len(), 1);
+
+        let software_build_q = SoftwareBuildQuery {
+            software_build_id: None,
+            software_version_id: Some(created_software_version[0].software_version_id),
+            build_job_id: None,
+            status: Some(BuildStatusEnum::Created),
+            image_url: None,
+            created_before: None,
+            created_after: None,
+            finished_before: None,
+            finished_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let created_software_build = SoftwareBuildData::find(&conn, software_build_q).unwrap();
+        assert_eq!(created_software_build.len(), 1);
+
+        let created_run_software_version = RunSoftwareVersionData::find_by_run_and_software_version(&conn, test_run.run_id, created_software_version[0].software_version_id).unwrap();
+    }
+
+    #[test]
+    fn test_get_or_create_run_software_version() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run(&conn);
+
+        let test_software_version = insert_test_software_version(&conn);
+
+        let result = get_or_create_run_software_version(&conn, test_software_version.software_version_id, test_run.run_id).unwrap();
+
+        assert_eq!(result.run_id, test_run.run_id);
+        assert_eq!(result.software_version_id, test_software_version.software_version_id);
+    }
+
     #[test]
     fn test_format_json_for_cromwell_success() {
-        let test_json = json!({"test":"1"});
+        std::env::set_var("IMAGE_REGISTRY_HOST", "https://example.com");
+
+        let test_json = json!({"test":"1","image":"image_build:example_project|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 
         let formatted_json =
             format_json_for_cromwell(&test_json).expect("Failed to format test json");
 
-        let expected_json = json!({"merged_workflow.test":"1"});
+        let expected_json = json!({"merged_workflow.test":"1","merged_workflow.image":"https://example.com/example_project:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 
         assert_eq!(formatted_json, expected_json);
+    }
+
+    #[test]
+    fn test_check_if_run_with_name_exists_true() {
+        let conn = get_test_db_connection();
+
+        insert_test_run(&conn);
+
+        let result = check_if_run_with_name_exists(&conn, "Kevin's test run").unwrap();
+
+        assert!(result);
+    }
+
+    #[test]
+    fn test_check_if_run_with_name_exists_false() {
+        let conn = get_test_db_connection();
+
+        insert_test_run(&conn);
+
+        let result = check_if_run_with_name_exists(&conn, "Kevin'stestrun").unwrap();
+
+        assert!(!result);
     }
 
     #[test]
