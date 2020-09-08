@@ -14,7 +14,7 @@ use crate::models::software_build::{SoftwareBuildChangeset, SoftwareBuildData};
 use crate::models::template_result::TemplateResultData;
 use crate::requests::cromwell_requests;
 use actix_web::client::Client;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use diesel::PgConnection;
 use log::{debug, error, info};
 use serde_json::{Map, Value};
@@ -23,7 +23,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use threadpool::ThreadPool;
+use std::hash::BuildHasherDefault;
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
@@ -121,8 +121,6 @@ pub async fn manage(
             }
         };
     }
-    // Create a threadpool for checking statuses
-    let pool = ThreadPool::new(*STATUS_MANAGER_THREADS);
     // Track consecutive failures to retrieve runs/builds so we can panic if there are too many
     let mut consecutive_failures: u32 = 0;
     // Main loop
@@ -259,6 +257,9 @@ async fn check_and_update_run_status(
                 Err(e) => Err(UpdateStatusError::Run(e))
             };
         }
+        // If any of the builds associated with this run have failed, mark the run as failed
+
+
         // Otherwise, just return ()
         return Ok(());
     }
@@ -364,8 +365,30 @@ async fn check_and_update_build_status(
 ) -> Result<(), UpdateStatusError> {
     // If this build has a status of 'Created', start it
     if matches!(build.status, BuildStatusEnum::Created) {
-        software_builder::start_software_build(client, conn, build.software_version_id, build.software_build_id).await?;
-        return Ok(());
+        match software_builder::start_software_build(client, conn, build.software_version_id, build.software_build_id).await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                error!("Failed to start software build {}, marking failed", build.software_build_id);
+                // If we failed to start the build, mark it as failed
+                let changeset = SoftwareBuildChangeset {
+                    image_url: None,
+                    status: Some(BuildStatusEnum::Failed),
+                    build_job_id: None,
+                    finished_at: Some(Utc::now().naive_utc()),
+                };
+                // Update
+                match SoftwareBuildData::update(conn, build.software_build_id.clone(), changeset) {
+                    Err(e) => {
+                        return Err(UpdateStatusError::DB(format!(
+                            "Updating build {} in DB failed with error {}",
+                            build.software_build_id,
+                            e
+                        )))
+                    }
+                    _ => {}
+                };
+            }
+        }
     }
     // Get metadata
     let metadata =
@@ -443,7 +466,8 @@ async fn check_and_update_build_status(
         match SoftwareBuildData::update(conn, build.software_build_id.clone(), build_update) {
             Err(e) => {
                 return Err(UpdateStatusError::DB(format!(
-                    "Updating build in DB failed with error {}",
+                    "Updating build {} in DB failed with error {}",
+                    build.software_build_id,
                     e
                 )))
             }
@@ -624,6 +648,9 @@ mod tests {
     use crate::models::software_build::{SoftwareBuildData, NewSoftwareBuild};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
+    use crate::models::template::{TemplateData, NewTemplate};
+    use std::fs::read_to_string;
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -652,6 +679,19 @@ mod tests {
             .expect("Failed inserting test template_result")
     }
 
+    fn insert_test_template(conn: &PgConnection) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: Uuid::new_v4(),
+            description: None,
+            test_wdl: format!("{}/test_software_params", mockito::server_url()),
+            eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            created_by: None,
+        };
+
+        TemplateData::create(&conn, new_template).expect("Failed to insert test")
+    }
+
     fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
         let new_test = NewTest {
             name: String::from("Kevin's test test"),
@@ -670,6 +710,21 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::Submitted,
+            test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
+            cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn insert_test_run_with_test_id_and_status(conn: &PgConnection, id: Uuid, status: RunStatusEnum) -> RunData {
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: id,
+            status,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
             cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
@@ -709,6 +764,47 @@ mod tests {
             .expect("Failed inserting test software_build")
     }
 
+    fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
+        let new_software = NewSoftware {
+            name: String::from("Kevin's Software"),
+            description: Some(String::from("Kevin made this software for testing")),
+            repository_url: String::from("https://example.com/organization/project"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let new_software = SoftwareData::create(conn, new_software).unwrap();
+
+        let new_software_version = NewSoftwareVersion {
+            software_id: new_software.software_id,
+            commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
+        };
+
+        SoftwareVersionData::create(conn, new_software_version)
+            .expect("Failed inserting test software_version")
+    }
+
+    fn insert_test_software_build_for_version_with_status(conn: &PgConnection, software_version_id: Uuid, status: BuildStatusEnum) -> SoftwareBuildData {
+        let new_software_build = NewSoftwareBuild{
+            software_version_id,
+            build_job_id: None,
+            status,
+            image_url: None,
+            finished_at: None,
+        };
+
+        SoftwareBuildData::create(conn, new_software_build).expect("Failed inserting test software build")
+    }
+
+    fn map_run_to_version(conn: &PgConnection, run_id: Uuid, software_version_id: Uuid){
+        let map = NewRunSoftwareVersion {
+            run_id,
+            software_version_id
+        };
+
+        RunSoftwareVersionData::create(conn, map).expect("Failed to map run to software version");
+
+    }
+
     #[test]
     fn test_fill_results() {
         let pool = get_test_db_pool();
@@ -739,7 +835,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_run_status() {
+    async fn test_check_and_update_run_status_succeeded() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
@@ -794,7 +890,166 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_build_status() {
+    async fn test_check_and_update_run_status_failed() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test and run we'll use for testing
+        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Failed",
+          "outputs": {},
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::Failed);
+        assert_eq!(
+            result_run.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_status_running() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test and run we'll use for testing
+        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Running",
+          "outputs": {},
+          "end": null
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::Running);
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_status_builds_failed() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert build, test, and run we'll use for testing
+        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let test_run = insert_test_run_with_test_id_and_status(&conn, test_test.test_id.clone(), RunStatusEnum::Building);
+        let test_software_version = insert_test_software_version(&conn);
+        insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Failed);
+        map_run_to_version(&conn, test_run.run_id, test_software_version.software_version_id);
+
+        // Define mockito mapping for cromwell response to ensure it's not being hit
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .expect(0)
+            .create();
+        // Check and update status
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::Failed);
+    }
+
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_status_builds_finished() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert build, template, test, and run we'll use for testing
+        let test_template = insert_test_template(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_test_run_with_test_id_and_status(&conn, test_test.test_id.clone(), RunStatusEnum::Building);
+        let test_software_version = insert_test_software_version(&conn);
+        insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Succeeded);
+        map_run_to_version(&conn, test_run.run_id, test_software_version.software_version_id);
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Define mappings for resource request responses
+        let test_wdl_resource = read_to_string("testdata/manager/test_runner/test_wdl_software_params.wdl").unwrap();
+        let test_wdl_mock = mockito::mock("GET", "/test_software_params")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl_resource)
+            .create();
+        let eval_wdl_resource = read_to_string("testdata/manager/test_runner/eval_wdl_software_params.wdl").unwrap();
+        let eval_wdl_mock = mockito::mock("GET", "/eval_software_params")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(eval_wdl_resource)
+            .create();
+        // Check and update status
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        cromwell_mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::Submitted);
+        assert_eq!(result_run.cromwell_job_id.unwrap(), "53709600-d114-4194-a7f7-9e41211ca2ce");
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_build_status_succeeded() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
@@ -836,5 +1091,155 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(result_build.image_url.unwrap(), "test.gcr.io/test_project/test_image:test");
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_build_status_failed() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_build = insert_test_software_build(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Failed",
+          "outputs": {},
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_build_status(&test_build, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for build to make sure data was filled properly
+        let result_build = SoftwareBuildData::find_by_id(&conn, test_build.software_build_id).unwrap();
+        assert_eq!(result_build.status, BuildStatusEnum::Failed);
+        assert_eq!(
+            result_build.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_build_status_aborted() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_build = insert_test_software_build(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Aborted",
+          "outputs": {},
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_build_status(&test_build, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for build to make sure data was filled properly
+        let result_build = SoftwareBuildData::find_by_id(&conn, test_build.software_build_id).unwrap();
+        assert_eq!(result_build.status, BuildStatusEnum::Aborted);
+        assert_eq!(
+            result_build.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_build_status_submitted() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_software_version = insert_test_software_version(&conn);
+        let test_build = insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Created);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+        // Check and update status
+        check_and_update_build_status(&test_build, &Client::default(), &conn)
+            .await
+            .unwrap();
+        cromwell_mock.assert();
+        // Query for build to make sure data was filled properly
+        let result_build = SoftwareBuildData::find_by_id(&conn, test_build.software_build_id).unwrap();
+        assert_eq!(result_build.status, BuildStatusEnum::Submitted);
+        assert_eq!(result_build.build_job_id.unwrap(), "53709600-d114-4194-a7f7-9e41211ca2ce");
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_build_status_running() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template_id = Uuid::new_v4();
+        let test_build = insert_test_software_build(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Running",
+          "outputs": {},
+          "end": null
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_build_status(&test_build, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for build to make sure data was filled properly
+        let result_build = SoftwareBuildData::find_by_id(&conn, test_build.software_build_id).unwrap();
+        assert_eq!(result_build.status, BuildStatusEnum::Running);
     }
 }

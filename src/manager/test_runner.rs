@@ -3,10 +3,10 @@
 //! The processing of running a test, once it has been defined and a request has been made to the
 //! test run mapping, is divided into multiple steps defined here
 
-use crate::custom_sql_types::RunStatusEnum;
+use crate::custom_sql_types::{RunStatusEnum, BuildStatusEnum};
 use crate::manager::{software_builder, util};
 use crate::models::run::{NewRun, RunChangeset, RunData, RunQuery};
-use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData, RunSoftwareVersionQuery};
+use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
 use crate::models::software::SoftwareData;
 use crate::models::software_build::SoftwareBuildData;
 use crate::models::software_version::SoftwareVersionData;
@@ -115,14 +115,14 @@ pub async fn create_run(
     let test = get_test(&conn, test_id)?;
 
     // Merge input JSONs
-    let mut test_json = json!("{}");
+    let mut test_json = json!({});
     if let Some(defaults) = &test.test_input_defaults {
         json_patch::merge(&mut test_json, defaults);
     }
     if let Some(inputs) = &test_input {
         json_patch::merge(&mut test_json, inputs);
     }
-    let mut eval_json = json!("{}");
+    let mut eval_json = json!({});
     if let Some(defaults) = &test.eval_input_defaults {
         json_patch::merge(&mut eval_json, defaults);
     }
@@ -152,7 +152,14 @@ pub async fn create_run(
     let run = create_run_in_db(conn, test_id, run_name, test_json, eval_json, created_by)?;
 
     // Find software version mappings associated with this run
-    let mut version_map = process_software_version_mappings(conn, run.run_id, &run.test_input)?;
+    let mut version_map = match process_software_version_mappings(conn, run.run_id, &run.test_input){
+        Ok(map) => map,
+        Err(e) => {
+            // Mark run as failed since it's been created and now we've encountered an error
+            mark_run_as_failed(conn, run.run_id)?;
+            return Err(e);
+        }
+    };
     version_map.extend(process_software_version_mappings(
         conn,
         run.run_id,
@@ -164,17 +171,31 @@ pub async fn create_run(
         for (_, version) in version_map {
             // Create build for this software version if there isn't one
             #[cfg(not(test))]
-            software_builder::get_or_create_software_build_in_transaction(
+            match software_builder::get_or_create_software_build_in_transaction(
                 conn,
                 version.software_version_id,
-            )?;
+            ){
+                // If creating a build fails, mark run as failed
+                Err(e) => {
+                    mark_run_as_failed(conn, run.run_id)?;
+                    return Err(Error::Build(e));
+                },
+                _ => {}
+            };
 
             // For tests, don't do it in a transaction
             #[cfg(test)]
-            software_builder::get_or_create_software_build(
+            match software_builder::get_or_create_software_build(
                 conn,
                 version.software_version_id,
-            )?;
+            ){
+                // If creating a build fails, mark run as failed
+                Err(e) => {
+                    mark_run_as_failed(conn, run.run_id)?;
+                    return Err(Error::Build(e));
+                },
+                _ => {}
+            };
         }
         // Update run status to building
         let run_update = RunChangeset {
@@ -184,27 +205,74 @@ pub async fn create_run(
             finished_at: None,
         };
 
-        Ok(RunData::update(conn, run.run_id, run_update)?)
+        match RunData::update(conn, run.run_id, run_update) {
+            Ok(run) => Ok(run),
+            // If updating the run fails, try marking it as failed before returning an error
+            Err(e) => {
+                mark_run_as_failed(conn, run.run_id)?;
+                return Err(Error::DB(e));
+            }
+        }
     }
     // Otherwise, start the run
     else {
-        Ok(start_run_with_template_id(conn, client, &run, test.template_id).await?)
+        match start_run_with_template_id(conn, client, &run, test.template_id).await {
+            Ok(run) => Ok(run),
+            Err(e) => {
+                mark_run_as_failed(conn, run.run_id)?;
+                return Err(e);
+            }
+        }
+    }
+}
+
+/// Updates the run with the specified `run_id` to have a status of FAILED
+///
+/// Returns `()` if successful or an error if it fails
+fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
+    let run_update = RunChangeset {
+        name: None,
+        status: Some(RunStatusEnum::Failed),
+        cromwell_job_id: None,
+        finished_at: Some(Utc::now().naive_utc()),
+    };
+
+    match RunData::update(conn, run_id, run_update) {
+        Err(e) => {
+            error!("Updating run to FAILED in db resulted in error: {}", e);
+            Err(Error::DB(e))
+        },
+        _ => Ok(())
     }
 }
 
 /// Returns `true` if all builds associated with the run specified by `run_id` are finished,
-/// returns `false` if it has unfinished builds, returns an error if there is some issue querying
-/// the DB
+/// returns `false` if it has unfinished builds or if there are failed builds, returns an error
+/// if there is some issue querying the DB
 pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<bool, Error> {
-    // Check for unfinished builds associated with this run
-    let builds = SoftwareBuildData::find_unfinished_for_run(conn, run_id)?;
+    // Check for most recent builds associated with this run
+    let builds = SoftwareBuildData::find_most_recent_builds_for_run(conn, run_id)?;
 
-    // If there aren't any unfinished builds for this run, return true
-    if builds.len() == 0 {
-        Ok(true)
-    } else {
-        Ok(false)
+    let mut finished = true;
+
+    //Loop through builds to check if any are incomplete or have failed
+    for build in builds {
+        match build.status {
+            BuildStatusEnum::Aborted | BuildStatusEnum::Failed => {
+                // If we found a failure, update the run to failed and return false
+                mark_run_as_failed(conn, run_id)?;
+                return Ok(false);
+            },
+            BuildStatusEnum::Succeeded => {},
+            _ => {
+                // If we found a build that hasn't reached a terminal state, mark that the builds
+                // are incomplete
+                finished = false;
+            }
+        }
     }
+
+    Ok(finished)
 }
 
 /// Starts a run by submitting it to cromwell
@@ -302,7 +370,7 @@ fn process_software_version_mappings(
     let json_object = match inputs_json.as_object() {
         Some(object) => object,
         None => {
-            error!("Failed to parse input json as object. This should not happen because the json parsing before this should ensure it's an object.");
+            error!("Failed to parse input json as object: {}.", inputs_json);
             return Err(Error::Json);
         }
     };
@@ -398,7 +466,7 @@ pub fn get_or_create_run_software_version(
 ) -> Result<RunSoftwareVersionData, Error> {
     // Try to find a run software version mapping row for this version and run to see if we've
     // already created the mapping
-    let mut run_software_version = RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
+    let run_software_version = RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
 
     match run_software_version {
         // If we found it, return it
@@ -632,61 +700,38 @@ fn create_run_in_db(
     eval_input: Value,
     created_by: Option<String>,
 ) -> Result<RunData, Error> {
-    let create_run_closure = || {
-        // Try to get run by name to see if a run with that name already exists
-        if check_if_run_with_name_exists(conn, &name)? {
-            return Err(Error::DuplicateName);
-        }
+    // Try to get run by name to see if a run with that name already exists
+    if check_if_run_with_name_exists(conn, &name)? {
+        return Err(Error::DuplicateName);
+    }
 
-        let new_run = NewRun {
-            test_id: test_id,
-            name: name,
-            status: RunStatusEnum::Created,
-            test_input: test_input,
-            eval_input: eval_input,
-            cromwell_job_id: None,
-            created_by: created_by,
-            finished_at: None,
-        };
-
-        match RunData::create(&conn, new_run) {
-            Ok(run) => Ok(run),
-            Err(e) => {
-                error!(
-                    "Encountered error while attempting to write run to db: {}",
-                    e
-                );
-                Err(Error::DB(e))
-            }
-        }
+    let new_run = NewRun {
+        test_id: test_id,
+        name: name,
+        status: RunStatusEnum::Created,
+        test_input: test_input,
+        eval_input: eval_input,
+        cromwell_job_id: None,
+        created_by: created_by,
+        finished_at: None,
     };
 
-    let result: Result<RunData, Error>;
-
-    // Execute this in a transaction so we don't have issues with creating a run with the same name
-    // after we've verified that one doesn't exist
-    #[cfg(not(test))]
-    {
-        result = conn.build_transaction().run(create_run_closure);
+    match RunData::create(&conn, new_run) {
+        Ok(run) => Ok(run),
+        Err(e) => {
+            error!(
+                "Encountered error while attempting to write run to db: {}",
+                e
+            );
+            Err(Error::DB(e))
+        }
     }
-
-    // Tests do all database stuff in transactions that are not committed so they don't interfere
-    // with other tests. An unfortunate side effect of this is that we can't use transactions in
-    // the code being tested, because you can't have a transaction within a transaction.  So, for
-    // tests, we don't specify that this be run in a transaction.
-    // P.S. I am very open to the idea that there is a better way to solve this problem
-    #[cfg(test)]
-    {
-        result = create_run_closure();
-    }
-
-    result
 }
 
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{RunStatusEnum, BuildStatusEnum};
-    use crate::manager::test_runner::{create_run_in_db, format_json_for_cromwell, Error, check_if_run_with_name_exists, create_run, get_or_create_run_software_version};
+    use crate::manager::test_runner::{create_run_in_db, format_json_for_cromwell, Error, check_if_run_with_name_exists, create_run, get_or_create_run_software_version, run_finished_building};
     use crate::models::run::{NewRun, RunData};
     use crate::unit_test_util::get_test_db_connection;
     use chrono::Utc;
@@ -700,8 +745,9 @@ mod tests {
     use crate::models::test::{TestData, NewTest};
     use std::fs::read_to_string;
     use std::path::Path;
-    use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
-    use crate::models::run_software_version::RunSoftwareVersionData;
+    use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery, NewSoftwareBuild};
+    use crate::models::run_software_version::{RunSoftwareVersionData, NewRunSoftwareVersion};
+    use crate::manager::test_runner::Error::Build;
 
     fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {
         let new_template = NewTemplate {
@@ -787,6 +833,38 @@ mod tests {
             .expect("Failed inserting test software_version")
     }
 
+    fn insert_test_software_version_for_software_with_commit(conn: &PgConnection, software_id: Uuid, commit: String) -> SoftwareVersionData {
+        let new_software_version = NewSoftwareVersion {
+            software_id,
+            commit,
+        };
+
+        SoftwareVersionData::create(conn, new_software_version)
+            .expect("Failed inserting test software_version")
+    }
+
+    fn insert_test_software_build_for_version_with_status(conn: &PgConnection, software_version_id: Uuid, status: BuildStatusEnum) -> SoftwareBuildData {
+        let new_software_build = NewSoftwareBuild{
+            software_version_id,
+            build_job_id: None,
+            status,
+            image_url: None,
+            finished_at: None,
+        };
+
+        SoftwareBuildData::create(conn, new_software_build).expect("Failed inserting test software build")
+    }
+
+    fn map_run_to_version(conn: &PgConnection, run_id: Uuid, software_version_id: Uuid){
+        let map = NewRunSoftwareVersion {
+            run_id,
+            software_version_id
+        };
+
+        RunSoftwareVersionData::create(conn, map).expect("Failed to map run to software version");
+
+    }
+
     #[actix_rt::test]
     async fn test_create_run_no_software_params() {
         let conn = get_test_db_connection();
@@ -796,7 +874,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
         let test_params = json!({"in_user_name":"Kevin"});
-        let eval_params = json!({"in_user":"Jonn"});
+        let eval_params = json!({});//json!({"in_user":"Jonn"});
 
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -864,7 +942,7 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
-        let test_template = insert_test_template_no_software_params(&conn);
+        let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
         let test_software = insert_test_software(&conn);
@@ -1055,5 +1133,89 @@ mod tests {
         );
 
         assert!(matches!(run_failure, Err(Error::DuplicateName)));
+    }
+
+    #[test]
+    fn test_run_finished_building_finished() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run(&conn);
+        let test_software = insert_test_software(&conn);
+
+        let test_software_version = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("e91e9bf34fbc312fa184d13f6b8f600eaeb1eadc"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Succeeded);
+        map_run_to_version(&conn, test_run.run_id, test_software_version.software_version_id);
+
+        let test_software_version2 = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("d91ac5fa5ec1d760140f14499cb1852d3c120a77"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version2.software_version_id, BuildStatusEnum::Succeeded);
+        map_run_to_version(&conn, test_run.run_id, test_software_version2.software_version_id);
+
+        let result = run_finished_building(&conn, test_run.run_id).expect("Failed to check if run finished building");
+        assert!(result);
+
+    }
+
+    #[test]
+    fn test_run_finished_building_unfinished() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run(&conn);
+        let test_software = insert_test_software(&conn);
+
+        let test_software_version = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("e91e9bf34fbc312fa184d13f6b8f600eaeb1eadc"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Running);
+        map_run_to_version(&conn, test_run.run_id, test_software_version.software_version_id);
+
+        let test_software_version2 = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("d91ac5fa5ec1d760140f14499cb1852d3c120a77"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version2.software_version_id, BuildStatusEnum::Succeeded);
+        map_run_to_version(&conn, test_run.run_id, test_software_version2.software_version_id);
+
+        let result = run_finished_building(&conn, test_run.run_id).expect("Failed to check if run finished building");
+        assert!(!result);
+
+    }
+
+    #[test]
+    fn test_run_finished_building_failed() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run(&conn);
+        let test_software = insert_test_software(&conn);
+
+        let test_software_version = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("e91e9bf34fbc312fa184d13f6b8f600eaeb1eadc"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Failed);
+        map_run_to_version(&conn, test_run.run_id, test_software_version.software_version_id);
+
+        let test_software_version2 = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("d91ac5fa5ec1d760140f14499cb1852d3c120a77"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version2.software_version_id, BuildStatusEnum::Succeeded);
+        map_run_to_version(&conn, test_run.run_id, test_software_version2.software_version_id);
+
+        let result = run_finished_building(&conn, test_run.run_id).expect("Failed to check if run finished building");
+        assert!(!result);
+
+        let run_result = RunData::find_by_id(&conn, test_run.run_id).expect("Failed to retrieve test run");
+        assert_eq!(run_result.status, RunStatusEnum::Failed);
+    }
+
+    #[test]
+    fn test_run_finished_building_failed_because_aborted() {
+        let conn = get_test_db_connection();
+
+        let test_run = insert_test_run(&conn);
+        let test_software = insert_test_software(&conn);
+
+        let test_software_version = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("e91e9bf34fbc312fa184d13f6b8f600eaeb1eadc"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version.software_version_id, BuildStatusEnum::Succeeded);
+        map_run_to_version(&conn, test_run.run_id, test_software_version.software_version_id);
+
+        let test_software_version2 = insert_test_software_version_for_software_with_commit(&conn, test_software.software_id, String::from("d91ac5fa5ec1d760140f14499cb1852d3c120a77"));
+        insert_test_software_build_for_version_with_status(&conn, test_software_version2.software_version_id, BuildStatusEnum::Aborted);
+        map_run_to_version(&conn, test_run.run_id, test_software_version2.software_version_id);
+
+        let result = run_finished_building(&conn, test_run.run_id).expect("Failed to check if run finished building");
+        assert!(!result);
+
+        let run_result = RunData::find_by_id(&conn, test_run.run_id).expect("Failed to retrieve test run");
+        assert_eq!(run_result.status, RunStatusEnum::Failed);
     }
 }

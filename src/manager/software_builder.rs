@@ -195,8 +195,14 @@ pub async fn start_software_build(
     software_version_id: Uuid,
     software_build_id: Uuid,
 ) -> Result<SoftwareBuildData, Error> {
+    // Include docker build wdl in project build
+    let docker_build_wdl = include_str!("../../scripts/wdl/docker_build.wdl");
+
+    // Put it in a temporary file to be sent with cromwell request
+    let wdl_file = util::get_temp_file(docker_build_wdl)?;
+
     // Create path to wdl that builds docker images
-    let wdl_file_path: &Path = Path::new("scripts/wdl/docker_build.wdl");
+    let wdl_file_path: &Path = &wdl_file.path();
 
     // Get necessary params for build wdl
     let (software_name, repo_url, commit) =

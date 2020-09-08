@@ -50,6 +50,10 @@ impl From<serde_json::error::Error> for Error {
 /// by `run_id`.  The email includes the contents of the RunWithResultData instance for that
 /// run_id
 pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
+    // If the email mode is None, just return
+    if matches!(*emailer::EMAIL_MODE, emailer::EmailMode::None) {
+        return Ok(());
+    }
     // Get run with result data
     let run = RunWithResultData::find_by_id(conn, run_id)?;
     // Get test

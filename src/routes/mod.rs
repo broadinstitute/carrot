@@ -5,6 +5,8 @@ pub mod pipeline;
 pub mod result;
 pub mod run;
 pub mod software;
+pub mod software_build;
+pub mod software_version;
 pub mod subscription;
 pub mod template;
 pub mod template_result;
