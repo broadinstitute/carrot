@@ -84,11 +84,11 @@ pub fn get_formatted_image_url(software_name: &str, commit_hash: &str) -> String
 
 #[cfg(test)]
 mod tests {
-    use actix_web::client::Client;
     use crate::manager::util::{get_temp_file, start_job};
+    use actix_web::client::Client;
+    use serde_json::json;
     use serde_json::Value;
     use std::path::PathBuf;
-    use serde_json::json;
 
     #[actix_rt::test]
     async fn test_start_job() {
@@ -113,12 +113,13 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response = start_job(&client, test_path.as_path(), test_json_file.path()).await.unwrap();
+        let response = start_job(&client, test_path.as_path(), test_json_file.path())
+            .await
+            .unwrap();
 
         mock.assert();
 
         assert_eq!(response.status, String::from("Submitted"));
         assert_eq!(response.id, "53709600-d114-4194-a7f7-9e41211ca2ce");
     }
-
 }

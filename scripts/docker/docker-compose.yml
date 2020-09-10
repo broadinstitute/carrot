@@ -6,7 +6,7 @@ services:
     image: carrot
     build:
       context: ../../
-      dockerfile: ../../Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "8080:80"
     environment:
@@ -16,6 +16,8 @@ services:
       - HOST=0.0.0.0
       - PORT=80
       - CROMWELL_ADDRESS=http://cromwell:8000
+      - EMAIL_MODE=NONE
+      - IMAGE_REGISTRY_HOST=
     depends_on:
       - db
       - cromwell

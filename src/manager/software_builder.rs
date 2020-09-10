@@ -239,14 +239,16 @@ pub async fn start_software_build(
 
 #[cfg(test)]
 mod tests {
-    use diesel::PgConnection;
-    use crate::models::software_version::{SoftwareVersionData, NewSoftwareVersion};
-    use crate::models::software::{NewSoftware, SoftwareData};
-    use crate::unit_test_util::get_test_db_connection;
-    use crate::manager::software_builder::{get_or_create_software_version, get_or_create_software_build, start_software_build};
-    use crate::models::software_build::{SoftwareBuildData, NewSoftwareBuild};
     use crate::custom_sql_types::BuildStatusEnum;
+    use crate::manager::software_builder::{
+        get_or_create_software_build, get_or_create_software_version, start_software_build,
+    };
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
+    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
+    use diesel::PgConnection;
     use serde_json::json;
 
     fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
@@ -340,7 +342,9 @@ mod tests {
     fn insert_test_software_build_expired(conn: &PgConnection) -> SoftwareBuildData {
         let new_software = NewSoftware {
             name: String::from("Kevin's Software4"),
-            description: Some(String::from("How does Kevin find time to make all this testing software?")),
+            description: Some(String::from(
+                "How does Kevin find time to make all this testing software?",
+            )),
             repository_url: String::from("https://example.com/organization/project4"),
             created_by: Some(String::from("Kevin4@example.com")),
         };
@@ -372,7 +376,12 @@ mod tests {
 
         let test_software_version = insert_test_software_version(&conn);
 
-        let result = get_or_create_software_version(&conn, test_software_version.software_id, &test_software_version.commit).unwrap();
+        let result = get_or_create_software_version(
+            &conn,
+            test_software_version.software_id,
+            &test_software_version.commit,
+        )
+        .unwrap();
 
         assert_eq!(test_software_version, result);
     }
@@ -383,7 +392,12 @@ mod tests {
 
         let test_software = insert_test_software(&conn);
 
-        let result = get_or_create_software_version(&conn, test_software.software_id, "1a4c5eb5fc4921b2642b6ded863894b3745a5dc7").unwrap();
+        let result = get_or_create_software_version(
+            &conn,
+            test_software.software_id,
+            "1a4c5eb5fc4921b2642b6ded863894b3745a5dc7",
+        )
+        .unwrap();
 
         assert_eq!(result.commit, "1a4c5eb5fc4921b2642b6ded863894b3745a5dc7");
         assert_eq!(result.software_id, test_software.software_id);
@@ -395,7 +409,8 @@ mod tests {
 
         let test_software_build = insert_test_software_build(&conn);
 
-        let result = get_or_create_software_build(&conn, test_software_build.software_version_id).unwrap();
+        let result =
+            get_or_create_software_build(&conn, test_software_build.software_version_id).unwrap();
 
         assert_eq!(test_software_build, result);
     }
@@ -406,9 +421,13 @@ mod tests {
 
         let test_software_version = insert_test_software_version(&conn);
 
-        let result = get_or_create_software_build(&conn, test_software_version.software_version_id).unwrap();
+        let result =
+            get_or_create_software_build(&conn, test_software_version.software_version_id).unwrap();
 
-        assert_eq!(result.software_version_id, test_software_version.software_version_id);
+        assert_eq!(
+            result.software_version_id,
+            test_software_version.software_version_id
+        );
         assert_eq!(result.build_job_id, None);
         assert_eq!(result.image_url, None);
         assert_eq!(result.status, BuildStatusEnum::Created);
@@ -420,9 +439,13 @@ mod tests {
 
         let test_software_build = insert_test_software_build_expired(&conn);
 
-        let result = get_or_create_software_build(&conn, test_software_build.software_version_id).unwrap();
+        let result =
+            get_or_create_software_build(&conn, test_software_build.software_version_id).unwrap();
 
-        assert_eq!(result.software_version_id, test_software_build.software_version_id);
+        assert_eq!(
+            result.software_version_id,
+            test_software_build.software_version_id
+        );
         assert_eq!(result.build_job_id, None);
         assert_eq!(result.image_url, None);
         assert_eq!(result.status, BuildStatusEnum::Created);
@@ -448,11 +471,21 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response_build = start_software_build(&client, &conn, test_software_build.software_version_id, test_software_build.software_build_id).await.unwrap();
+        let response_build = start_software_build(
+            &client,
+            &conn,
+            test_software_build.software_version_id,
+            test_software_build.software_build_id,
+        )
+        .await
+        .unwrap();
 
         mock.assert();
 
         assert_eq!(response_build.status, BuildStatusEnum::Submitted);
-        assert_eq!(response_build.build_job_id, Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")));
+        assert_eq!(
+            response_build.build_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
     }
 }

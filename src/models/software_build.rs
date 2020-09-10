@@ -5,15 +5,14 @@
 //! database by the SOFTWARE_BUILD table.
 
 use crate::custom_sql_types::BuildStatusEnum;
-use crate::schema::run_software_version;
 use crate::schema::software_build;
 use crate::schema::software_build::dsl::*;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use diesel::sql_query;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use diesel::sql_query;
 
 /// Mapping to a software_build as it exists in the SOFTWARE_BUILD table in the database.
 ///
@@ -103,27 +102,6 @@ impl SoftwareBuildData {
             .load::<Self>(conn)
     }
 
-    /// Queries the DB for unfinished software builds for each software version associated with the
-    /// run specified by `id`
-    ///
-    /// Returns result containing either a vector of the retrieved software_builds (which have a
-    /// null value in the `finished_at` column and are related to a software_version for which
-    /// there is a relation to the run with run_id = `id`), or a diesel error if retrieving the
-    /// rows fails for some reason
-    pub fn find_unfinished_for_run(
-        conn: &PgConnection,
-        id: Uuid,
-    ) -> Result<Vec<Self>, diesel::result::Error> {
-        let run_software_version_subquery = run_software_version::dsl::run_software_version
-            .filter(run_software_version::dsl::run_id.eq(id))
-            .select(run_software_version::dsl::software_version_id);
-
-        software_build
-            .filter(software_version_id.eq_any(run_software_version_subquery))
-            .filter(finished_at.is_null())
-            .load::<Self>(conn)
-    }
-
     /// Queries the DB for the most recent builds for each software_version associated with the run
     /// specified by `id` via the RUN_SOFTWARE_VERSION table
     ///
@@ -132,7 +110,7 @@ impl SoftwareBuildData {
     /// run specified by `id`), or a diesel error if retrieving the rows fails for some reason
     pub fn find_most_recent_builds_for_run(
         conn: &PgConnection,
-        id: Uuid
+        id: Uuid,
     ) -> Result<Vec<Self>, diesel::result::Error> {
         let query = format!(
             "select *
@@ -151,7 +129,6 @@ impl SoftwareBuildData {
         );
 
         sql_query(query).load(conn)
-
     }
 
     /// Queries the DB for software_builds matching the specified query criteria
@@ -443,13 +420,12 @@ mod tests {
         );
 
         software_builds
-
     }
 
     fn insert_run_software_version_with_software_version_id(
         conn: &PgConnection,
         id: Uuid,
-        run_name: &str
+        run_name: &str,
     ) -> RunSoftwareVersionData {
         let new_run = NewRun {
             test_id: Uuid::new_v4(),
@@ -512,27 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn find_unfinished_for_run_success() {
-        let conn = get_test_db_connection();
-
-        insert_test_software_build(&conn);
-        let (_, test_software_builds) = insert_software_builds_with_versions(&conn);
-
-        let test_run_software_version = insert_run_software_version_with_software_version_id(
-            &conn,
-            test_software_builds[2].software_version_id,
-            "run1"
-        );
-
-        let found_software_builds =
-            SoftwareBuildData::find_unfinished_for_run(&conn, test_run_software_version.run_id)
-                .expect("Failed to find software_builds");
-
-        assert_eq!(found_software_builds.len(), 1);
-        assert_eq!(found_software_builds[0], test_software_builds[2]);
-    }
-
-    #[test]
     // Not actually a perfect test of the functionality of the `find_most_recent_builds_for_run`
     // because most recent is determined by `created_at`, and, since `created_at` is set within
     // the DB, it is set to the start of the transaction, which means it's the same for any rows
@@ -547,25 +502,29 @@ mod tests {
         let test_run_software_version1 = insert_run_software_version_with_software_version_id(
             &conn,
             test_software_builds[0].software_version_id,
-            "run1"
+            "run1",
         );
 
         let test_run_software_version2 = insert_run_software_version_with_software_version_id(
             &conn,
             test_software_build.software_version_id,
-            "run2"
+            "run2",
         );
 
-        let found_software_builds =
-            SoftwareBuildData::find_most_recent_builds_for_run(&conn, test_run_software_version1.run_id)
-                .expect("Failed to find software_builds");
+        let found_software_builds = SoftwareBuildData::find_most_recent_builds_for_run(
+            &conn,
+            test_run_software_version1.run_id,
+        )
+        .expect("Failed to find software_builds");
 
         assert_eq!(found_software_builds.len(), 1);
         assert_eq!(found_software_builds[0], test_software_builds[0]);
 
-        let found_software_builds =
-            SoftwareBuildData::find_most_recent_builds_for_run(&conn, test_run_software_version2.run_id)
-                .expect("Failed to find software_builds");
+        let found_software_builds = SoftwareBuildData::find_most_recent_builds_for_run(
+            &conn,
+            test_run_software_version2.run_id,
+        )
+        .expect("Failed to find software_builds");
 
         assert_eq!(found_software_builds.len(), 1);
         assert_eq!(found_software_builds[0], test_software_build);

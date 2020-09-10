@@ -4,7 +4,7 @@
 //! their URI mappings
 
 use crate::db;
-use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData, SoftwareBuildQuery};
+use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
@@ -49,26 +49,27 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             }
         }
     })
-        .await
-        // If there is no error, return a response with the retrieved data
-        .map(|software_builds| HttpResponse::Ok().json(software_builds))
-        .map_err(|e| {
-            error!("{}", e);
-            match e {
-                // If no software_build is found, return a 404
-                BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                    title: "No software_build found".to_string(),
-                    status: 404,
-                    detail: "No software_build found with the specified ID".to_string(),
-                }),
-                // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Error while attempting to retrieve requested software_build from DB".to_string(),
-                }),
-            }
-        })
+    .await
+    // If there is no error, return a response with the retrieved data
+    .map(|software_builds| HttpResponse::Ok().json(software_builds))
+    .map_err(|e| {
+        error!("{}", e);
+        match e {
+            // If no software_build is found, return a 404
+            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
+                title: "No software_build found".to_string(),
+                status: 404,
+                detail: "No software_build found with the specified ID".to_string(),
+            }),
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: "Error while attempting to retrieve requested software_build from DB"
+                    .to_string(),
+            }),
+        }
+    })
 }
 
 /// Handles requests to /software_builds for retrieving software_build info by query parameters
@@ -96,29 +97,30 @@ async fn find(
             }
         }
     })
-        .await
-        .map(|software_builds| {
-            // If no software_build is found, return a 404
-            if software_builds.len() < 1 {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No software_build found".to_string(),
-                    status: 404,
-                    detail: "No software_builds found with the specified parameters".to_string(),
-                })
-            } else {
-                // If there is no error, return a response with the retrieved data
-                HttpResponse::Ok().json(software_builds)
-            }
-        })
-        .map_err(|e| {
-            // For any errors, return a 500
-            error!("{}", e);
-            HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested software_build(s) from DB".to_string(),
+    .await
+    .map(|software_builds| {
+        // If no software_build is found, return a 404
+        if software_builds.len() < 1 {
+            HttpResponse::NotFound().json(ErrorBody {
+                title: "No software_build found".to_string(),
+                status: 404,
+                detail: "No software_builds found with the specified parameters".to_string(),
             })
+        } else {
+            // If there is no error, return a response with the retrieved data
+            HttpResponse::Ok().json(software_builds)
+        }
+    })
+    .map_err(|e| {
+        // For any errors, return a 500
+        error!("{}", e);
+        HttpResponse::InternalServerError().json(ErrorBody {
+            title: "Server error".to_string(),
+            status: 500,
+            detail: "Error while attempting to retrieve requested software_build(s) from DB"
+                .to_string(),
         })
+    })
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -126,26 +128,21 @@ async fn find(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::resource("/software_builds/{id}")
-            .route(web::get().to(find_by_id)),
-    );
-    cfg.service(
-        web::resource("/software_builds")
-            .route(web::get().to(find)),
-    );
+    cfg.service(web::resource("/software_builds/{id}").route(web::get().to(find_by_id)));
+    cfg.service(web::resource("/software_builds").route(web::get().to(find)));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::custom_sql_types::BuildStatusEnum;
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
-    use crate::models::software::{NewSoftware, SoftwareData};
-    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
-    use crate::custom_sql_types::BuildStatusEnum;
+    use crate::models::software_build::NewSoftwareBuild;
 
     fn create_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
         let new_software = NewSoftware {
@@ -185,7 +182,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/software_builds/{}", new_software_build.software_build_id))
+            .uri(&format!(
+                "/software_builds/{}",
+                new_software_build.software_build_id
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -217,7 +217,10 @@ mod tests {
 
         assert_eq!(error_body.title, "No software_build found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(error_body.detail, "No software_build found with the specified ID");
+        assert_eq!(
+            error_body.detail,
+            "No software_build found with the specified ID"
+        );
     }
 
     #[actix_rt::test]

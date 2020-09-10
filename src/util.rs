@@ -173,14 +173,16 @@ mod tests {
 
     #[actix_rt::test]
     async fn git_repo_exists_true() {
-        let test = git_repo_exists("git://github.com/broadinstitute/gatk.git").await
+        let test = git_repo_exists("git://github.com/broadinstitute/gatk.git")
+            .await
             .expect("Error when checking if git repo exists");
 
         assert!(test);
     }
     #[actix_rt::test]
     async fn git_repo_exists_false() {
-        let test = git_repo_exists("git://example.com/example/project.git").await
+        let test = git_repo_exists("git://example.com/example/project.git")
+            .await
             .expect("Error when checking if git repo exists");
 
         assert!(!test);
