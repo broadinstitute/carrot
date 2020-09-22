@@ -15,7 +15,7 @@ task build_and_push {
         git clone ${repo_url} .
         git checkout ${commit_hash}
         echo -n "" >> .gcloudignore
-        gcloud builds submit --tag ${registry_host}/${software_name}:${commit_hash}
+        gcloud builds submit --tag ${registry_host}/${software_name}:${commit_hash} --timeout=24h
     }
 
     runtime {
