@@ -93,8 +93,8 @@ impl From<software_builder::Error> for Error {
 /// `Created`.  If any of the parameters for this run match the format for specifying a software
 /// build, it marks the run as `Building` (after creating the records for the builds, if necessary).
 /// If none of the parameters specify a software build, it starts the run.  Returns created run or
-/// an error if parsing `test_id` fails, a run already exists with the name specified in
-/// `new_run.name` or there is an error querying or inserting to the DB.
+/// an error if: parsing `test_id` fails, or a run already exists with the name specified in
+/// `new_run.name`, or there is an error querying or inserting to the DB.
 ///
 /// Note: In the case that a docker image needs to be built for a run, it does not actually start
 /// the build (i.e. it doesn't submit the build job to Cromwell).  Instead, it marks the build as
@@ -136,19 +136,7 @@ pub async fn create_run(
         None => get_run_default_name(&test.name),
     };
 
-    // Write run to db in a transaction so we don't have issues with creating a run with the same
-    // name after we've verified that one doesn't exist
-    #[cfg(not(test))]
-    let run =
-        create_run_in_db_in_transaction(conn, test_id, run_name, test_json, eval_json, created_by)?;
-
-    // Tests do all database stuff in transactions that are not committed so they don't interfere
-    // with other tests. An unfortunate side effect of this is that we can't use transactions in
-    // the code being tested, because you can't have a transaction within a transaction.  So, for
-    // tests, we don't specify that this be run in a transaction.
-    // Also, if your IDE says we're using moved values here, it's unaware that this line and the
-    // line above it will never exist in the same build, so the values aren't actually moved.
-    #[cfg(test)]
+    // Write run to db
     let run = create_run_in_db(conn, test_id, run_name, test_json, eval_json, created_by)?;
 
     // Find software version mappings associated with this run
@@ -171,23 +159,10 @@ pub async fn create_run(
     if !version_map.is_empty() {
         for (_, version) in version_map {
             // Create build for this software version if there isn't one
-            #[cfg(not(test))]
-            match software_builder::get_or_create_software_build_in_transaction(
+            match software_builder::get_or_create_software_build(
                 conn,
                 version.software_version_id,
             ) {
-                // If creating a build fails, mark run as failed
-                Err(e) => {
-                    mark_run_as_failed(conn, run.run_id)?;
-                    return Err(Error::Build(e));
-                }
-                _ => {}
-            };
-
-            // For tests, don't do it in a transaction
-            #[cfg(test)]
-            match software_builder::get_or_create_software_build(conn, version.software_version_id)
-            {
                 // If creating a build fails, mark run as failed
                 Err(e) => {
                     mark_run_as_failed(conn, run.run_id)?;
@@ -409,20 +384,6 @@ fn process_software_version_mappings(
                 },
             };
             // Get or create software version for this software&commit and add to map
-            #[cfg(not(test))]
-            let software_version = software_builder::get_or_create_software_version_in_transaction(
-                conn,
-                software.software_id,
-                name_and_commit[1],
-            )?;
-
-            // Tests do all database stuff in transactions that are not committed so they don't interfere
-            // with other tests. An unfortunate side effect of this is that we can't use transactions in
-            // the code being tested, because you can't have a transaction within a transaction.  So, for
-            // tests, we don't specify that this be run in a transaction.
-            // Also, if your IDE says we're using moved values here, it's unaware that this line and the
-            // line above it will never exist in the same build, so the values aren't actually moved.
-            #[cfg(test)]
             let software_version = software_builder::get_or_create_software_version(
                 conn,
                 software.software_id,
@@ -432,15 +393,6 @@ fn process_software_version_mappings(
             version_map.insert(String::from(key), software_version);
             // Also add run_software_version mapping
             for (_, value) in &version_map {
-                #[cfg(not(test))]
-                get_or_create_run_software_version_in_transaction(
-                    conn,
-                    value.software_version_id,
-                    run_id,
-                )?;
-
-                // See explanation above about transactions in tests
-                #[cfg(test)]
                 get_or_create_run_software_version(conn, value.software_version_id, run_id)?;
             }
         }
@@ -450,49 +402,49 @@ fn process_software_version_mappings(
 }
 
 /// Attempts to retrieve a run_software_version record with the specified `run_id` and
-/// `software_version_id`, and creates one if unsuccessful, in a transaction
-pub fn get_or_create_run_software_version_in_transaction(
-    conn: &PgConnection,
-    software_version_id: Uuid,
-    run_id: Uuid,
-) -> Result<RunSoftwareVersionData, Error> {
-    // Call get_software_version within a transaction
-    conn.build_transaction()
-        .run(|| get_or_create_run_software_version(conn, software_version_id, run_id))
-}
-
-/// Attempts to retrieve a run_software_version record with the specified `run_id` and
 /// `software_version_id`, and creates one if unsuccessful
 pub fn get_or_create_run_software_version(
     conn: &PgConnection,
     software_version_id: Uuid,
     run_id: Uuid,
 ) -> Result<RunSoftwareVersionData, Error> {
-    // Try to find a run software version mapping row for this version and run to see if we've
-    // already created the mapping
-    let run_software_version =
-        RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
+    let run_software_version_closure = || {
+        // Try to find a run software version mapping row for this version and run to see if we've
+        // already created the mapping
+        let run_software_version =
+            RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
 
-    match run_software_version {
-        // If we found it, return it
-        Ok(run_software_version) => {
-            return Ok(run_software_version);
-        }
-        // If we didn't find it, create it
-        Err(diesel::NotFound) => {
-            let new_run_software_version = NewRunSoftwareVersion {
-                run_id,
-                software_version_id,
-            };
+        match run_software_version {
+            // If we found it, return it
+            Ok(run_software_version) => {
+                return Ok(run_software_version);
+            }
+            // If we didn't find it, create it
+            Err(diesel::NotFound) => {
+                let new_run_software_version = NewRunSoftwareVersion {
+                    run_id,
+                    software_version_id,
+                };
 
-            Ok(RunSoftwareVersionData::create(
-                conn,
-                new_run_software_version,
-            )?)
+                Ok(RunSoftwareVersionData::create(
+                    conn,
+                    new_run_software_version,
+                )?)
+            }
+            // Otherwise, return error
+            Err(e) => return Err(Error::DB(e)),
         }
-        // Otherwise, return error
-        Err(e) => return Err(Error::DB(e)),
-    }
+    };
+
+    #[cfg(not(test))]
+    return conn.build_transaction().run(|| run_software_version_closure());
+
+    // Tests do all database stuff in transactions that are not committed so they don't interfere
+    // with other tests. An unfortunate side effect of this is that we can't use transactions in
+    // the code being tested, because you can't have a transaction within a transaction.  So, for
+    // tests, we don't specify that this be run in a transaction.
+    #[cfg(test)]
+    return run_software_version_closure();
 }
 
 /// Checks if there is already a run in the DB with the specified name
@@ -678,20 +630,6 @@ fn get_run_default_name(test_name: &str) -> String {
     format!("{}_run_{}", test_name, Utc::now())
 }
 
-/// Calls `create_run_in_db` within a database transaction
-fn create_run_in_db_in_transaction(
-    conn: &PgConnection,
-    test_id: Uuid,
-    name: String,
-    test_input: Value,
-    eval_input: Value,
-    created_by: Option<String>,
-) -> Result<RunData, Error> {
-    // Call create_run_in_db within a transaction
-    conn.build_transaction()
-        .run(|| create_run_in_db(conn, test_id, name, test_input, eval_input, created_by))
-}
-
 /// Stores a new run in the database
 ///
 /// Connects to the db with `conn`, checks if a run already exists with the specified name, and,
@@ -706,32 +644,48 @@ fn create_run_in_db(
     eval_input: Value,
     created_by: Option<String>,
 ) -> Result<RunData, Error> {
-    // Try to get run by name to see if a run with that name already exists
-    if check_if_run_with_name_exists(conn, &name)? {
-        return Err(Error::DuplicateName);
-    }
+    let create_run_closure = || {
+        // Try to get run by name to see if a run with that name already exists
+        if check_if_run_with_name_exists(conn, &name)? {
+            return Err(Error::DuplicateName);
+        }
 
-    let new_run = NewRun {
-        test_id: test_id,
-        name: name,
-        status: RunStatusEnum::Created,
-        test_input: test_input,
-        eval_input: eval_input,
-        cromwell_job_id: None,
-        created_by: created_by,
-        finished_at: None,
+        let new_run = NewRun {
+            test_id: test_id,
+            name: name,
+            status: RunStatusEnum::Created,
+            test_input: test_input,
+            eval_input: eval_input,
+            cromwell_job_id: None,
+            created_by: created_by,
+            finished_at: None,
+        };
+
+        match RunData::create(&conn, new_run) {
+            Ok(run) => Ok(run),
+            Err(e) => {
+                error!(
+                    "Encountered error while attempting to write run to db: {}",
+                    e
+                );
+                Err(Error::DB(e))
+            }
+        }
     };
 
-    match RunData::create(&conn, new_run) {
-        Ok(run) => Ok(run),
-        Err(e) => {
-            error!(
-                "Encountered error while attempting to write run to db: {}",
-                e
-            );
-            Err(Error::DB(e))
-        }
-    }
+    // Write run to db in a transaction so we don't have issues with creating a run with the same
+    // name after we've verified that one doesn't exist
+    #[cfg(not(test))]
+    return conn.build_transaction().run(|| create_run_closure());
+
+    // Tests do all database stuff in transactions that are not committed so they don't interfere
+    // with other tests. An unfortunate side effect of this is that we can't use transactions in
+    // the code being tested, because you can't have a transaction within a transaction.  So, for
+    // tests, we don't specify that this be run in a transaction.
+    // Also, if your IDE says we're using moved values here, it's unaware that this line and the
+    // line above it will never exist in the same build, so the values aren't actually moved.
+    #[cfg(test)]
+    return create_run_closure();
 }
 
 #[cfg(test)]

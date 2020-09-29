@@ -9,6 +9,13 @@ task build_and_push {
         String registry_host
     }
 
+    parameter_meta {
+        repo_url: "The url of the repository containing the project to build from"
+        software_name: "The name that will be used to name the docker image"
+        commit_hash: "The hash for the commit to build from; will also be used to tag the image"
+        registry_host: "The docker repository to push the image to"
+    }
+
     command {
         mkdir repo-folder
         cd repo-folder
@@ -27,10 +34,17 @@ task build_and_push {
 workflow docker_build {
 
     input {
-        String repo_url # The url of the repository containing the project to build from
-        String software_name # The name that will be used to name the docker image
-        String commit_hash # The hash for the commit to build from; will also be used to tag the image
-        String registry_host # The docker repository to push the image to
+        String repo_url
+        String software_name
+        String commit_hash
+        String registry_host
+    }
+
+    parameter_meta {
+        repo_url: "The url of the repository containing the project to build from"
+        software_name: "The name that will be used to name the docker image"
+        commit_hash: "The hash for the commit to build from; will also be used to tag the image"
+        registry_host: "The docker repository to push the image to"
     }
 
     call build_and_push {

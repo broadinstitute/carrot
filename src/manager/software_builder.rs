@@ -76,66 +76,51 @@ pub fn setup() {
 }
 
 /// Attempts to retrieve a software_version record with the specified `software_id` and `commit`,
-/// and creates one if unsuccessful, in a transaction
-pub fn get_or_create_software_version_in_transaction(
-    conn: &PgConnection,
-    software_id: Uuid,
-    commit: &str,
-) -> Result<SoftwareVersionData, Error> {
-    // Call get_software_version within a transaction
-    conn.build_transaction()
-        .run(|| get_or_create_software_version(conn, software_id, commit))
-}
-
-/// Attempts to retrieve a software_version record with the specified `software_id` and `commit`,
 /// and creates one if unsuccessful
 pub fn get_or_create_software_version(
     conn: &PgConnection,
     software_id: Uuid,
     commit: &str,
 ) -> Result<SoftwareVersionData, Error> {
-    // Try to find a software version row for this software and commit hash to see if we've ever
-    // built this version before
-    let software_version_query = SoftwareVersionQuery {
-        software_version_id: None,
-        software_id: Some(software_id),
-        commit: Some(String::from(commit)),
-        software_name: None,
-        created_before: None,
-        created_after: None,
-        sort: None,
-        limit: None,
-        offset: None,
-    };
-    let mut software_version = SoftwareVersionData::find(conn, software_version_query)?;
+    let software_version_closure = || {
+        // Try to find a software version row for this software and commit hash to see if we've ever
+        // built this version before
+        let software_version_query = SoftwareVersionQuery {
+            software_version_id: None,
+            software_id: Some(software_id),
+            commit: Some(String::from(commit)),
+            software_name: None,
+            created_before: None,
+            created_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let mut software_version = SoftwareVersionData::find(conn, software_version_query)?;
 
-    // If we found it, return it
-    if software_version.len() > 0 {
-        return Ok(software_version.pop().unwrap());
-    }
-    // If not, create it
-    let new_software_version = NewSoftwareVersion {
-        commit: String::from(commit),
-        software_id,
+        // If we found it, return it
+        if software_version.len() > 0 {
+            return Ok(software_version.pop().unwrap());
+        }
+        // If not, create it
+        let new_software_version = NewSoftwareVersion {
+            commit: String::from(commit),
+            software_id,
+        };
+
+        Ok(SoftwareVersionData::create(conn, new_software_version)?)
     };
 
-    Ok(SoftwareVersionData::create(conn, new_software_version)?)
-}
-/// Attempts to retrieve the most recent software_build record for the specified
-/// `software_version_id`. If successful and the build doesn't have status `Aborted`, `Expired`, or
-/// `Failed`, returns the retrieved software_build.  If successful and the build does have one of
-/// those statuses, or if unsuccessful, creates a new software_build record with the specified
-/// `software_version_id` and a status of `Created` (but does not start actually building an image
-/// for that software_version (it'll be picked up and started by the `status_manager`)) and returns
-/// it.  Returns an error if there is an issue querying or inserting into the DB.
-/// Does all of this in a transaction
-pub fn get_or_create_software_build_in_transaction(
-    conn: &PgConnection,
-    software_version_id: Uuid,
-) -> Result<SoftwareBuildData, Error> {
-    // Call get_software_build within a transaction
-    conn.build_transaction()
-        .run(|| get_or_create_software_build(conn, software_version_id))
+    // Call in a transaction
+    #[cfg(not(test))]
+    return conn.build_transaction().run(|| software_version_closure());
+
+    // Tests do all database stuff in transactions that are not committed so they don't interfere
+    // with other tests. An unfortunate side effect of this is that we can't use transactions in
+    // the code being tested, because you can't have a transaction within a transaction.  So, for
+    // tests, we don't specify that this be run in a transaction.
+    #[cfg(test)]
+    return software_version_closure();
 }
 
 /// Attempts to retrieve the most recent software_build record for the specified
@@ -149,42 +134,54 @@ pub fn get_or_create_software_build(
     conn: &PgConnection,
     software_version_id: Uuid,
 ) -> Result<SoftwareBuildData, Error> {
-    // Try to find a software build row for this software version to see if we have a current build
-    // of it.  Getting just the most recent so we can see its status
-    let software_build_query = SoftwareBuildQuery {
-        software_build_id: None,
-        software_version_id: Some(software_version_id),
-        build_job_id: None,
-        status: None,
-        image_url: None,
-        created_before: None,
-        created_after: None,
-        finished_before: None,
-        finished_after: None,
-        sort: Some(String::from("desc(created_by)")),
-        limit: Some(1),
-        offset: None,
-    };
-    let mut result: Vec<SoftwareBuildData> = SoftwareBuildData::find(conn, software_build_query)?;
+    let software_build_closure = || {
+        // Try to find a software build row for this software version to see if we have a current build
+        // of it.  Getting just the most recent so we can see its status
+        let software_build_query = SoftwareBuildQuery {
+            software_build_id: None,
+            software_version_id: Some(software_version_id),
+            build_job_id: None,
+            status: None,
+            image_url: None,
+            created_before: None,
+            created_after: None,
+            finished_before: None,
+            finished_after: None,
+            sort: Some(String::from("desc(created_at)")),
+            limit: Some(1),
+            offset: None,
+        };
+        let mut result: Vec<SoftwareBuildData> = SoftwareBuildData::find(conn, software_build_query)?;
 
-    // If we found it, return it as long as it's not aborted, expired, or failed
-    if result.len() > 0 {
-        let software_build = result.pop().unwrap();
-        match software_build.status {
-            BuildStatusEnum::Aborted | BuildStatusEnum::Expired | BuildStatusEnum::Failed => {}
-            _ => return Ok(software_build),
+        // If we found it, return it as long as it's not aborted, expired, or failed
+        if result.len() > 0 {
+            let software_build = result.pop().unwrap();
+            match software_build.status {
+                BuildStatusEnum::Aborted | BuildStatusEnum::Expired | BuildStatusEnum::Failed => {}
+                _ => return Ok(software_build),
+            }
         }
-    }
-    // If we didn't find it, or it's bad (aborted, expired, failed), then we'll make one
-    let new_software_build = NewSoftwareBuild {
-        build_job_id: None,
-        software_version_id,
-        status: BuildStatusEnum::Created,
-        image_url: None,
-        finished_at: None,
+        // If we didn't find it, or it's bad (aborted, expired, failed), then we'll make one
+        let new_software_build = NewSoftwareBuild {
+            build_job_id: None,
+            software_version_id,
+            status: BuildStatusEnum::Created,
+            image_url: None,
+            finished_at: None,
+        };
+
+        Ok(SoftwareBuildData::create(conn, new_software_build)?)
     };
 
-    Ok(SoftwareBuildData::create(conn, new_software_build)?)
+    #[cfg(not(test))]
+    return conn.build_transaction().run(|| software_build_closure());
+
+    // Tests do all database stuff in transactions that are not committed so they don't interfere
+    // with other tests. An unfortunate side effect of this is that we can't use transactions in
+    // the code being tested, because you can't have a transaction within a transaction.  So, for
+    // tests, we don't specify that this be run in a transaction.
+    #[cfg(test)]
+    return software_build_closure();
 }
 
 /// Starts a cromwell job for building the software associated with the software_build specified by
