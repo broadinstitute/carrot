@@ -3,6 +3,8 @@
 //! Should and will probably be moved to a module where it is relevant, in favor of having a
 //! forever-growing util module
 
+use std::process::Command;
+
 /// Defines a sort clause to be used in DB queries
 #[derive(PartialEq, Debug)]
 pub struct SortClause {
@@ -48,6 +50,24 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
     }
 
     sort_clauses
+}
+
+/// Checks where the remote git repo specified by `url` exists
+///
+/// Uses the `git ls-remote` command to check the specified url for a git repo.  Returns Ok(true)
+/// if the command is successful, and Ok(false) if it fails.  Returns an error if there is some
+/// error trying to execute the command
+pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!("git ls-remote {}", url))
+        .output()?;
+
+    if output.status.success() {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +169,22 @@ mod tests {
                 ascending: true
             }
         );
+    }
+
+    #[actix_rt::test]
+    async fn git_repo_exists_true() {
+        let test = git_repo_exists("git://github.com/broadinstitute/gatk.git")
+            .await
+            .expect("Error when checking if git repo exists");
+
+        assert!(test);
+    }
+    #[actix_rt::test]
+    async fn git_repo_exists_false() {
+        let test = git_repo_exists("git://example.com/example/project.git")
+            .await
+            .expect("Error when checking if git repo exists");
+
+        assert!(!test);
     }
 }

@@ -10,7 +10,7 @@ use std::fmt;
 /// Maps to the custom type `run_status_enum` in the DB
 ///
 /// Represents the enum used in the DB for storing the status of a run
-#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 #[DieselType = "Run_status_enum"]
 pub enum RunStatusEnum {
@@ -22,6 +22,8 @@ pub enum RunStatusEnum {
     Starting,
     QueuedInCromwell,
     WaitingForQueueSpace,
+    Building,
+    Created,
 }
 
 impl fmt::Display for RunStatusEnum {
@@ -35,6 +37,44 @@ impl fmt::Display for RunStatusEnum {
             RunStatusEnum::Starting => write!(f, "starting"),
             RunStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
             RunStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
+            RunStatusEnum::Building => write!(f, "building"),
+            RunStatusEnum::Created => write!(f, "created"),
+        }
+    }
+}
+
+/// Maps to the custom type `build_status_enum` in the DB
+///
+/// Represents the enum used in the DB for storing the status of a run
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+#[DieselType = "Build_status_enum"]
+pub enum BuildStatusEnum {
+    Submitted,
+    Running,
+    Succeeded,
+    Failed,
+    Aborted,
+    Starting,
+    QueuedInCromwell,
+    WaitingForQueueSpace,
+    Expired,
+    Created,
+}
+
+impl fmt::Display for BuildStatusEnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BuildStatusEnum::Submitted => write!(f, "submitted"),
+            BuildStatusEnum::Running => write!(f, "running"),
+            BuildStatusEnum::Succeeded => write!(f, "succeeded"),
+            BuildStatusEnum::Failed => write!(f, "failed"),
+            BuildStatusEnum::Aborted => write!(f, "aborted"),
+            BuildStatusEnum::Starting => write!(f, "starting"),
+            BuildStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
+            BuildStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
+            BuildStatusEnum::Expired => write!(f, "expired"),
+            BuildStatusEnum::Created => write!(f, "created"),
         }
     }
 }

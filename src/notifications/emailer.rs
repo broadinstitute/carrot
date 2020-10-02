@@ -285,7 +285,7 @@ mod tests {
         std::env::set_var("EMAIL_FROM", "kevin@example.com");
 
         // Create temporary directory for file
-        let mut dir_path = Builder::new()
+        let dir_path = Builder::new()
             .prefix("test_send_email")
             .rand_bytes(0)
             .tempdir_in(temp_dir())

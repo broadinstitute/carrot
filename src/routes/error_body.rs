@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 /// `status` is the http status code
 /// `detail` is a more detailed explanation of the error
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub struct ErrorBody<'a> {
-    pub title: &'a str,
+pub struct ErrorBody {
+    pub title: String,
     pub status: u16,
-    pub detail: &'a str,
+    pub detail: String,
 }
