@@ -51,6 +51,13 @@ lettre = "0.9"
 lettre_email = "0.9"
 # For minor multithreading tasks
 threadpool = "1.0"
+# For pulling from a Google Cloud Pub/Sub subscription
+google-pubsub1 = "*"
+hyper = "^0.10"
+hyper-rustls = "^0.6"
+yup-oauth2 = "^1.0"
+# For decodeding pubsub messages
+base64 = "*"
 
 [dev-dependencies]
 # For generating random values in test data

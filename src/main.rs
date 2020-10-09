@@ -52,6 +52,8 @@ fn main() {
         .parse()
         .expect("DB_THREADS environment variable must be an integer");
 
+    manager::gcloud_subscriber::run_subscriber();
+    /*
     // Make sure we have values for necessary email config variables
     notifications::emailer::setup();
     // Make sure we have values for necessary software build config variables
@@ -118,4 +120,6 @@ fn main() {
     manager_thread
         .join()
         .expect("Failed to join to manager thread");
+
+     */
 }
