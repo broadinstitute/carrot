@@ -89,9 +89,10 @@ impl From<software_builder::Error> for Error {
 
 /// Creates a new run and inserts it into the DB
 ///
-/// Creates a new run based on `new_run`, with `test_id`, and inserts it into the DB with status
-/// `Created`.  If any of the parameters for this run match the format for specifying a software
-/// build, it marks the run as `Building` (after creating the records for the builds, if necessary).
+/// Creates a new run based on `name`, `test_input`, `eval_input`, and `created_by`, with
+/// `test_id`, and inserts it into the DB with status `Created`.  If any of the parameters for
+/// this run match the format for specifying a software build, it marks the run as `Building`
+/// (after creating the records for the builds, if necessary).
 /// If none of the parameters specify a software build, it starts the run.  Returns created run or
 /// an error if: parsing `test_id` fails, or a run already exists with the name specified in
 /// `new_run.name`, or there is an error querying or inserting to the DB.

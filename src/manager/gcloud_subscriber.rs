@@ -9,6 +9,11 @@ use yup_oauth2;
 use std::env;
 use log::{debug, error, info};
 use base64;
+use crate::manager::github_runner::GithubRunRequest;
+use crate::manager::github_runner;
+use crate::db::DbPool;
+use actix_web::client::Client;
+use diesel::PgConnection;
 
 lazy_static!{
     static ref GCLOUD_SA_KEY_FILE: String = env::var("GCLOUD_SA_KEY_FILE")
@@ -36,9 +41,16 @@ lazy_static!{
 
 type PubsubClient = Pubsub<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
 
-pub fn run_subscriber() {
-    let client = initialize_pubsub();
-    pull_message_data_from_subscription(&client);
+/// Main loop function for this manager. Initializes the manager, then loops checking the pubsub
+/// subscription for requests, and attempts to start a test run for each request
+pub async fn run_subscriber(
+    db_pool: DbPool,
+    client: Client,
+) {
+    // Create the pubsub client so we can connect to the subscription
+    let pubsub_client = initialize_pubsub();
+
+    pull_message_data_from_subscription(&pubsub_client, &client, &db_pool.get().unwrap()).await;
 }
 
 /// Creates and returns a Pubsub instance that will connect to the subscription specified by
@@ -59,7 +71,7 @@ fn initialize_pubsub() -> PubsubClient{
 }
 
 /// Pulls messages from the subscription specified by PUBSUB_SUBSCRIPTION_NAME and processes them
-fn pull_message_data_from_subscription(client: &PubsubClient) {
+async fn pull_message_data_from_subscription(pubsub_client: &PubsubClient, client: &Client, conn: &PgConnection) {
     // Set up request to not return immediately if there are no messages (Google's recommendation),
     // and retrieve, at max, the number of messages set in the environment variable
     let message_req = google_pubsub1::PullRequest {
@@ -67,21 +79,15 @@ fn pull_message_data_from_subscription(client: &PubsubClient) {
         max_messages: Some(*PUBSUB_MAX_MESSAGES_PER),
     };
     // Send the request to get the messages
-    match client.projects().subscriptions_pull(message_req, &*PUBSUB_SUBSCRIPTION_NAME).doit() {
+    match pubsub_client.projects().subscriptions_pull(message_req, &*PUBSUB_SUBSCRIPTION_NAME).doit() {
         Ok((_, response)) => {
             match response.received_messages {
                 Some(messages) => {
                     let mut ack_ids = Vec::new();
-                    // If we received any messages, process them
-                    for message in messages {
-                        if let Some(contents) = message.message{
-                            debug!("Received message: {}", String::from_utf8(base64::decode(&contents.data.unwrap()).unwrap()).unwrap());
-                        }
-                        else{
-                            debug!("Received message without message body");
-                        }
-                        if let Some(ack_id) = message.ack_id {
-                            ack_ids.push(ack_id);
+                    // Collect ack_ids for messages
+                    for message in &messages {
+                        if let Some(ack_id) = &message.ack_id {
+                            ack_ids.push(ack_id.to_string());
                         }
                         else{
                             debug!("Received message without ack ID");
@@ -92,15 +98,36 @@ fn pull_message_data_from_subscription(client: &PubsubClient) {
                         let ack_request = google_pubsub1::AcknowledgeRequest{
                             ack_ids: Some(ack_ids)
                         };
-                        match client.projects().subscriptions_acknowledge(ack_request, &*PUBSUB_SUBSCRIPTION_NAME).doit() {
+                        match pubsub_client.projects().subscriptions_acknowledge(ack_request, &*PUBSUB_SUBSCRIPTION_NAME).doit() {
                             Ok(_) => debug!("Acknowledged message"),
                             Err(e) => {
                                 error!("Failed to ack message with error: {}", e);
                             }
                         }
                     }
+                    // Now try to start runs for any messages we received
+                    for message in messages {
+                        if let Some(contents) = message.message{
+                            // Convert message from base64 to utf8 (pubsub sends messages as base64
+                            // but rust strings are utf8)
+                            let message_unicode = String::from_utf8(base64::decode(&contents.data.unwrap()).unwrap()).unwrap();
+                            debug!("Received message: {}", message_unicode);
+                            // Parse message
+                            match parse_github_request_from_message(&message_unicode) {
+                                Ok(message_request) => {
+                                    // Attempt to start run from request
+                                    github_runner::process_request(conn, client, message_request).await;
+                                },
+                                Err(e) => {
+                                    error!("Failed to parse GithubRunRequest from message with body: {}", message_unicode);
+                                }
+                            }
 
-
+                        }
+                        else{
+                            debug!("Received message without message body");
+                        }
+                    }
                 },
                 None => debug!("No messages retrieved from pubsub")
             }
@@ -110,4 +137,10 @@ fn pull_message_data_from_subscription(client: &PubsubClient) {
         }
     }
 
+}
+
+/// Parses `message` as a GithubRunRequest and returns it, or returns and error if the parsing
+/// fails
+fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, serde_json::Error> {
+    Ok(serde_json::from_str(message)?)
 }

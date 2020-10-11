@@ -222,6 +222,16 @@ impl TestData {
         query.load::<Self>(conn)
     }
 
+    /// Retrieves the id of a test by its name
+    ///
+    /// Queries the DB using `conn` to retrieve the id for the first row with a name value of
+    /// `test_name`
+    /// Returns a result containing either the retrieved id as a Uuid or an error if the query
+    /// fails for some reason or if no test is found matching the criteria
+    pub fn find_id_by_name(conn: &PgConnection, test_name: &str) -> Result<Uuid, diesel::result::Error> {
+        test.filter(name.eq(test_name)).select(test_id).first::<Uuid>(conn)
+    }
+
     /// Inserts a new test into the DB
     ///
     /// Creates a new test row in the DB using `conn` with the values specified in `params`
@@ -648,6 +658,18 @@ mod tests {
         let found_tests = TestData::find(&conn, test_query).expect("Failed to find tests");
 
         assert_eq!(found_tests.len(), 3);
+    }
+
+    #[test]
+    fn find_id_by_name_exists() {
+        let conn = get_test_db_connection();
+
+        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+
+        let found_id = TestData::find_id_by_name(&conn, &test_tests[0].name).unwrap();
+
+        assert_eq!(found_id, test_tests[0].test_id);
+
     }
 
     #[test]

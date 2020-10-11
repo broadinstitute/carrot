@@ -52,8 +52,6 @@ fn main() {
         .parse()
         .expect("DB_THREADS environment variable must be an integer");
 
-    manager::gcloud_subscriber::run_subscriber();
-    /*
     // Make sure we have values for necessary email config variables
     notifications::emailer::setup();
     // Make sure we have values for necessary software build config variables
@@ -80,6 +78,9 @@ fn main() {
         panic!();
     }
 
+    manager::gcloud_subscriber::run_subscriber(pool.clone(), Client::default());
+
+    /*
     // Create channel for sending terminate signal to manager thread
     let (manager_send, manager_receive) = mpsc::channel();
     info!("Starting status manager thread");

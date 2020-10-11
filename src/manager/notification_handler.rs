@@ -83,10 +83,32 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
     Ok(())
 }
 
+/// Sends email to each user subscribed to the test, template, or pipeline for the test specified
+/// by `test_id`.  The email has `subject` for its subject and `message` for its message
+pub fn send_notification_emails_for_test(conn: &PgConnection, test_id: Uuid, subject: &str, message: &str) -> Result<(), Error> {
+    // If the email mode is None, just return
+    if matches!(*emailer::EMAIL_MODE, emailer::EmailMode::None) {
+        return Ok(());
+    }
+    // Get subscriptions
+    let subs = SubscriptionData::find_all_for_test(conn, test_id)?;
+
+    // Assemble set of email addresses to notify
+    let mut email_addresses: HashSet<&str> = HashSet::new();
+    for sub in &subs {
+        email_addresses.insert(&sub.email);
+    }
+
+    // Attempt to send email, and log an error and mark the error boolean as true if it fails
+    emailer::send_email(email_addresses.into_iter().collect(), subject, message)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum};
-    use crate::manager::notification_handler::send_run_complete_emails;
+    use crate::manager::notification_handler::{send_run_complete_emails, send_notification_emails_for_test};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
@@ -113,10 +135,19 @@ mod tests {
         conn: &PgConnection,
         email_base_name: &str,
     ) -> (RunData, TestData) {
+        let test = insert_test_test_with_subscriptions_with_entities(conn, email_base_name);
+        let run = insert_test_run_with_test_id(conn, test.test_id.clone());
+
+        (run, test)
+    }
+
+    fn insert_test_test_with_subscriptions_with_entities(
+        conn: &PgConnection,
+        email_base_name: &str
+    ) -> (TestData) {
         let pipeline = insert_test_pipeline(conn);
         let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
         let test = insert_test_test_with_template_id(conn, template.template_id.clone());
-        let run = insert_test_run_with_test_id(conn, test.test_id.clone());
 
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Pipeline,
@@ -144,7 +175,7 @@ mod tests {
         SubscriptionData::create(conn, new_subscription)
             .expect("Failed inserting test subscription");
 
-        (run, test)
+        test
     }
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
@@ -320,4 +351,101 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_send_notification_emails_for_test_success() {
+        // Set environment variables so they don't break the test
+        std::env::set_var("EMAIL_MODE", "SENDMAIL");
+        std::env::set_var("EMAIL_FROM", "kevin@example.com");
+
+        let pool = get_test_db_pool();
+
+        let new_test = insert_test_test_with_subscriptions_with_entities(
+            &pool.get().unwrap(),
+            "test_send_notification_emails",
+        );
+
+        let test_subject = "Cool Subject";
+        let test_message = "Cool message";
+
+        // Make temporary directory for the email
+        let email_path = Builder::new()
+            .prefix("test_send_notification_emails")
+            .rand_bytes(0)
+            .tempdir_in(temp_dir())
+            .unwrap();
+
+        // Send email
+        send_notification_emails_for_test(&pool.get().unwrap(), new_test.test_id, "Cool Subject", "Cool message").unwrap();
+
+        // Verify that the email was created correctly
+        let files_in_dir = read_dir(email_path.path())
+            .unwrap()
+            .collect::<Vec<std::io::Result<DirEntry>>>();
+
+        assert_eq!(files_in_dir.len(), 1);
+
+        let test_email_string =
+            read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
+        let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
+
+        assert_eq!(
+            test_email
+                .envelope
+                .get("forward_path")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .get(0)
+                .unwrap(),
+            "test_send_notification_emails@example.com"
+        );
+        assert_eq!(
+            test_email.envelope.get("reverse_path").unwrap(),
+            "kevin@example.com"
+        );
+
+        let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
+
+        assert_eq!(
+            parsed_mail.subparts[0].get_body().unwrap().trim(),
+            test_message
+        );
+        assert_eq!(
+            parsed_mail.headers.get_first_value("Subject").unwrap(),
+            test_subject
+        );
+
+        email_path.close().unwrap();
+    }
+
+    #[test]
+    fn test_send_notification_emails_for_test_failure_bad_email() {
+        // Set environment variables so they don't break the test
+        std::env::set_var("EMAIL_MODE", "SENDMAIL");
+        std::env::set_var("EMAIL_FROM", "kevin@example.com");
+
+        let pool = get_test_db_pool();
+
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &pool.get().unwrap(),
+            "send_notification_emails_for_test@",
+        );
+
+        // Send emails
+        match send_notification_emails_for_test(&pool.get().unwrap(), test_test.test_id, "Hello", "This will fail") {
+            Err(e) => match e {
+                super::Error::Email(_) => {}
+                _ => panic!(
+                    "Send run complete emails failed with unexpected error: {}",
+                    e
+                ),
+            },
+            _ => {
+                panic!("Send run complete emails succeeded unexpectedly");
+            }
+        }
+    }
+
+
 }
