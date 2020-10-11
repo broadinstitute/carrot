@@ -137,12 +137,12 @@ mod tests {
     use super::*;
     use crate::custom_sql_types::BuildStatusEnum;
     use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_build::NewSoftwareBuild;
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
-    use crate::models::software_build::NewSoftwareBuild;
 
     fn create_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
         let new_software = NewSoftware {

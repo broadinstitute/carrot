@@ -85,7 +85,12 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
 
 /// Sends email to each user subscribed to the test, template, or pipeline for the test specified
 /// by `test_id`.  The email has `subject` for its subject and `message` for its message
-pub fn send_notification_emails_for_test(conn: &PgConnection, test_id: Uuid, subject: &str, message: &str) -> Result<(), Error> {
+pub fn send_notification_emails_for_test(
+    conn: &PgConnection,
+    test_id: Uuid,
+    subject: &str,
+    message: &str,
+) -> Result<(), Error> {
     // If the email mode is None, just return
     if matches!(*emailer::EMAIL_MODE, emailer::EmailMode::None) {
         return Ok(());
@@ -108,7 +113,9 @@ pub fn send_notification_emails_for_test(conn: &PgConnection, test_id: Uuid, sub
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum};
-    use crate::manager::notification_handler::{send_run_complete_emails, send_notification_emails_for_test};
+    use crate::manager::notification_handler::{
+        send_notification_emails_for_test, send_run_complete_emails,
+    };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
@@ -143,7 +150,7 @@ mod tests {
 
     fn insert_test_test_with_subscriptions_with_entities(
         conn: &PgConnection,
-        email_base_name: &str
+        email_base_name: &str,
     ) -> (TestData) {
         let pipeline = insert_test_pipeline(conn);
         let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
@@ -376,7 +383,13 @@ mod tests {
             .unwrap();
 
         // Send email
-        send_notification_emails_for_test(&pool.get().unwrap(), new_test.test_id, "Cool Subject", "Cool message").unwrap();
+        send_notification_emails_for_test(
+            &pool.get().unwrap(),
+            new_test.test_id,
+            "Cool Subject",
+            "Cool message",
+        )
+        .unwrap();
 
         // Verify that the email was created correctly
         let files_in_dir = read_dir(email_path.path())
@@ -433,7 +446,12 @@ mod tests {
         );
 
         // Send emails
-        match send_notification_emails_for_test(&pool.get().unwrap(), test_test.test_id, "Hello", "This will fail") {
+        match send_notification_emails_for_test(
+            &pool.get().unwrap(),
+            test_test.test_id,
+            "Hello",
+            "This will fail",
+        ) {
             Err(e) => match e {
                 super::Error::Email(_) => {}
                 _ => panic!(
@@ -446,6 +464,4 @@ mod tests {
             }
         }
     }
-
-
 }

@@ -151,7 +151,8 @@ pub fn get_or_create_software_build(
             limit: Some(1),
             offset: None,
         };
-        let mut result: Vec<SoftwareBuildData> = SoftwareBuildData::find(conn, software_build_query)?;
+        let mut result: Vec<SoftwareBuildData> =
+            SoftwareBuildData::find(conn, software_build_query)?;
 
         // If we found it, return it as long as it's not aborted, expired, or failed
         if result.len() > 0 {

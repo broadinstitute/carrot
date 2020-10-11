@@ -2,16 +2,16 @@
 //! data should be included within the request, and how to start a run and notify relevant users of
 //! the success or failure of starting the run
 
-use crate::models::test::TestData;
-use diesel::PgConnection;
-use core::fmt;
-use actix_web::client::Client;
-use serde_json::{Value, json};
-use crate::models::run::RunData;
 use crate::manager::{notification_handler, test_runner};
-use uuid::Uuid;
+use crate::models::run::RunData;
+use crate::models::test::TestData;
+use actix_web::client::Client;
+use core::fmt;
+use diesel::PgConnection;
 use log::error;
 use serde::Deserialize;
+use serde_json::{json, Value};
+use uuid::Uuid;
 
 /// Represents the data received from a GitHub Actions request to start a test run
 ///
@@ -26,13 +26,13 @@ pub struct GithubRunRequest {
     eval_input_key: Option<String>,
     software_name: String,
     commit: String,
-    author: String
+    author: String,
 }
 
 #[derive(Debug)]
 pub enum Error {
     DB(diesel::result::Error),
-    Run(test_runner::Error)
+    Run(test_runner::Error),
 }
 
 impl std::error::Error for Error {}
@@ -82,79 +82,117 @@ pub async fn process_request(conn: &PgConnection, client: &Client, request: Gith
             let run_info = match serde_json::to_string_pretty(&run) {
                 Ok(info) => info,
                 Err(e) => {
-                    error!("Failed to build pretty json from run with id: {} due to error: {}", run.run_id, e);
+                    error!(
+                        "Failed to build pretty json from run with id: {} due to error: {}",
+                        run.run_id, e
+                    );
                     format!("Failed to get run data to include in email due to the following error:\n{}", e)
                 }
             };
-            let message = format!("GitHub user {} started a run for test {}:\n{}", author, test_name, run_info);
+            let message = format!(
+                "GitHub user {} started a run for test {}:\n{}",
+                author, test_name, run_info
+            );
             // Send emails
-            if let Err(e) = notification_handler::send_notification_emails_for_test(conn, test_id, subject, &message){
-                error!("Failed to send run start notification emails due to the following error: {}", e);
+            if let Err(e) = notification_handler::send_notification_emails_for_test(
+                conn, test_id, subject, &message,
+            ) {
+                error!(
+                    "Failed to send run start notification emails due to the following error: {}",
+                    e
+                );
             }
-
-        },
+        }
         Err(e) => {
-            error!("Encountered an error when trying to start a run from GitHub: {}", e);
+            error!(
+                "Encountered an error when trying to start a run from GitHub: {}",
+                e
+            );
             let subject = "Encountered an error when attempting to start a test run from GitHub";
             let message = format!("GitHub user {} attempted to start a run for test {}, but encountered the following error: {}", author, test_name, e);
             // Send emails
-            if let Err(e) = notification_handler::send_notification_emails_for_test(conn, test_id, subject, &message){
+            if let Err(e) = notification_handler::send_notification_emails_for_test(
+                conn, test_id, subject, &message,
+            ) {
                 error!("Failed to send run start failure notification emails due to the following error: {}", e);
             }
-
         }
     }
-
 }
 
 /// Builds parameters from `request` to start a run and starts the run.  Returns either the
 /// RunData for the started run or an error if it fails
-async fn start_run_from_request(conn: &PgConnection, client: &Client, test_id: Uuid, request: GithubRunRequest) -> Result<RunData, Error>{
+async fn start_run_from_request(
+    conn: &PgConnection,
+    client: &Client,
+    test_id: Uuid,
+    request: GithubRunRequest,
+) -> Result<RunData, Error> {
     // Build test and eval input jsons from the request, if it has values for the keys
     let test_input = match request.test_input_key {
-        Some(key) =>
-            Some(build_input_from_key_and_software_and_commit(&key, &request.software_name, &request.commit)),
-        None => None
+        Some(key) => Some(build_input_from_key_and_software_and_commit(
+            &key,
+            &request.software_name,
+            &request.commit,
+        )),
+        None => None,
     };
     let eval_input = match request.eval_input_key {
-        Some(key) =>
-            Some(build_input_from_key_and_software_and_commit(&key, &request.software_name, &request.commit)),
-        None => None
+        Some(key) => Some(build_input_from_key_and_software_and_commit(
+            &key,
+            &request.software_name,
+            &request.commit,
+        )),
+        None => None,
     };
     // Start run
-    Ok(test_runner::create_run(conn, client, &test_id.to_string(), None, test_input, eval_input, None).await?)
+    Ok(test_runner::create_run(
+        conn,
+        client,
+        &test_id.to_string(),
+        None,
+        test_input,
+        eval_input,
+        None,
+    )
+    .await?)
 }
 
 /// Returns a json object containing one key value pair, with `input_key` as the key, and the value
 /// set to the CARROT docker build value format: image_build:software_name|commit
-fn build_input_from_key_and_software_and_commit(input_key: &str, software_name: &str, commit: &str) -> Value {
-    json!({
-        input_key: format!("image_build:{}|{}", software_name, commit)
-    })
+fn build_input_from_key_and_software_and_commit(
+    input_key: &str,
+    software_name: &str,
+    commit: &str,
+) -> Value {
+    json!({ input_key: format!("image_build:{}|{}", software_name, commit) })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::github_runner::{build_input_from_key_and_software_and_commit, GithubRunRequest, start_run_from_request, process_request};
-    use serde_json::{json, Value};
-    use diesel::PgConnection;
-    use crate::models::test::{TestData, NewTest};
+    use crate::custom_sql_types::{BuildStatusEnum, EntityTypeEnum, RunStatusEnum};
+    use crate::manager::github_runner::{
+        build_input_from_key_and_software_and_commit, process_request, start_run_from_request,
+        GithubRunRequest,
+    };
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::run::RunData;
+    use crate::models::run_software_version::RunSoftwareVersionData;
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
+    use crate::models::software_version::{SoftwareVersionData, SoftwareVersionQuery};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
-    use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum, BuildStatusEnum};
-    use crate::models::pipeline::{PipelineData, NewPipeline};
-    use uuid::Uuid;
-    use crate::models::template::{TemplateData, NewTemplate};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
-    use crate::models::software::{SoftwareData, NewSoftware};
-    use crate::models::software_version::{SoftwareVersionQuery, SoftwareVersionData};
-    use crate::models::software_build::{SoftwareBuildQuery, SoftwareBuildData};
-    use crate::models::run_software_version::RunSoftwareVersionData;
-    use std::env::temp_dir;
-    use std::fs::{read_dir, DirEntry, read_to_string};
+    use diesel::PgConnection;
     use mailparse::MailHeaderMap;
-    use crate::models::run::RunData;
     use serde::Deserialize;
+    use serde_json::{json, Value};
+    use std::env::temp_dir;
+    use std::fs::{read_dir, read_to_string, DirEntry};
+    use uuid::Uuid;
 
     #[derive(Deserialize)]
     struct ParsedEmailFile {
@@ -165,7 +203,7 @@ mod tests {
 
     fn insert_test_test_with_subscriptions_with_entities(
         conn: &PgConnection,
-        email_base_name: &str
+        email_base_name: &str,
     ) -> TestData {
         let pipeline = insert_test_pipeline(conn);
         let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
@@ -255,17 +293,20 @@ mod tests {
 
         let conn = get_test_db_connection();
         let client = Client::default();
-        let test_test = insert_test_test_with_subscriptions_with_entities(&conn, "test_process_request_success");
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_success",
+        );
 
         let test_software = insert_test_software(&conn);
 
-        let test_request = GithubRunRequest{
+        let test_request = GithubRunRequest {
             test_name: test_test.name,
             test_input_key: Some(String::from("in_test_image")),
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: test_software.name,
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
-            author: String::from("ExampleKevin")
+            author: String::from("ExampleKevin"),
         };
 
         let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
@@ -313,7 +354,10 @@ mod tests {
         let subject = parsed_mail.headers.get_first_value("Subject").unwrap();
         assert_eq!(subject, "Successfully started run from GitHub");
         let split_message: Vec<&str> = message.splitn(2, "\n").collect();
-        assert_eq!(split_message[0], "GitHub user ExampleKevin started a run for test Kevin's test test:");
+        assert_eq!(
+            split_message[0],
+            "GitHub user ExampleKevin started a run for test Kevin's test test:"
+        );
         let test_run: RunData = serde_json::from_str(split_message[1].trim()).unwrap();
 
         assert_eq!(test_run.test_id, test_test.test_id);
@@ -359,7 +403,7 @@ mod tests {
                 test_run.run_id,
                 created_software_version[0].software_version_id,
             )
-                .unwrap();
+            .unwrap();
 
         email_path.close().unwrap();
     }
@@ -372,15 +416,18 @@ mod tests {
 
         let conn = get_test_db_connection();
         let client = Client::default();
-        let test_test = insert_test_test_with_subscriptions_with_entities(&conn, "test_process_request_failure_no_software");
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_failure_no_software",
+        );
 
-        let test_request = GithubRunRequest{
+        let test_request = GithubRunRequest {
             test_name: test_test.name,
             test_input_key: Some(String::from("in_test_image")),
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: String::from("TestSoftware"),
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
-            author: String::from("ExampleKevin")
+            author: String::from("ExampleKevin"),
         };
 
         // Make temporary directory for the email
@@ -423,7 +470,10 @@ mod tests {
 
         let message = String::from(parsed_mail.subparts[0].get_body().unwrap().trim());
         let subject = parsed_mail.headers.get_first_value("Subject").unwrap();
-        assert_eq!(subject, "Encountered an error when attempting to start a test run from GitHub");
+        assert_eq!(
+            subject,
+            "Encountered an error when attempting to start a test run from GitHub"
+        );
         assert_eq!(message, "GitHub user ExampleKevin attempted to start a run for test Kevin's test test, but encountered the following error: Error Run Error SoftwareNotFound: TestSoftware");
 
         email_path.close().unwrap();
@@ -433,17 +483,18 @@ mod tests {
     async fn test_start_run_from_request() {
         let conn = get_test_db_connection();
         let client = Client::default();
-        let test_test = insert_test_test_with_subscriptions_with_entities(&conn, "test_start_run_from_request");
+        let test_test =
+            insert_test_test_with_subscriptions_with_entities(&conn, "test_start_run_from_request");
 
         let test_software = insert_test_software(&conn);
 
-        let test_request = GithubRunRequest{
+        let test_request = GithubRunRequest {
             test_name: test_test.name,
             test_input_key: Some(String::from("in_test_image")),
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: test_software.name,
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
-            author: String::from("ExampleKevin")
+            author: String::from("ExampleKevin"),
         };
 
         let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
@@ -518,9 +569,8 @@ mod tests {
                 test_run.run_id,
                 created_software_version[0].software_version_id,
             )
-                .unwrap();
+            .unwrap();
     }
-
 
     #[test]
     fn test_build_input_from_key_and_software_and_commit() {
@@ -536,5 +586,4 @@ mod tests {
 
         assert_eq!(result, expected_result);
     }
-
 }

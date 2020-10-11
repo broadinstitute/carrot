@@ -160,10 +160,8 @@ pub async fn create_run(
     if !version_map.is_empty() {
         for (_, version) in version_map {
             // Create build for this software version if there isn't one
-            match software_builder::get_or_create_software_build(
-                conn,
-                version.software_version_id,
-            ) {
+            match software_builder::get_or_create_software_build(conn, version.software_version_id)
+            {
                 // If creating a build fails, mark run as failed
                 Err(e) => {
                     mark_run_as_failed(conn, run.run_id)?;
@@ -412,8 +410,11 @@ pub fn get_or_create_run_software_version(
     let run_software_version_closure = || {
         // Try to find a run software version mapping row for this version and run to see if we've
         // already created the mapping
-        let run_software_version =
-            RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
+        let run_software_version = RunSoftwareVersionData::find_by_run_and_software_version(
+            conn,
+            run_id,
+            software_version_id,
+        );
 
         match run_software_version {
             // If we found it, return it
@@ -438,7 +439,9 @@ pub fn get_or_create_run_software_version(
     };
 
     #[cfg(not(test))]
-    return conn.build_transaction().run(|| run_software_version_closure());
+    return conn
+        .build_transaction()
+        .run(|| run_software_version_closure());
 
     // Tests do all database stuff in transactions that are not committed so they don't interfere
     // with other tests. An unfortunate side effect of this is that we can't use transactions in

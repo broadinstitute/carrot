@@ -179,12 +179,17 @@ pub async fn manage(
                         "Checking status of build with id: {}",
                         build.software_build_id
                     );
-                    match check_and_update_build_status(&build, &client, &db_pool.get().unwrap()).await{
+                    match check_and_update_build_status(&build, &client, &db_pool.get().unwrap())
+                        .await
+                    {
                         Err(e) => {
                             error!("Encountered error while trying to update status for build with id {}: {}", build.software_build_id, e);
-                        },
+                        }
                         Ok(_) => {
-                            debug!("Successfully checked/updated status for build with id {}", build.software_build_id);
+                            debug!(
+                                "Successfully checked/updated status for build with id {}",
+                                build.software_build_id
+                            );
                         }
                     }
                 }

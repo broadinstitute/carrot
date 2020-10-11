@@ -228,8 +228,13 @@ impl TestData {
     /// `test_name`
     /// Returns a result containing either the retrieved id as a Uuid or an error if the query
     /// fails for some reason or if no test is found matching the criteria
-    pub fn find_id_by_name(conn: &PgConnection, test_name: &str) -> Result<Uuid, diesel::result::Error> {
-        test.filter(name.eq(test_name)).select(test_id).first::<Uuid>(conn)
+    pub fn find_id_by_name(
+        conn: &PgConnection,
+        test_name: &str,
+    ) -> Result<Uuid, diesel::result::Error> {
+        test.filter(name.eq(test_name))
+            .select(test_id)
+            .first::<Uuid>(conn)
     }
 
     /// Inserts a new test into the DB
@@ -669,7 +674,6 @@ mod tests {
         let found_id = TestData::find_id_by_name(&conn, &test_tests[0].name).unwrap();
 
         assert_eq!(found_id, test_tests[0].test_id);
-
     }
 
     #[test]

@@ -136,11 +136,11 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 mod tests {
     use super::*;
     use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_version::NewSoftwareVersion;
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
-    use crate::models::software_version::NewSoftwareVersion;
 
     fn create_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
         let new_software = NewSoftware {
