@@ -10,6 +10,8 @@ use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
+use std::sync::mpsc;
+use std::time::Duration;
 
 lazy_static! {
     // Url for the docker repo where images will be stored
@@ -80,6 +82,27 @@ pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
 /// we ever need to change it, we don't have to do it in a bunch of places in the code
 pub fn get_formatted_image_url(software_name: &str, commit_hash: &str) -> String {
     format!("{}/{}:{}", *IMAGE_REGISTRY_HOST, software_name, commit_hash)
+}
+
+/// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel
+/// is disconnected, or `None` if the channel is empty
+pub fn check_for_terminate_message(channel_recv: &mpsc::Receiver<()>) -> Option<()> {
+    match channel_recv.try_recv() {
+        Ok(_) | Err(mpsc::TryRecvError::Disconnected) => Some(()),
+        _ => None,
+    }
+}
+
+/// Blocks for a message on `channel_recv` until timeout has passed, and returns `Some(())` if it
+/// finds one or the channel is disconnected, or `None` if it times out
+pub fn check_for_terminate_message_with_timeout(
+    channel_recv: &mpsc::Receiver<()>,
+    timeout: Duration,
+) -> Option<()> {
+    match channel_recv.recv_timeout(timeout) {
+        Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => Some(()),
+        Err(mpsc::RecvTimeoutError::Timeout) => None,
+    }
 }
 
 #[cfg(test)]

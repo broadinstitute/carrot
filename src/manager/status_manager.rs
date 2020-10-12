@@ -23,6 +23,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
@@ -224,27 +225,6 @@ pub async fn manage(
         if let Some(_) = check_for_terminate_message(&channel_recv) {
             return Ok(());
         }
-    }
-}
-
-/// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel
-/// is disconnected, or `None` if the channel is empty
-fn check_for_terminate_message(channel_recv: &mpsc::Receiver<()>) -> Option<()> {
-    match channel_recv.try_recv() {
-        Ok(_) | Err(mpsc::TryRecvError::Disconnected) => Some(()),
-        _ => None,
-    }
-}
-
-/// Blocks for a message on `channel_recv` until timeout has passed, and returns `Some(())` if it
-/// finds one or the channel is disconnected, or `None` if it times out
-fn check_for_terminate_message_with_timeout(
-    channel_recv: &mpsc::Receiver<()>,
-    timeout: Duration,
-) -> Option<()> {
-    match channel_recv.recv_timeout(timeout) {
-        Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => Some(()),
-        Err(mpsc::RecvTimeoutError::Timeout) => None,
     }
 }
 

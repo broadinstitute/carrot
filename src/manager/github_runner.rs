@@ -21,12 +21,12 @@ use uuid::Uuid;
 /// who triggered the request in GitHub by creating a comment in the format to trigger a test run
 #[derive(Deserialize)]
 pub struct GithubRunRequest {
-    test_name: String,
-    test_input_key: Option<String>,
-    eval_input_key: Option<String>,
-    software_name: String,
-    commit: String,
-    author: String,
+    pub test_name: String,
+    pub test_input_key: Option<String>,
+    pub eval_input_key: Option<String>,
+    pub software_name: String,
+    pub commit: String,
+    pub author: String,
 }
 
 #[derive(Debug)]
