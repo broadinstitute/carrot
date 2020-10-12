@@ -7,16 +7,16 @@
 use crate::db::DbPool;
 use crate::manager::github_runner;
 use crate::manager::github_runner::GithubRunRequest;
+use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 use actix_web::client::Client;
 use base64;
 use diesel::PgConnection;
 use google_pubsub1::{Pubsub, ReceivedMessage};
 use log::{debug, error, info};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use std::{env, fmt};
 use yup_oauth2;
-use std::time::{Instant, Duration};
-use std::sync::mpsc;
-use crate::manager::util::{check_for_terminate_message_with_timeout, check_for_terminate_message};
 
 type PubsubClient = Pubsub<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
 
@@ -25,7 +25,7 @@ type PubsubClient = Pubsub<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper
 enum ParseMessageError {
     Json(serde_json::Error),
     Base64(base64::DecodeError),
-    Unicode(std::string::FromUtf8Error)
+    Unicode(std::string::FromUtf8Error),
 }
 
 impl std::error::Error for ParseMessageError {}
@@ -95,14 +95,13 @@ pub async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc:
         // Check if we've received a terminate message from main
         // While the time since we last started a check of the subscription hasn't exceeded
         // PUBSUB_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
-        let wait_timeout = Duration::new(*PUBSUB_WAIT_TIME_IN_SECS, 0)
-            .checked_sub(Instant::now() - query_time);
+        let wait_timeout =
+            Duration::new(*PUBSUB_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
         if let Some(timeout) = wait_timeout {
             if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout) {
                 return;
             }
-        }
-        else {
+        } else {
             // If we've exceeded the wait time, check with no wait
             if let Some(_) = check_for_terminate_message(&channel_recv) {
                 return;
@@ -184,25 +183,24 @@ async fn start_run_from_message(conn: &PgConnection, client: &Client, message: &
                 match parse_github_request_from_message(&message_data) {
                     Ok(message_request) => {
                         // Attempt to start run from request
-                        github_runner::process_request(conn, client, message_request)
-                            .await;
+                        github_runner::process_request(conn, client, message_request).await;
                     }
                     Err(e) => {
-                        error!("Failed to parse GithubRunRequest from message {:?} due to error: {}", message, e);
+                        error!(
+                            "Failed to parse GithubRunRequest from message {:?} due to error: {}",
+                            message, e
+                        );
                     }
                 }
-            },
+            }
             None => {
                 error!("Received message without data in body: {:?}", message);
             }
-
         }
-
     } else {
         debug!("Received message without message body");
     }
 }
-
 
 /// Collects the ack ids from `messages` and sends a request to pubsub to acknowledge that the
 /// messages have been received
@@ -248,28 +246,30 @@ fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, 
 #[cfg(test)]
 mod tests {
 
-    use serde_json::{json, Value};
-    use serde::Deserialize;
-    use crate::manager::gcloud_subscriber::{ParseMessageError, parse_github_request_from_message, start_run_from_message};
-    use diesel::PgConnection;
-    use crate::models::test::{TestData, NewTest};
+    use crate::custom_sql_types::{BuildStatusEnum, EntityTypeEnum, RunStatusEnum};
+    use crate::manager::gcloud_subscriber::{
+        parse_github_request_from_message, start_run_from_message, ParseMessageError,
+    };
+    use crate::manager::github_runner::GithubRunRequest;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::run::RunData;
+    use crate::models::run_software_version::RunSoftwareVersionData;
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
+    use crate::models::software_version::{SoftwareVersionData, SoftwareVersionQuery};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
-    use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum, BuildStatusEnum};
-    use crate::models::pipeline::{PipelineData, NewPipeline};
-    use uuid::Uuid;
-    use crate::models::template::{TemplateData, NewTemplate};
-    use crate::models::software::{SoftwareData, NewSoftware};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
-    use crate::manager::github_runner::GithubRunRequest;
-    use std::env::temp_dir;
-    use std::fs::{read_dir, DirEntry, read_to_string};
-    use mailparse::MailHeaderMap;
-    use crate::models::run::RunData;
-    use crate::models::software_version::{SoftwareVersionQuery, SoftwareVersionData};
-    use crate::models::software_build::{SoftwareBuildQuery, SoftwareBuildData};
-    use crate::models::run_software_version::RunSoftwareVersionData;
+    use diesel::PgConnection;
     use google_pubsub1::{PubsubMessage, ReceivedMessage};
+    use mailparse::MailHeaderMap;
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+    use std::env::temp_dir;
+    use std::fs::{read_dir, read_to_string, DirEntry};
+    use uuid::Uuid;
 
     #[derive(Deserialize)]
     struct ParsedEmailFile {
@@ -388,16 +388,16 @@ mod tests {
         let request_data_string = serde_json::to_string(&request_data_json).unwrap();
         let base64_request_data = base64::encode(&request_data_string);
 
-        let pubsub_message = PubsubMessage{
+        let pubsub_message = PubsubMessage {
             attributes: None,
             data: Some(base64_request_data),
             publish_time: None,
-            message_id: None
+            message_id: None,
         };
         let received_message = ReceivedMessage {
             ack_id: Some("test_id".to_string()),
             message: Some(pubsub_message),
-            delivery_attempt: Some(1)
+            delivery_attempt: Some(1),
         };
 
         let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
@@ -494,7 +494,7 @@ mod tests {
                 test_run.run_id,
                 created_software_version[0].software_version_id,
             )
-                .unwrap();
+            .unwrap();
 
         email_path.close().unwrap();
     }
@@ -516,7 +516,10 @@ mod tests {
         assert_eq!(parsed_request.test_input_key.unwrap(), "test_key");
         assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
         assert_eq!(parsed_request.software_name, "test_software");
-        assert_eq!(parsed_request.commit, "ca82a6dff817ec66f44342007202690a93763949");
+        assert_eq!(
+            parsed_request.commit,
+            "ca82a6dff817ec66f44342007202690a93763949"
+        );
         assert_eq!(parsed_request.author, "me");
     }
 
@@ -547,5 +550,4 @@ mod tests {
         let parsed_request = parse_github_request_from_message(&base64_message);
         assert!(matches!(parsed_request, Err(ParseMessageError::Json(_))));
     }
-
 }

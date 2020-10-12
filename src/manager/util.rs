@@ -9,9 +9,9 @@ use log::error;
 use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 use std::sync::mpsc;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 
 lazy_static! {
     // Url for the docker repo where images will be stored

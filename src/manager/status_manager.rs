@@ -7,6 +7,7 @@
 
 use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::db::DbPool;
+use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 use crate::manager::{notification_handler, software_builder, test_runner};
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_result::{NewRunResult, RunResultData};
@@ -23,7 +24,6 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
