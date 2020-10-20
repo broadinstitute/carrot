@@ -851,7 +851,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
         let test_params = json!({"in_user_name":"Kevin"});
-        let eval_params = json!({}); //json!({"in_user":"Jonn"});
+        let eval_params = json!({});
 
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({

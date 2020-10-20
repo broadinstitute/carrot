@@ -1,9 +1,11 @@
 //! Contains functions for sending notifications to users
 
 use crate::models::run::RunWithResultData;
+use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
-use crate::notifications::emailer;
+use crate::notifications::{emailer, github_commenter};
+use actix_web::client::Client;
 use diesel::PgConnection;
 use std::collections::HashSet;
 use std::fmt;
@@ -15,14 +17,16 @@ pub enum Error {
     DB(diesel::result::Error),
     Email(emailer::SendEmailError),
     Json(serde_json::error::Error),
+    Github(github_commenter::Error),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::DB(e) => write!(f, "Error DB {}", e),
-            Error::Email(e) => write!(f, "Error Email {}", e),
-            Error::Json(e) => write!(f, "Error Json {}", e),
+            Error::DB(e) => write!(f, "Notification Error DB {}", e),
+            Error::Email(e) => write!(f, "Notification Error Email {}", e),
+            Error::Json(e) => write!(f, "Notification Error Json {}", e),
+            Error::Github(e) => write!(f, "Notification Error Github {}", e),
         }
     }
 }
@@ -43,6 +47,11 @@ impl From<emailer::SendEmailError> for Error {
 impl From<serde_json::error::Error> for Error {
     fn from(e: serde_json::error::Error) -> Error {
         Error::Json(e)
+    }
+}
+impl From<github_commenter::Error> for Error {
+    fn from(e: github_commenter::Error) -> Error {
+        Error::Github(e)
     }
 }
 
@@ -108,6 +117,41 @@ pub fn send_notification_emails_for_test(
     emailer::send_email(email_addresses.into_iter().collect(), subject, message)?;
 
     Ok(())
+}
+
+/// Checks to see if the run indicated by `run_id` was triggered from Github (i.e has a
+/// corresponding row in the RUN_IS_FROM_GITHUB table) and, if so, attempts to post a comment to
+/// GitHub to indicate the run has finished, with the run's data.  Returns an error if there is
+/// some issue querying the db or posting the comment
+pub async fn post_run_complete_comment_if_from_github(
+    conn: &PgConnection,
+    client: &Client,
+    run_id: Uuid,
+) -> Result<(), Error> {
+    // Check if run was triggered by a github comment and retrieve relevant data if so
+    match RunIsFromGithubData::find_by_run_id(conn, run_id) {
+        Ok(data_from_github) => {
+            // If the run was triggered from github, retrieve its data and post to github
+            let run_data = RunWithResultData::find_by_id(conn, run_id)?;
+            github_commenter::post_run_finished_comment(
+                client,
+                &data_from_github.owner,
+                &data_from_github.repo,
+                data_from_github.issue_number.clone(),
+                &run_data,
+            )
+            .await?;
+            Ok(())
+        }
+        Err(e) => {
+            match e {
+                // If we just didn't get a record, that's fine
+                diesel::result::Error::NotFound => Ok(()),
+                // We want to return any other error
+                _ => Err(Error::DB(e)),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -464,4 +508,7 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_post_run_complete_comment_if_from_github() {}
 }

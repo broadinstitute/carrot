@@ -4,11 +4,13 @@
 
 use crate::manager::{notification_handler, test_runner};
 use crate::models::run::RunData;
+use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
 use crate::models::test::TestData;
+use crate::notifications::github_commenter;
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
-use log::error;
+use log::{debug, error};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -26,6 +28,9 @@ pub struct GithubRunRequest {
     pub eval_input_key: Option<String>,
     pub software_name: String,
     pub commit: String,
+    pub owner: String,
+    pub repo: String,
+    pub issue_number: i32,
     pub author: String,
 }
 
@@ -74,8 +79,13 @@ pub async fn process_request(conn: &PgConnection, client: &Client, request: Gith
         }
     };
     // Start run
-    match start_run_from_request(conn, client, test_id, request).await {
+    match start_run_from_request(conn, client, test_id, &request).await {
         Ok(run) => {
+            // Insert run_is_from_github record for the created run
+            match record_github_info(conn, run.run_id, &request.owner, &request.repo, request.issue_number.clone(), &request.author) {
+                Ok(_) => debug!("Created run_is_from_github record for run {}", run.run_id),
+                Err(e) => error!("Encountered an error trying to create a run_is_from_github record for run {}: {}", run.run_id, e)
+            }
             // Send email notifying subscribers that the run has started successfully
             // Build subject and message for email
             let subject = "Successfully started run from GitHub";
@@ -89,6 +99,7 @@ pub async fn process_request(conn: &PgConnection, client: &Client, request: Gith
                     format!("Failed to get run data to include in email due to the following error:\n{}", e)
                 }
             };
+
             let message = format!(
                 "GitHub user {} started a run for test {}:\n{}",
                 author, test_name, run_info
@@ -101,6 +112,18 @@ pub async fn process_request(conn: &PgConnection, client: &Client, request: Gith
                     "Failed to send run start notification emails due to the following error: {}",
                     e
                 );
+            }
+            // Post to GitHub
+            if let Err(e) = github_commenter::post_run_started_comment(
+                client,
+                &request.owner,
+                &request.repo,
+                request.issue_number.clone(),
+                &run,
+            )
+            .await
+            {
+                error!("Failed to post run start notification to GitHub due to the following error: {}", e);
             }
         }
         Err(e) => {
@@ -116,6 +139,18 @@ pub async fn process_request(conn: &PgConnection, client: &Client, request: Gith
             ) {
                 error!("Failed to send run start failure notification emails due to the following error: {}", e);
             }
+            // Post to GitHub
+            if let Err(e) = github_commenter::post_run_failed_to_start_comment(
+                client,
+                &request.owner,
+                &request.repo,
+                request.issue_number.clone(),
+                &e.to_string(),
+            )
+            .await
+            {
+                error!("Failed to post run start failure notification to GitHub due to the following error: {}", e);
+            }
         }
     }
 }
@@ -126,20 +161,20 @@ async fn start_run_from_request(
     conn: &PgConnection,
     client: &Client,
     test_id: Uuid,
-    request: GithubRunRequest,
+    request: &GithubRunRequest,
 ) -> Result<RunData, Error> {
     // Build test and eval input jsons from the request, if it has values for the keys
-    let test_input = match request.test_input_key {
+    let test_input = match &request.test_input_key {
         Some(key) => Some(build_input_from_key_and_software_and_commit(
-            &key,
+            key,
             &request.software_name,
             &request.commit,
         )),
         None => None,
     };
-    let eval_input = match request.eval_input_key {
+    let eval_input = match &request.eval_input_key {
         Some(key) => Some(build_input_from_key_and_software_and_commit(
-            &key,
+            key,
             &request.software_name,
             &request.commit,
         )),
@@ -156,6 +191,27 @@ async fn start_run_from_request(
         None,
     )
     .await?)
+}
+
+/// Creates a record in the RUN_IS_FROM_GITHUB table to store the data (`owner`, `repo`,
+/// `issue_number`, `author`) related to the github comment that triggered the run (`run_id`)
+fn record_github_info(
+    conn: &PgConnection,
+    run_id: Uuid,
+    owner: &str,
+    repo: &str,
+    issue_number: i32,
+    author: &str,
+) -> Result<RunIsFromGithubData, diesel::result::Error> {
+    let github_info_rec = NewRunIsFromGithub {
+        run_id,
+        owner: String::from(owner),
+        repo: String::from(repo),
+        issue_number,
+        author: String::from(author),
+    };
+
+    RunIsFromGithubData::create(conn, github_info_rec)
 }
 
 /// Returns a json object containing one key value pair, with `input_key` as the key, and the value
@@ -177,6 +233,7 @@ mod tests {
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::RunData;
+    use crate::models::run_is_from_github::RunIsFromGithubData;
     use crate::models::run_software_version::RunSoftwareVersionData;
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
@@ -290,6 +347,8 @@ mod tests {
         // Set environment variables so they don't break the test
         std::env::set_var("EMAIL_MODE", "SENDMAIL");
         std::env::set_var("EMAIL_FROM", "kevin@example.com");
+        std::env::set_var("GITHUB_CLIENT_ID", "user");
+        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
 
         let conn = get_test_db_connection();
         let client = Client::default();
@@ -306,8 +365,17 @@ mod tests {
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: test_software.name,
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
+            owner: String::from("ExampleOwner"),
+            repo: String::from("ExampleRepo"),
+            issue_number: 4,
             author: String::from("ExampleKevin"),
         };
+
+        // Define mockito mapping for github comment response
+        let mock = mockito::mock("POST", "/repos/ExampleOwner/ExampleRepo/issues/4/comments")
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
 
         let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
         let eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
@@ -405,6 +473,15 @@ mod tests {
             )
             .unwrap();
 
+        let created_run_is_from_github =
+            RunIsFromGithubData::find_by_run_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(created_run_is_from_github.issue_number, 4);
+        assert_eq!(created_run_is_from_github.owner, "ExampleOwner");
+        assert_eq!(created_run_is_from_github.repo, "ExampleRepo");
+        assert_eq!(created_run_is_from_github.author, "ExampleKevin");
+
+        mock.assert();
+
         email_path.close().unwrap();
     }
 
@@ -413,6 +490,8 @@ mod tests {
         // Set environment variables so they don't break the test
         std::env::set_var("EMAIL_MODE", "SENDMAIL");
         std::env::set_var("EMAIL_FROM", "kevin@example.com");
+        std::env::set_var("GITHUB_CLIENT_ID", "user");
+        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
 
         let conn = get_test_db_connection();
         let client = Client::default();
@@ -427,8 +506,17 @@ mod tests {
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: String::from("TestSoftware"),
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
+            owner: String::from("ExampleOwner"),
+            repo: String::from("ExampleRepo"),
+            issue_number: 4,
             author: String::from("ExampleKevin"),
         };
+
+        // Define mockito mapping for github comment response
+        let mock = mockito::mock("POST", "/repos/ExampleOwner/ExampleRepo/issues/4/comments")
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
 
         // Make temporary directory for the email
         let email_path = tempfile::Builder::new()
@@ -476,6 +564,8 @@ mod tests {
         );
         assert_eq!(message, "GitHub user ExampleKevin attempted to start a run for test Kevin's test test, but encountered the following error: Error Run Error SoftwareNotFound: TestSoftware");
 
+        mock.assert();
+
         email_path.close().unwrap();
     }
 
@@ -494,6 +584,9 @@ mod tests {
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: test_software.name,
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
+            owner: String::from("ExampleOwner"),
+            repo: String::from("ExampleRepo"),
+            issue_number: 4,
             author: String::from("ExampleKevin"),
         };
 
@@ -518,7 +611,7 @@ mod tests {
             .expect(0)
             .create();
 
-        let test_run = start_run_from_request(&conn, &client, test_test.test_id, test_request)
+        let test_run = start_run_from_request(&conn, &client, test_test.test_id, &test_request)
             .await
             .unwrap();
 

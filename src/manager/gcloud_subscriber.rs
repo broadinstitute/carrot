@@ -8,15 +8,50 @@ use crate::db::DbPool;
 use crate::manager::github_runner;
 use crate::manager::github_runner::GithubRunRequest;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
+use crate::requests::github_requests;
+use actix_rt::System;
 use actix_web::client::Client;
 use base64;
 use diesel::PgConnection;
 use google_pubsub1::{Pubsub, ReceivedMessage};
 use log::{debug, error, info};
 use std::sync::mpsc;
+use std::sync::mpsc::Sender;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use std::{env, fmt};
+use std::{env, fmt, thread};
 use yup_oauth2;
+
+lazy_static! {
+    pub static ref ENABLE_GITHUB_REQUESTS: bool = match env::var("ENABLE_GITHUB_REQUESTS") {
+        Ok(val) => {
+            if val == "true" {
+                true
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    };
+    static ref GCLOUD_SA_KEY_FILE: String =
+        env::var("GCLOUD_SA_KEY_FILE").expect("GCLOUD_SA_KEY_FILE environment variable not set");
+    static ref PUBSUB_SUBSCRIPTION_NAME: String = env::var("PUBSUB_SUBSCRIPTION_NAME")
+        .expect("PUBSUB_SUBSCRIPTION_NAME environment variable not set");
+    static ref PUBSUB_MAX_MESSAGES_PER: i32 = match env::var("PUBSUB_MAX_MESSAGES_PER") {
+        Ok(s) => s.parse::<i32>().unwrap(),
+        Err(_) => {
+            info!("No PUBSUB_MAX_MESSAGES_PER specified.  Defaulting to 20 messages");
+            20
+        }
+    };
+    static ref PUBSUB_WAIT_TIME_IN_SECS: u64 = match env::var("PUBSUB_WAIT_TIME_IN_SECS") {
+        Ok(s) => s.parse::<u64>().unwrap(),
+        Err(_) => {
+            info!("No PUBSUB_WAIT_TIME_IN_SECS specified.  Defaulting to 1 minute");
+            60
+        }
+    };
+}
 
 type PubsubClient = Pubsub<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
 
@@ -58,30 +93,54 @@ impl From<std::string::FromUtf8Error> for ParseMessageError {
     }
 }
 
-lazy_static! {
-    static ref GCLOUD_SA_KEY_FILE: String =
-        env::var("GCLOUD_SA_KEY_FILE").expect("GCLOUD_SA_KEY_FILE environment variable not set");
-    static ref PUBSUB_SUBSCRIPTION_NAME: String = env::var("PUBSUB_SUBSCRIPTION_NAME")
-        .expect("PUBSUB_SUBSCRIPTION_NAME environment variable not set");
-    static ref PUBSUB_MAX_MESSAGES_PER: i32 = match env::var("PUBSUB_MAX_MESSAGES_PER") {
-        Ok(s) => s.parse::<i32>().unwrap(),
-        Err(_) => {
-            info!("No PUBSUB_MAX_MESSAGES_PER specified.  Defaulting to 20 messages");
-            20
-        }
-    };
-    static ref PUBSUB_WAIT_TIME_IN_SECS: u64 = match env::var("PUBSUB_WAIT_TIME_IN_SECS") {
-        Ok(s) => s.parse::<u64>().unwrap(),
-        Err(_) => {
-            info!("No PUBSUB_WAIT_TIME_IN_SECS specified.  Defaulting to 1 minute");
-            60
-        }
-    };
+/// If the ENABLE_GITHUB_REQUESTS environment variable is set to `true`, starts running the
+/// subscriber and returns a message channel sender for sending it a termination message and a join
+/// handle to join the thread.  If not, returns (None, None)
+///
+/// # Panics
+/// Panics if ENABLE_GITHUB_REQUESTS is set to `true` and a required environments variable is not
+/// set
+pub fn init_or_not(pool: DbPool) -> (Option<Sender<()>>, Option<JoinHandle<()>>) {
+    // If we're enabling github requests, start the subscriber
+    if *ENABLE_GITHUB_REQUESTS {
+        // Make sure all the environment variables we need are set
+        initialize_lazy_static_variables();
+        // Start the gcloud_subscriber server and return the channel sender to communicate with
+        // it and the thread to join on it
+        let (gcloud_subscriber_send, gcloud_subscriber_receive) = mpsc::channel();
+        info!("Starting gcloud subscriber thread");
+        let gcloud_subscriber_thread = thread::spawn(move || {
+            let mut sys = System::new("GCloudSubscriberSystem");
+            sys.block_on(run_subscriber(
+                pool,
+                Client::default(),
+                gcloud_subscriber_receive,
+            ));
+        });
+        (Some(gcloud_subscriber_send), Some(gcloud_subscriber_thread))
+    }
+    // Otherwise, return Nones
+    else {
+        (None, None)
+    }
+}
+
+/// Initialize any lazy static variables in this module or modules that are necessary for this one
+/// to run correctly
+///
+/// # Panics
+/// Panics if certain required variables cannot be initialized
+fn initialize_lazy_static_variables() {
+    lazy_static::initialize(&GCLOUD_SA_KEY_FILE);
+    lazy_static::initialize(&PUBSUB_SUBSCRIPTION_NAME);
+    lazy_static::initialize(&PUBSUB_MAX_MESSAGES_PER);
+    lazy_static::initialize(&PUBSUB_WAIT_TIME_IN_SECS);
+    github_requests::initialize_lazy_static_variables();
 }
 
 /// Main loop function for this manager. Initializes the manager, then loops checking the pubsub
 /// subscription for requests, and attempts to start a test run for each request
-pub async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Receiver<()>) {
+async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Receiver<()>) {
     // Create the pubsub client so we can connect to the subscription
     let pubsub_client = initialize_pubsub();
 
@@ -95,6 +154,7 @@ pub async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc:
         // Check if we've received a terminate message from main
         // While the time since we last started a check of the subscription hasn't exceeded
         // PUBSUB_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
+        debug!("Finished gcloud subscription check.  Sleeping . . .");
         let wait_timeout =
             Duration::new(*PUBSUB_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
         if let Some(timeout) = wait_timeout {
@@ -367,6 +427,8 @@ mod tests {
         // Set environment variables so they don't break the test
         std::env::set_var("EMAIL_MODE", "SENDMAIL");
         std::env::set_var("EMAIL_FROM", "kevin@example.com");
+        std::env::set_var("GITHUB_CLIENT_ID", "user");
+        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
 
         let conn = get_test_db_connection();
         let client = Client::default();
@@ -383,8 +445,18 @@ mod tests {
             "eval_input_key": "in_eval_image",
             "software_name": test_software.name,
             "commit": "764a00442ddb412eed331655cfd90e151f580518",
+            "owner":"TestOwner",
+            "repo":"TestRepo",
+            "issue_number":4,
             "author": "ExampleKevin"
         });
+
+        // Define mockito mapping for github comment response
+        let mock = mockito::mock("POST", "/repos/TestOwner/TestRepo/issues/4/comments")
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
         let request_data_string = serde_json::to_string(&request_data_json).unwrap();
         let base64_request_data = base64::encode(&request_data_string);
 
@@ -496,6 +568,8 @@ mod tests {
             )
             .unwrap();
 
+        mock.assert();
+
         email_path.close().unwrap();
     }
 
@@ -507,6 +581,9 @@ mod tests {
             "eval_input_key": "eval_key",
             "software_name": "test_software",
             "commit": "ca82a6dff817ec66f44342007202690a93763949",
+            "owner":"TestOwner",
+            "repo":"TestRepo",
+            "issue_number":4,
             "author": "me"
         });
         let message_string = serde_json::to_string(&message_json).unwrap();
@@ -531,6 +608,9 @@ mod tests {
             "eval_input_key": "eval_key",
             "software_name": "test_software",
             "commit": "ca82a6dff817ec66f44342007202690a93763949",
+            "owner":"TestOwner",
+            "repo":"TestRepo",
+            "issue_number":4,
             "author": "me"
         });
         let message_string = serde_json::to_string(&message_json).unwrap();
