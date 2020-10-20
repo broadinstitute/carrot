@@ -27,7 +27,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Request(e) => write!(f, "GitHub Request Error {}", e),
-            Error::Failed(msg) => write!(f, "GitHub Request Failed {}", msg),
+            Error::Failed(msg) => write!(f, "GitHub Request Failed {}", msg)
         }
     }
 }
@@ -69,22 +69,45 @@ pub async fn post_comment(
     // Build body json to include in request
     let body_json = json!({ "body": comment_body });
     // Send request
-    let response = client
+    let mut response = client
         .post(format!(
             "{}/repos/{}/{}/issues/{}/comments",
             base_address, owner, repo, issue_number
         ))
         .basic_auth(&*GITHUB_CLIENT_ID, Some(&*GITHUB_CLIENT_TOKEN))
         .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "Carrot-App")
         .send_json(&body_json)
         .await?;
     // Check to see if status code indicates the request was successful
     if response.status().is_success() {
         Ok(())
     } else {
+        // Get response body and convert it into &str so we can print it
+        let response_body = match response.body().await {
+            Ok(val) => val,
+            Err(e) => {
+                return Err(Error::Failed(format!(
+                    "Request returned status code {} and failed to parse body due to error {}",
+                    response.status(),
+                    e
+                )))
+            }
+        };
+        let body_utf8 = match std::str::from_utf8(response_body.as_ref()){
+            Ok(val) => val,
+            Err(e) => {
+                return Err(Error::Failed(format!(
+                    "Request returned status code {} and failed to parse body due to error {}",
+                    response.status(),
+                    e
+                )))
+            }
+        };
         Err(Error::Failed(format!(
-            "Request returned status code {}",
-            response.status()
+            "Request returned status code {} and body {}",
+            response.status(),
+            body_utf8
         )))
     }
 }

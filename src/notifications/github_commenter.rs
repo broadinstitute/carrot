@@ -48,7 +48,7 @@ pub async fn post_run_started_comment(
 ) -> Result<(), Error> {
     let run_as_string = serde_json::to_string_pretty(run)?;
     let comment_body = format!(
-        "<details><summary>Started a CARROT test run : {}</summary>```json\n{}\n```</details>",
+        "<details><summary>Started a CARROT test run : {}</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
         run.name, run_as_string
     );
     Ok(github_requests::post_comment(client, owner, repo, issue_number, &comment_body).await?)
@@ -65,7 +65,7 @@ pub async fn post_run_failed_to_start_comment(
     reason: &str,
 ) -> Result<(), Error> {
     let comment_body = format!(
-        "<details><summary>CARROT test run failed to start<summary>```\n{}\n```</details>",
+        "<details><summary>CARROT test run failed to start</summary> \n {} \n </details>",
         reason
     );
     Ok(github_requests::post_comment(client, owner, repo, issue_number, &comment_body).await?)
@@ -83,7 +83,7 @@ pub async fn post_run_finished_comment(
 ) -> Result<(), Error> {
     let run_as_string = serde_json::to_string_pretty(run)?;
     let comment_body = format!(
-        "<details><summary>CARROT test run finished<summary>```json\n{}\n```</details>",
+        "<details><summary>CARROT test run finished</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
         run_as_string
     );
     Ok(github_requests::post_comment(client, owner, repo, issue_number, &comment_body).await?)
@@ -124,7 +124,7 @@ mod tests {
         let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
 
         let request_body = json!({
-            "body":format!("<details><summary>Started a CARROT test run : TestRun</summary>```json\n{}\n```</details>", test_run_string)
+            "body":format!("<details><summary>Started a CARROT test run : TestRun</summary> <pre lang=\"json\"> \n {} \n </pre> </details>", test_run_string)
         });
 
         // Define mockito mapping for response
@@ -152,7 +152,7 @@ mod tests {
         let test_reason = "Test Reason";
 
         let request_body = json!({
-            "body":"<details><summary>CARROT test run failed to start<summary>```\nTest Reason\n```</details>"
+            "body":"<details><summary>CARROT test run failed to start</summary> \n Test Reason \n </details>"
         });
 
         // Define mockito mapping for response
@@ -195,7 +195,7 @@ mod tests {
         let request_body = json!({
             "body":
                 format!(
-                    "<details><summary>CARROT test run finished<summary>```json\n{}\n```</details>",
+                    "<details><summary>CARROT test run finished</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
                     test_run_string
                 )
         });
