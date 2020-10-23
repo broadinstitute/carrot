@@ -32,6 +32,14 @@ lazy_static! {
         Regex::new(r"image_build:\w[^\|]*\|[0-9a-f]{40}").unwrap();
 }
 
+/// Enum for denoting whether a run is still building, has finished, or has failed builds
+#[derive(Debug)]
+pub enum RunBuildStatus {
+    Building,
+    Finished,
+    Failed,
+}
+
 /// Error type for possible errors returned by running a test
 #[derive(Debug)]
 pub enum Error {
@@ -202,7 +210,7 @@ pub async fn create_run(
 /// Updates the run with the specified `run_id` to have a status of FAILED
 ///
 /// Returns `()` if successful or an error if it fails
-fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
+pub fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
     let run_update = RunChangeset {
         name: None,
         status: Some(RunStatusEnum::Failed),
@@ -222,25 +230,24 @@ fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
 /// Returns `true` if all builds associated with the run specified by `run_id` are finished,
 /// returns `false` if it has unfinished builds or if there are failed builds, returns an error
 /// if there is some issue querying the DB
-pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<bool, Error> {
+pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<RunBuildStatus, Error> {
     // Check for most recent builds associated with this run
     let builds = SoftwareBuildData::find_most_recent_builds_for_run(conn, run_id)?;
 
-    let mut finished = true;
+    let mut finished = RunBuildStatus::Finished;
 
     //Loop through builds to check if any are incomplete or have failed
     for build in builds {
         match build.status {
             BuildStatusEnum::Aborted | BuildStatusEnum::Failed => {
-                // If we found a failure, update the run to failed and return false
-                mark_run_as_failed(conn, run_id)?;
-                return Ok(false);
+                // If we found a failure, return Failed
+                finished = RunBuildStatus::Failed;
             }
             BuildStatusEnum::Succeeded => {}
             _ => {
                 // If we found a build that hasn't reached a terminal state, mark that the builds
                 // are incomplete
-                finished = false;
+                finished = RunBuildStatus::Building;
             }
         }
     }
@@ -263,7 +270,13 @@ pub async fn start_run(
     // Retrieve test for id or return error
     let test = get_test(&conn, run.test_id.clone())?;
 
-    start_run_with_template_id(conn, client, run, test.template_id).await
+    match start_run_with_template_id(conn, client, run, test.template_id).await {
+        Ok(run) => Ok(run),
+        Err(e) => {
+            mark_run_as_failed(conn, run.run_id)?;
+            return Err(e);
+        }
+    }
 }
 
 /// Starts a run by submitting it to cromwell
@@ -698,7 +711,7 @@ mod tests {
     use crate::manager::test_runner::Error::Build;
     use crate::manager::test_runner::{
         check_if_run_with_name_exists, create_run, create_run_in_db, format_json_for_cromwell,
-        get_or_create_run_software_version, run_finished_building, Error,
+        get_or_create_run_software_version, run_finished_building, Error, RunBuildStatus,
     };
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
@@ -1174,7 +1187,7 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(result);
+        assert!(matches!(result, RunBuildStatus::Finished));
     }
 
     #[test]
@@ -1218,7 +1231,7 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(!result);
+        assert!(matches!(result, RunBuildStatus::Building));
     }
 
     #[test]
@@ -1262,11 +1275,7 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(!result);
-
-        let run_result =
-            RunData::find_by_id(&conn, test_run.run_id).expect("Failed to retrieve test run");
-        assert_eq!(run_result.status, RunStatusEnum::Failed);
+        assert!(matches!(result, RunBuildStatus::Failed));
     }
 
     #[test]
@@ -1310,10 +1319,6 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(!result);
-
-        let run_result =
-            RunData::find_by_id(&conn, test_run.run_id).expect("Failed to retrieve test run");
-        assert_eq!(run_result.status, RunStatusEnum::Failed);
+        assert!(matches!(result, RunBuildStatus::Failed));
     }
 }

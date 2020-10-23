@@ -27,7 +27,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Request(e) => write!(f, "GitHub Request Error {}", e),
-            Error::Failed(msg) => write!(f, "GitHub Request Failed {}", msg)
+            Error::Failed(msg) => write!(f, "GitHub Request Failed {}", msg),
         }
     }
 }
@@ -94,7 +94,7 @@ pub async fn post_comment(
                 )))
             }
         };
-        let body_utf8 = match std::str::from_utf8(response_body.as_ref()){
+        let body_utf8 = match std::str::from_utf8(response_body.as_ref()) {
             Ok(val) => val,
             Err(e) => {
                 return Err(Error::Failed(format!(

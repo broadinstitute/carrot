@@ -87,7 +87,9 @@ pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(),
     let message = serde_json::to_string_pretty(&run)?;
 
     // Attempt to send email, and log an error and mark the error boolean as true if it fails
-    emailer::send_email(email_addresses.into_iter().collect(), &subject, &message)?;
+    if !email_addresses.is_empty() {
+        emailer::send_email(email_addresses.into_iter().collect(), &subject, &message)?;
+    }
 
     Ok(())
 }
@@ -114,7 +116,9 @@ pub fn send_notification_emails_for_test(
     }
 
     // Attempt to send email, and log an error and mark the error boolean as true if it fails
-    emailer::send_email(email_addresses.into_iter().collect(), subject, message)?;
+    if !email_addresses.is_empty() {
+        emailer::send_email(email_addresses.into_iter().collect(), subject, message)?;
+    }
 
     Ok(())
 }
@@ -158,14 +162,17 @@ pub async fn post_run_complete_comment_if_from_github(
 mod tests {
     use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum};
     use crate::manager::notification_handler::{
-        send_notification_emails_for_test, send_run_complete_emails,
+        post_run_complete_comment_if_from_github, send_notification_emails_for_test,
+        send_run_complete_emails, Error,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_pool;
+    use actix_web::client::Client;
     use diesel::PgConnection;
     use mailparse::MailHeaderMap;
     use serde::Deserialize;
@@ -278,6 +285,20 @@ mod tests {
         };
 
         RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn insert_test_run_is_from_github_with_run_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunIsFromGithubData {
+        let new_run_is_from_github = NewRunIsFromGithub {
+            run_id: id,
+            owner: String::from("exampleowner"),
+            repo: String::from("examplerepo"),
+            issue_number: 1,
+            author: String::from("ExampleAuthor"),
+        };
+        RunIsFromGithubData::create(conn, new_run_is_from_github).unwrap()
     }
 
     #[test]
@@ -509,6 +530,60 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_post_run_complete_comment_if_from_github() {}
+    #[actix_rt::test]
+    async fn test_post_run_complete_comment_if_from_github() {
+        std::env::set_var("GITHUB_CLIENT_ID", "user");
+        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        let client = Client::default();
+
+        let test_run = insert_test_run_with_test_id(&conn, Uuid::new_v4());
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
+        let test_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+
+        let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
+
+        let request_body = json!({
+            "body":
+                format!(
+                    "<details><summary>CARROT test run finished</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
+                    test_run_string
+                )
+        });
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .match_body(mockito::Matcher::Json(request_body))
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let result = post_run_complete_comment_if_from_github(&conn, &client, test_run.run_id)
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn test_post_run_complete_comment_if_from_github_not_from_github() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        let client = Client::default();
+
+        let test_run = insert_test_run_with_test_id(&conn, Uuid::new_v4());
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .expect(0)
+            .create();
+
+        let result = post_run_complete_comment_if_from_github(&conn, &client, test_run.run_id)
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
 }

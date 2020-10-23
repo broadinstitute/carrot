@@ -7,6 +7,7 @@
 
 use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::db::DbPool;
+use crate::manager::test_runner::RunBuildStatus;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 use crate::manager::{gcloud_subscriber, notification_handler, software_builder, test_runner};
 use crate::models::run::{RunChangeset, RunData};
@@ -141,12 +142,8 @@ pub async fn manage(
                     };
                     // Check and update status in new thread
                     debug!("Checking status of run with id: {}", run.run_id);
-                    if let Err(e) = check_and_update_run_status(
-                        &run,
-                        &client,
-                        &db_pool.get().unwrap(),
-                    )
-                    .await
+                    if let Err(e) =
+                        check_and_update_run_status(&run, &client, &db_pool.get().unwrap()).await
                     {
                         error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
                     }
@@ -245,12 +242,31 @@ async fn check_and_update_run_status(
     // If it's building, check if it's ready to run
     if matches!(run.status, RunStatusEnum::Building) {
         // If all the builds associated with this run have completed, start the run
-        // If any have failed, run_finished_building will also mark the run as failed
-        if test_runner::run_finished_building(conn, run.run_id)? {
-            return match test_runner::start_run(conn, client, run).await {
-                Ok(_) => Ok(()),
-                Err(e) => Err(UpdateStatusError::Run(e)),
-            };
+        match test_runner::run_finished_building(conn, run.run_id)? {
+            RunBuildStatus::Finished => {
+                return match test_runner::start_run(conn, client, run).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(UpdateStatusError::Run(e)),
+                };
+            }
+            // If any of the builds failed, fail the run and send notifications
+            RunBuildStatus::Failed => {
+                // Mark as failed
+                test_runner::mark_run_as_failed(conn, run.run_id)?;
+                // Send notifications
+                #[cfg(not(test))] // Skip the email step when testing
+                notification_handler::send_run_complete_emails(conn, run.run_id)?;
+                // If triggering runs from GitHub is enabled, check if this run was triggered from a
+                // a GitHub comment and reply if so
+                if *gcloud_subscriber::ENABLE_GITHUB_REQUESTS {
+                    notification_handler::post_run_complete_comment_if_from_github(
+                        conn, client, run.run_id,
+                    )
+                    .await?;
+                }
+            }
+            // If it's still building, do nothing
+            RunBuildStatus::Building => {}
         }
 
         // Otherwise, just return ()
@@ -594,9 +610,7 @@ fn fill_results(
             // If we found it, add it to the list of results to write to the DB
             Some(output) => {
                 let output = match output.as_str() {
-                    Some(val) => {
-                        String::from(val)
-                    }
+                    Some(val) => String::from(val),
                     None => {
                         error!(
                             "Failed to parse output {} as string for run {}, had value: {}",
@@ -847,7 +861,6 @@ mod tests {
 
     #[test]
     fn test_fill_results() {
-
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
@@ -877,11 +890,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_succeeded() {
-        // Set environment variables for github posting so it doesn't break the test
-        std::env::set_var("ENABLE_GITHUB_REQUESTS", "true");
-        std::env::set_var("GITHUB_CLIENT_ID", "user");
-        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
-
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
@@ -919,18 +927,11 @@ mod tests {
             mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
         ]))
         .create();
-        // Define mockito mapping for github response
-        let github_mock =
-            mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
-                .with_status(201)
-                .with_header("content_type", "application/json")
-                .create();
         // Check and update status
         check_and_update_run_status(&test_run, &Client::default(), &conn)
             .await
             .unwrap();
         mock.assert();
-        github_mock.assert();
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::Succeeded);
@@ -946,11 +947,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_failed() {
-        // Set environment variables for github posting so it doesn't break the test
-        std::env::set_var("ENABLE_GITHUB_REQUESTS", "true");
-        std::env::set_var("GITHUB_CLIENT_ID", "user");
-        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
-
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
@@ -978,18 +974,11 @@ mod tests {
             mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
         ]))
         .create();
-        // Define mockito mapping for github response
-        let github_mock =
-            mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
-                .with_status(201)
-                .with_header("content_type", "application/json")
-                .create();
         // Check and update status
         check_and_update_run_status(&test_run, &Client::default(), &conn)
             .await
             .unwrap();
         mock.assert();
-        github_mock.assert();
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::Failed);
@@ -1002,7 +991,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_running() {
-
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
@@ -1040,7 +1028,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_builds_failed() {
-
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert build, test, and run we'll use for testing
@@ -1083,7 +1070,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_builds_finished() {
-
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert build, template, test, and run we'll use for testing
