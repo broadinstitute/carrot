@@ -4,6 +4,7 @@
 pub mod pipeline;
 pub mod result;
 pub mod run;
+pub mod run_is_from_github;
 pub mod run_result;
 pub mod run_software_version;
 pub mod software;

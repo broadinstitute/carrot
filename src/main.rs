@@ -92,6 +92,10 @@ fn main() {
         .expect("Failed to start status manager with StatusManagerSystem");
     });
 
+    // Do the same for the gcloud subscriber thread if configured to use it
+    let (gcloud_subscriber_send, gcloud_subscriber_thread) =
+        manager::gcloud_subscriber::init_or_not(pool.clone());
+
     // Create channel for getting app server controller from app thread
     let (app_send, app_receive) = mpsc::channel();
 
@@ -107,10 +111,15 @@ fn main() {
 
     // Wait for Ctrl-C to terminate
     while user_term.load(Ordering::SeqCst) {}
-    // Once we've received a Ctrl-C send message to receiver to terminate
+    // Once we've received a Ctrl-C send message to receivers to terminate
     manager_send
         .send(())
         .expect("Failed to send terminate message to manager thread");
+    if let Some(sender) = gcloud_subscriber_send {
+        sender
+            .send(())
+            .expect("Failed to send terminate message to gcloud subscriber thread");
+    }
     // Then tell app server to stop
     let app_server_stop_future = app_srv_controller.stop(true);
     // Then wait for both to finish
@@ -118,4 +127,9 @@ fn main() {
     manager_thread
         .join()
         .expect("Failed to join to manager thread");
+    if let Some(thread) = gcloud_subscriber_thread {
+        thread
+            .join()
+            .expect("Failed to join to gcloud subscriber thread");
+    }
 }

@@ -32,6 +32,14 @@ lazy_static! {
         Regex::new(r"image_build:\w[^\|]*\|[0-9a-f]{40}").unwrap();
 }
 
+/// Enum for denoting whether a run is still building, has finished, or has failed builds
+#[derive(Debug)]
+pub enum RunBuildStatus {
+    Building,
+    Finished,
+    Failed,
+}
+
 /// Error type for possible errors returned by running a test
 #[derive(Debug)]
 pub enum Error {
@@ -89,9 +97,10 @@ impl From<software_builder::Error> for Error {
 
 /// Creates a new run and inserts it into the DB
 ///
-/// Creates a new run based on `new_run`, with `test_id`, and inserts it into the DB with status
-/// `Created`.  If any of the parameters for this run match the format for specifying a software
-/// build, it marks the run as `Building` (after creating the records for the builds, if necessary).
+/// Creates a new run based on `name`, `test_input`, `eval_input`, and `created_by`, with
+/// `test_id`, and inserts it into the DB with status `Created`.  If any of the parameters for
+/// this run match the format for specifying a software build, it marks the run as `Building`
+/// (after creating the records for the builds, if necessary).
 /// If none of the parameters specify a software build, it starts the run.  Returns created run or
 /// an error if: parsing `test_id` fails, or a run already exists with the name specified in
 /// `new_run.name`, or there is an error querying or inserting to the DB.
@@ -159,10 +168,8 @@ pub async fn create_run(
     if !version_map.is_empty() {
         for (_, version) in version_map {
             // Create build for this software version if there isn't one
-            match software_builder::get_or_create_software_build(
-                conn,
-                version.software_version_id,
-            ) {
+            match software_builder::get_or_create_software_build(conn, version.software_version_id)
+            {
                 // If creating a build fails, mark run as failed
                 Err(e) => {
                     mark_run_as_failed(conn, run.run_id)?;
@@ -203,7 +210,7 @@ pub async fn create_run(
 /// Updates the run with the specified `run_id` to have a status of FAILED
 ///
 /// Returns `()` if successful or an error if it fails
-fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
+pub fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
     let run_update = RunChangeset {
         name: None,
         status: Some(RunStatusEnum::Failed),
@@ -223,30 +230,29 @@ fn mark_run_as_failed(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
 /// Returns `true` if all builds associated with the run specified by `run_id` are finished,
 /// returns `false` if it has unfinished builds or if there are failed builds, returns an error
 /// if there is some issue querying the DB
-pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<bool, Error> {
+pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<RunBuildStatus, Error> {
     // Check for most recent builds associated with this run
     let builds = SoftwareBuildData::find_most_recent_builds_for_run(conn, run_id)?;
 
-    let mut finished = true;
+    let mut status = RunBuildStatus::Finished;
 
     //Loop through builds to check if any are incomplete or have failed
     for build in builds {
         match build.status {
             BuildStatusEnum::Aborted | BuildStatusEnum::Failed => {
-                // If we found a failure, update the run to failed and return false
-                mark_run_as_failed(conn, run_id)?;
-                return Ok(false);
+                // If we found a failure, return Failed
+                status = RunBuildStatus::Failed;
             }
             BuildStatusEnum::Succeeded => {}
             _ => {
                 // If we found a build that hasn't reached a terminal state, mark that the builds
                 // are incomplete
-                finished = false;
+                status = RunBuildStatus::Building;
             }
         }
     }
 
-    Ok(finished)
+    Ok(status)
 }
 
 /// Starts a run by submitting it to cromwell
@@ -264,7 +270,13 @@ pub async fn start_run(
     // Retrieve test for id or return error
     let test = get_test(&conn, run.test_id.clone())?;
 
-    start_run_with_template_id(conn, client, run, test.template_id).await
+    match start_run_with_template_id(conn, client, run, test.template_id).await {
+        Ok(run) => Ok(run),
+        Err(e) => {
+            mark_run_as_failed(conn, run.run_id)?;
+            return Err(e);
+        }
+    }
 }
 
 /// Starts a run by submitting it to cromwell
@@ -411,8 +423,11 @@ pub fn get_or_create_run_software_version(
     let run_software_version_closure = || {
         // Try to find a run software version mapping row for this version and run to see if we've
         // already created the mapping
-        let run_software_version =
-            RunSoftwareVersionData::find_by_run_and_software_version(conn, run_id, software_version_id);
+        let run_software_version = RunSoftwareVersionData::find_by_run_and_software_version(
+            conn,
+            run_id,
+            software_version_id,
+        );
 
         match run_software_version {
             // If we found it, return it
@@ -437,7 +452,9 @@ pub fn get_or_create_run_software_version(
     };
 
     #[cfg(not(test))]
-    return conn.build_transaction().run(|| run_software_version_closure());
+    return conn
+        .build_transaction()
+        .run(|| run_software_version_closure());
 
     // Tests do all database stuff in transactions that are not committed so they don't interfere
     // with other tests. An unfortunate side effect of this is that we can't use transactions in
@@ -694,7 +711,7 @@ mod tests {
     use crate::manager::test_runner::Error::Build;
     use crate::manager::test_runner::{
         check_if_run_with_name_exists, create_run, create_run_in_db, format_json_for_cromwell,
-        get_or_create_run_software_version, run_finished_building, Error,
+        get_or_create_run_software_version, run_finished_building, Error, RunBuildStatus,
     };
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
@@ -847,7 +864,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
         let test_params = json!({"in_user_name":"Kevin"});
-        let eval_params = json!({}); //json!({"in_user":"Jonn"});
+        let eval_params = json!({});
 
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -1170,7 +1187,7 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(result);
+        assert!(matches!(result, RunBuildStatus::Finished));
     }
 
     #[test]
@@ -1214,7 +1231,7 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(!result);
+        assert!(matches!(result, RunBuildStatus::Building));
     }
 
     #[test]
@@ -1258,11 +1275,7 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(!result);
-
-        let run_result =
-            RunData::find_by_id(&conn, test_run.run_id).expect("Failed to retrieve test run");
-        assert_eq!(run_result.status, RunStatusEnum::Failed);
+        assert!(matches!(result, RunBuildStatus::Failed));
     }
 
     #[test]
@@ -1306,10 +1319,6 @@ mod tests {
 
         let result = run_finished_building(&conn, test_run.run_id)
             .expect("Failed to check if run finished building");
-        assert!(!result);
-
-        let run_result =
-            RunData::find_by_id(&conn, test_run.run_id).expect("Failed to retrieve test run");
-        assert_eq!(run_result.status, RunStatusEnum::Failed);
+        assert!(matches!(result, RunBuildStatus::Failed));
     }
 }

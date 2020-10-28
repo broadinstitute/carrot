@@ -1,0 +1,1 @@
+drop table if exists run_is_from_github;

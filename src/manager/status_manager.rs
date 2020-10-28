@@ -7,7 +7,9 @@
 
 use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::db::DbPool;
-use crate::manager::{notification_handler, software_builder, test_runner};
+use crate::manager::test_runner::RunBuildStatus;
+use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
+use crate::manager::{gcloud_subscriber, notification_handler, software_builder, test_runner};
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_result::{NewRunResult, RunResultData};
 use crate::models::software_build::{SoftwareBuildChangeset, SoftwareBuildData};
@@ -179,12 +181,17 @@ pub async fn manage(
                         "Checking status of build with id: {}",
                         build.software_build_id
                     );
-                    match check_and_update_build_status(&build, &client, &db_pool.get().unwrap()).await{
+                    match check_and_update_build_status(&build, &client, &db_pool.get().unwrap())
+                        .await
+                    {
                         Err(e) => {
                             error!("Encountered error while trying to update status for build with id {}: {}", build.software_build_id, e);
-                        },
+                        }
                         Ok(_) => {
-                            debug!("Successfully checked/updated status for build with id {}", build.software_build_id);
+                            debug!(
+                                "Successfully checked/updated status for build with id {}",
+                                build.software_build_id
+                            );
                         }
                     }
                 }
@@ -222,27 +229,6 @@ pub async fn manage(
     }
 }
 
-/// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel
-/// is disconnected, or `None` if the channel is empty
-fn check_for_terminate_message(channel_recv: &mpsc::Receiver<()>) -> Option<()> {
-    match channel_recv.try_recv() {
-        Ok(_) | Err(mpsc::TryRecvError::Disconnected) => Some(()),
-        _ => None,
-    }
-}
-
-/// Blocks for a message on `channel_recv` until timeout has passed, and returns `Some(())` if it
-/// finds one or the channel is disconnected, or `None` if it times out
-fn check_for_terminate_message_with_timeout(
-    channel_recv: &mpsc::Receiver<()>,
-    timeout: Duration,
-) -> Option<()> {
-    match channel_recv.recv_timeout(timeout) {
-        Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => Some(()),
-        Err(mpsc::RecvTimeoutError::Timeout) => None,
-    }
-}
-
 /// Gets status for run from cromwell and updates in DB if appropriate
 async fn check_and_update_run_status(
     run: &RunData,
@@ -256,13 +242,32 @@ async fn check_and_update_run_status(
     // If it's building, check if it's ready to run
     if matches!(run.status, RunStatusEnum::Building) {
         // If all the builds associated with this run have completed, start the run
-        if test_runner::run_finished_building(conn, run.run_id)? {
-            return match test_runner::start_run(conn, client, run).await {
-                Ok(_) => Ok(()),
-                Err(e) => Err(UpdateStatusError::Run(e)),
-            };
+        match test_runner::run_finished_building(conn, run.run_id)? {
+            RunBuildStatus::Finished => {
+                return match test_runner::start_run(conn, client, run).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(UpdateStatusError::Run(e)),
+                };
+            }
+            // If any of the builds failed, fail the run and send notifications
+            RunBuildStatus::Failed => {
+                // Mark as failed
+                test_runner::mark_run_as_failed(conn, run.run_id)?;
+                // Send notifications
+                #[cfg(not(test))] // Skip the email step when testing
+                notification_handler::send_run_complete_emails(conn, run.run_id)?;
+                // If triggering runs from GitHub is enabled, check if this run was triggered from a
+                // a GitHub comment and reply if so
+                if *gcloud_subscriber::ENABLE_GITHUB_REQUESTS {
+                    notification_handler::post_run_complete_comment_if_from_github(
+                        conn, client, run.run_id,
+                    )
+                    .await?;
+                }
+            }
+            // If it's still building, do nothing
+            RunBuildStatus::Building => {}
         }
-        // If any of the builds associated with this run have failed, mark the run as failed
 
         // Otherwise, just return ()
         return Ok(());
@@ -355,6 +360,14 @@ async fn check_and_update_run_status(
         {
             #[cfg(not(test))] // Skip the email step when testing
             notification_handler::send_run_complete_emails(conn, run.run_id)?;
+            // If triggering runs from GitHub is enabled, check if this run was triggered from a
+            // a GitHub comment and reply if so
+            if *gcloud_subscriber::ENABLE_GITHUB_REQUESTS {
+                notification_handler::post_run_complete_comment_if_from_github(
+                    conn, client, run.run_id,
+                )
+                .await?;
+            }
         }
     }
 
@@ -594,7 +607,7 @@ fn fill_results(
     for template_result in template_results {
         // Check outputs for this result
         match outputs.get(&format!("merged_workflow.{}", template_result.result_key)) {
-            // If we found it, add it to the list of results to write tot he DB
+            // If we found it, add it to the list of results to write to the DB
             Some(output) => {
                 let output = match output.as_str() {
                     Some(val) => String::from(val),
@@ -651,6 +664,7 @@ mod tests {
     };
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
@@ -665,6 +679,10 @@ mod tests {
     use serde_json::json;
     use std::fs::read_to_string;
     use uuid::Uuid;
+    use yup_oauth2::{
+        ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage,
+        ServiceAccountKey,
+    };
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -751,6 +769,20 @@ mod tests {
         };
 
         RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn insert_test_run_is_from_github_with_run_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunIsFromGithubData {
+        let new_run_is_from_github = NewRunIsFromGithub {
+            run_id: id,
+            owner: String::from("exampleowner"),
+            repo: String::from("examplerepo"),
+            issue_number: 1,
+            author: String::from("ExampleAuthor"),
+        };
+        RunIsFromGithubData::create(conn, new_run_is_from_github).unwrap()
     }
 
     fn insert_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
@@ -870,6 +902,8 @@ mod tests {
             test_result.result_id,
         );
         let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -918,6 +952,8 @@ mod tests {
         // Insert test and run we'll use for testing
         let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
         let test_run = insert_test_run_with_test_id(&conn, test_test.test_id.clone());
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",

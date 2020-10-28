@@ -171,6 +171,19 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    run_is_from_github(run_id) {
+        run_id -> Uuid,
+        owner -> Text,
+        repo -> Text,
+        issue_number -> Integer,
+        author -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
 joinable!(run -> run_id_with_results(run_id));
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
@@ -189,4 +202,5 @@ allow_tables_to_appear_in_same_query!(
     software_build,
     run_software_version,
     subscription,
+    run_is_from_github
 );
