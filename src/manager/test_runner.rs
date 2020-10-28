@@ -234,25 +234,25 @@ pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<RunBui
     // Check for most recent builds associated with this run
     let builds = SoftwareBuildData::find_most_recent_builds_for_run(conn, run_id)?;
 
-    let mut finished = RunBuildStatus::Finished;
+    let mut status = RunBuildStatus::Finished;
 
     //Loop through builds to check if any are incomplete or have failed
     for build in builds {
         match build.status {
             BuildStatusEnum::Aborted | BuildStatusEnum::Failed => {
                 // If we found a failure, return Failed
-                finished = RunBuildStatus::Failed;
+                status = RunBuildStatus::Failed;
             }
             BuildStatusEnum::Succeeded => {}
             _ => {
                 // If we found a build that hasn't reached a terminal state, mark that the builds
                 // are incomplete
-                finished = RunBuildStatus::Building;
+                status = RunBuildStatus::Building;
             }
         }
     }
 
-    Ok(finished)
+    Ok(status)
 }
 
 /// Starts a run by submitting it to cromwell
