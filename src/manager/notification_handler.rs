@@ -276,10 +276,11 @@ mod tests {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
-            status: RunStatusEnum::Submitted,
+            status: RunStatusEnum::TestSubmitted,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
-            cromwell_job_id: Some(String::from("123456789")),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: None,
             created_by: Some(String::from("test_send_run_complete_emails@example.com")),
             finished_at: None,
         };

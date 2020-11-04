@@ -18,12 +18,12 @@ lazy_static! {
     static ref IMAGE_REGISTRY_HOST: String = env::var("IMAGE_REGISTRY_HOST").expect("IMAGE_REGISTRY_HOST environment variable not set");
 }
 
-/// Sends a request to cromwell to start a job
+/// Sends a request to cromwell to start a job from a WDL file
 ///
 /// Sends a request to Cromwell specifying the WDL at `wdl_file_path` for the workflow and the
 /// json at `json_file_path` for the inputs.  Returns the response as a WorkflowIdAndType or an
 /// error if there is some issue starting the job
-pub async fn start_job(
+pub async fn start_job_from_file(
     client: &Client,
     wdl_file_path: &Path,
     json_file_path: &Path,
@@ -44,6 +44,37 @@ pub async fn start_job(
         workflow_type: Some(WorkflowTypeEnum::WDL),
         workflow_type_version: None,
         workflow_url: None,
+    };
+    // Submit request to start job
+    cromwell_requests::start_job(&client, cromwell_params).await
+}
+
+/// Sends a request to cromwell to start a job from a WDL URL
+///
+/// Sends a request to Cromwell specifying the WDL pointed to by `wdl_url` for the workflow and the
+/// json at `json_file_path` for the inputs.  Returns the response as a WorkflowIdAndType or an
+/// error if there is some issue starting the job
+pub async fn start_job_from_url(
+    client: &Client,
+    wdl_url: &str,
+    json_file_path: &Path,
+) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
+    // Build request parameters
+    let cromwell_params = cromwell_requests::StartJobParams {
+        labels: None,
+        workflow_dependencies: None,
+        workflow_inputs: Some(PathBuf::from(json_file_path)),
+        workflow_inputs_2: None,
+        workflow_inputs_3: None,
+        workflow_inputs_4: None,
+        workflow_inputs_5: None,
+        workflow_on_hold: None,
+        workflow_options: None,
+        workflow_root: None,
+        workflow_source: None,
+        workflow_type: Some(WorkflowTypeEnum::WDL),
+        workflow_type_version: None,
+        workflow_url: Some(String::from(wdl_url)),
     };
     // Submit request to start job
     cromwell_requests::start_job(&client, cromwell_params).await
@@ -107,7 +138,7 @@ pub fn check_for_terminate_message_with_timeout(
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::util::{get_temp_file, start_job};
+    use crate::manager::util::{get_temp_file, start_job_from_file};
     use actix_web::client::Client;
     use serde_json::json;
     use serde_json::Value;
@@ -136,7 +167,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response = start_job(&client, test_path.as_path(), test_json_file.path())
+        let response = start_job_from_file(&client, test_path.as_path(), test_json_file.path())
             .await
             .unwrap();
 

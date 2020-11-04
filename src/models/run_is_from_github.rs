@@ -202,7 +202,8 @@ mod tests {
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
-            cromwell_job_id: Some(String::from("123456789")),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
         };
@@ -246,7 +247,8 @@ mod tests {
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
-            cromwell_job_id: Some(String::from("1234567890")),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
         };
@@ -256,10 +258,11 @@ mod tests {
         let new_run = NewRun {
             test_id: Uuid::new_v4(),
             name: String::from("name2"),
-            status: RunStatusEnum::Submitted,
+            status: RunStatusEnum::TestSubmitted,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
-            cromwell_job_id: None,
+            test_cromwell_job_id: Some(String::from("123456789012")),
+            eval_cromwell_job_id: None,
             created_by: None,
             finished_at: None,
         };
@@ -272,7 +275,8 @@ mod tests {
             status: RunStatusEnum::Building,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_by: None,
             finished_at: None,
         };

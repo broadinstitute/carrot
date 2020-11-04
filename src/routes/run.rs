@@ -29,7 +29,8 @@ pub struct RunQueryIncomplete {
     pub status: Option<RunStatusEnum>,
     pub test_input: Option<Value>,
     pub eval_input: Option<Value>,
-    pub cromwell_job_id: Option<String>,
+    pub test_cromwell_job_id: Option<String>,
+    pub eval_cromwell_job_id: Option<String>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -151,7 +152,8 @@ async fn find_for_test(
         status: query.status,
         test_input: query.test_input,
         eval_input: query.eval_input,
-        cromwell_job_id: query.cromwell_job_id,
+        test_cromwell_job_id: query.test_cromwell_job_id,
+        eval_cromwell_job_id: query.eval_cromwell_job_id,
         created_before: query.created_before,
         created_after: query.created_after,
         created_by: query.created_by,
@@ -238,7 +240,8 @@ async fn find_for_template(
         status: query.status,
         test_input: query.test_input,
         eval_input: query.eval_input,
-        cromwell_job_id: query.cromwell_job_id,
+        test_cromwell_job_id: query.test_cromwell_job_id,
+        eval_cromwell_job_id: query.eval_cromwell_job_id,
         created_before: query.created_before,
         created_after: query.created_after,
         created_by: query.created_by,
@@ -325,7 +328,8 @@ async fn find_for_pipeline(
         status: query.status,
         test_input: query.test_input,
         eval_input: query.eval_input,
-        cromwell_job_id: query.cromwell_job_id,
+        test_cromwell_job_id: query.test_cromwell_job_id,
+        eval_cromwell_job_id: query.eval_cromwell_job_id,
         created_before: query.created_before,
         created_after: query.created_after,
         created_by: query.created_by,
@@ -405,11 +409,6 @@ async fn run_for_test(
         Ok(run) => HttpResponse::Ok().json(run),
         Err(err) => {
             let error_body = match err {
-                test_runner::Error::WrapperWdl(_) => ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Encountered error while attempting to create wrapper WDL to run test and evaluation".to_string(),
-                },
                 test_runner::Error::DuplicateName => ErrorBody {
                     title: "Run with specified name already exists".to_string(),
                     status: 400,
@@ -457,6 +456,11 @@ async fn run_for_test(
                     title: "Server error".to_string(),
                     status: 500,
                     detail: format!("Error while attempting to build software docker image: {}", e),
+                },
+                test_runner::Error::MissingOutputKey(k) => ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to retrieve key ({}) from cromwell outputs to fill as input to eval wdl", k),
                 }
             };
             HttpResponseBuilder::new(
@@ -520,7 +524,8 @@ mod tests {
             status: test_run.status,
             test_input: test_run.test_input,
             eval_input: test_run.eval_input,
-            cromwell_job_id: test_run.cromwell_job_id,
+            test_cromwell_job_id: test_run.test_cromwell_job_id,
+            eval_cromwell_job_id: test_run.eval_cromwell_job_id,
             created_at: test_run.created_at,
             created_by: test_run.created_by,
             finished_at: test_run.finished_at,
@@ -621,10 +626,11 @@ mod tests {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
-            status: RunStatusEnum::Submitted,
+            status: RunStatusEnum::TestSubmitted,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
-            cromwell_job_id: Some(String::from("123456789")),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: None,
         };
@@ -938,20 +944,6 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        // Define mappings for resource request responses
-        let test_wdl_resource = read_to_string("testdata/routes/run/test_wdl.wdl").unwrap();
-        let test_wdl_mock = mockito::mock("GET", "/test")
-            .with_status(201)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl_resource)
-            .create();
-        let eval_wdl_resource = read_to_string("testdata/routes/run/eval_wdl.wdl").unwrap();
-        let eval_wdl_mock = mockito::mock("GET", "/eval")
-            .with_status(201)
-            .with_header("content_type", "text/plain")
-            .with_body(eval_wdl_resource)
-            .create();
-
         // Start up app for testing
         let mut app = test::init_service(
             App::new()
@@ -968,8 +960,6 @@ mod tests {
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
-        test_wdl_mock.assert();
-        eval_wdl_mock.assert();
         assert_eq!(resp.status(), http::StatusCode::OK);
         cromwell_mock.assert();
 
@@ -977,9 +967,9 @@ mod tests {
         let test_run: RunData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run.test_id, test_test.test_id);
-        assert_eq!(test_run.status, RunStatusEnum::Submitted);
+        assert_eq!(test_run.status, RunStatusEnum::TestSubmitted);
         assert_eq!(
-            test_run.cromwell_job_id,
+            test_run.test_cromwell_job_id,
             Some("53709600-d114-4194-a7f7-9e41211ca2ce".to_string())
         );
         let mut test_input_to_compare = json!({});
