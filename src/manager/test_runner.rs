@@ -827,7 +827,7 @@ fn create_run_in_db(
 mod tests {
     use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
     use crate::manager::test_runner::Error::Build;
-    use crate::manager::test_runner::{check_if_run_with_name_exists, create_run, create_run_in_db, format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building, Error, RunBuildStatus, format_eval_json_for_cromwell};
+    use crate::manager::test_runner::{check_if_run_with_name_exists, create_run, create_run_in_db, format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building, Error, RunBuildStatus, format_eval_json_for_cromwell, start_run_eval, start_run_test};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
@@ -877,8 +877,8 @@ mod tests {
             name: String::from("Kevin's test test"),
             template_id: id,
             description: None,
-            test_input_defaults: Some(json!({"in_pleasantry":"Yo"})),
-            eval_input_defaults: Some(json!({"in_verb":"yelled"})),
+            test_input_defaults: Some(json!({"test_test.in_pleasantry":"Yo"})),
+            eval_input_defaults: Some(json!({"test_test.in_verb":"yelled"})),
             created_by: None,
         };
 
@@ -910,6 +910,38 @@ mod tests {
         };
 
         RunData::create(&conn, new_run).expect("Failed to insert run")
+    }
+
+    fn insert_test_run_with_test_id_and_status_building(conn: &PgConnection, id: Uuid) -> RunData {
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: id,
+            status: RunStatusEnum::Building,
+            test_input: json!({"test_test.in_pleasantry":"Yo", "test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            eval_input: json!({"test_test.in_verb":"yelled", "test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn insert_test_run_with_test_id_and_status_test_submitted(conn: &PgConnection, id: Uuid) -> RunData {
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: id,
+            status: RunStatusEnum::TestSubmitted,
+            test_input: json!({"test_test.in_pleasantry":"Yo", "test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            eval_input: json!({"test_test.in_verb":"yelled", "test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
+            test_cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
+            eval_cromwell_job_id: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
     }
 
     fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
@@ -1053,18 +1085,6 @@ mod tests {
             .expect(0)
             .create();
 
-        // Define mappings for resource request responses
-        let test_wdl_mock = mockito::mock("GET", "/test_software_params")
-            .with_status(201)
-            .with_header("content_type", "text/plain")
-            .expect(0)
-            .create();
-        let eval_wdl_mock = mockito::mock("GET", "/eval_software_params")
-            .with_status(201)
-            .with_header("content_type", "text/plain")
-            .expect(0)
-            .create();
-
         let test_run = create_run(
             &conn,
             &client,
@@ -1077,8 +1097,6 @@ mod tests {
         .await
         .unwrap();
 
-        test_wdl_mock.assert();
-        eval_wdl_mock.assert();
         cromwell_mock.assert();
 
         assert_eq!(test_run.test_id, test_test.test_id);
@@ -1137,6 +1155,91 @@ mod tests {
                 created_software_version[0].software_version_id,
             )
             .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_start_run_test() {
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        let test_template = insert_test_template_software_params(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_test_run_with_test_id_and_status_building(&conn, test_test.test_id);
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "34958601-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        let result = start_run_test(&conn, &client, &test_run).await.unwrap();
+
+        cromwell_mock.assert();
+
+        assert_eq!(result.test_cromwell_job_id.unwrap(), "34958601-d114-4194-a7f7-9e41211ca2ce");
+    }
+
+    #[actix_rt::test]
+    async fn test_start_run_eval() {
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        let test_template = insert_test_template_software_params(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
+
+        let test_results = json!({
+            "test_test.TestKey": "TestVal",
+            "test_test.UnimportantKey": "Who Cares?"
+        });
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "34958601-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        let result = start_run_eval(&conn, &client, &test_run, test_results.as_object().unwrap()).await.unwrap();
+
+        cromwell_mock.assert();
+
+        assert_eq!(result.eval_cromwell_job_id.unwrap(), "34958601-d114-4194-a7f7-9e41211ca2ce");
+    }
+
+    #[actix_rt::test]
+    async fn test_start_run_eval_missing_test_output() {
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        let test_template = insert_test_template_software_params(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
+
+        let test_results = json!({
+            "test_test.UnimportantKey": "Who Cares?"
+        });
+
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .expect(0)
+            .create();
+
+        let result = start_run_eval(&conn, &client, &test_run, test_results.as_object().unwrap()).await;
+
+        cromwell_mock.assert();
+
+        assert!(matches!(result, Err(Error::MissingOutputKey(_))));
     }
 
     #[test]

@@ -779,7 +779,7 @@ fn fill_results(
     // Loop through template_results, check for each of the keys in outputs, and add them to list to write
     for template_result in template_results {
         // Check outputs for this result
-        match outputs.get(&format!("merged_workflow.{}", template_result.result_key)) {
+        match outputs.get(&template_result.result_key) {
             // If we found it, add it to the list of results to write to the DB
             Some(output) => {
                 let output = match output.as_str() {
@@ -862,7 +862,7 @@ mod tests {
         let new_template_result = NewTemplateResult {
             template_id: template_id,
             result_id: result_id,
-            result_key: String::from("TestKey"),
+            result_key: String::from("test_test.TestKey"),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -902,7 +902,7 @@ mod tests {
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
-            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
+            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
             test_cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -918,7 +918,7 @@ mod tests {
             test_id: id,
             status: RunStatusEnum::EvalSubmitted,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
-            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
+            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "greeting.txt"}),
             test_cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
             eval_cromwell_job_id: Some(String::from("12345612-d114-4194-a7f7-9e41211ca2ce")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -1052,14 +1052,79 @@ mod tests {
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id.clone());
         // Create results map
         let results_map = json!({
-            "merged_workflow.TestKey": "TestVal",
-            "merged_workflow.UnimportantKey": "Who Cares?"
+            "test_test.TestKey": "TestVal",
+            "test_test.UnimportantKey": "Who Cares?"
         });
         let results_map = results_map.as_object().unwrap().to_owned();
         // Fill results
         fill_results(&results_map, &test_run, &conn).unwrap();
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let results = result_run.results.unwrap().as_object().unwrap().to_owned();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_status_test_succeeded() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template = insert_test_template(&conn);
+        let test_result = insert_test_result(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, template.template_id.clone());
+        insert_test_template_result_with_template_id_and_result_id(
+            &conn,
+            template.template_id,
+            test_result.result_id,
+        );
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id.clone());
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
+        // Define mockito mapping for cromwell submit response
+        let mock_response_body = json!({
+          "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            //.match_body(r#"{"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "TestVal"}"#)
+            .create();
+        // Define mockito mapping for cromwell metadata response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Succeeded",
+          "outputs": {
+            "test_test.TestKey": "TestVal",
+            "test_test.UnimportantKey": "Who Cares?"
+          },
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        cromwell_mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::EvalSubmitted);
+        assert!(matches!(result_run.finished_at, Option::None));
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
         assert_eq!(results.len(), 1);
         assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
@@ -1086,8 +1151,8 @@ mod tests {
           "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
           "status": "Succeeded",
           "outputs": {
-            "merged_workflow.TestKey": "TestVal",
-            "merged_workflow.UnimportantKey": "Who Cares?"
+            "test_test.TestKey": "TestVal",
+            "test_test.UnimportantKey": "Who Cares?"
           },
           "end": "2020-12-31T11:11:11.0000Z"
         });
@@ -1167,7 +1232,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_run_status_running() {
+    async fn test_check_and_update_run_status_test_running() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
@@ -1201,6 +1266,43 @@ mod tests {
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::TestRunning);
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_status_eval_running() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test and run we'll use for testing
+        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(&conn, test_test.test_id.clone());
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Running",
+          "outputs": {},
+          "end": null
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/12345612-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::EvalRunning);
     }
 
     #[actix_rt::test]
