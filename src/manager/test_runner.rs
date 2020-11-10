@@ -13,8 +13,6 @@ use crate::models::software_version::SoftwareVersionData;
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
 use crate::requests::cromwell_requests::CromwellRequestError;
-use crate::requests::test_resource_requests;
-use crate::requests::test_resource_requests::ProcessRequestError;
 use actix_web::client::Client;
 use chrono::Utc;
 use diesel::PgConnection;
@@ -49,7 +47,6 @@ pub enum Error {
     DB(diesel::result::Error),
     DuplicateName,
     Uuid(uuid::Error),
-    WdlRequest(ProcessRequestError, String),
     TempFile(std::io::Error),
     Cromwell(CromwellRequestError),
     Json,
@@ -66,13 +63,16 @@ impl fmt::Display for Error {
             Error::DB(e) => write!(f, "Error DB {}", e),
             Error::DuplicateName => write!(f, "Error DuplicateName"),
             Error::Uuid(e) => write!(f, "Error Uuid {}", e),
-            Error::WdlRequest(e, w) => write!(f, "Error WDL Request {} with wdl: {}", e, w),
             Error::TempFile(e) => write!(f, "Error TempFile {}", e),
             Error::Cromwell(e) => write!(f, "Error Cromwell {}", e),
             Error::Json => write!(f, "Error Json Parsing"),
             Error::SoftwareNotFound(name) => write!(f, "Error SoftwareNotFound: {}", name),
             Error::Build(e) => write!(f, "Error Build: {}", e),
-            Error::MissingOutputKey(k) => write!(f, "Error missing output key {} in outputs from cromwell for test", k),
+            Error::MissingOutputKey(k) => write!(
+                f,
+                "Error missing output key {} in outputs from cromwell for test",
+                k
+            ),
         }
     }
 }
@@ -206,27 +206,33 @@ pub async fn create_run(
 /// Updates the run with the specified `run_id` to have the specified status
 ///
 /// Returns the updated run if successful or an error if it fails
-pub fn update_run_status(conn: &PgConnection, run_id: Uuid, status: RunStatusEnum) -> Result<RunData, Error> {
+pub fn update_run_status(
+    conn: &PgConnection,
+    run_id: Uuid,
+    status: RunStatusEnum,
+) -> Result<RunData, Error> {
     let run_update = match status {
         // If it's a terminal status, add finished_at also
-        RunStatusEnum::BuildFailed | RunStatusEnum::Succeeded | RunStatusEnum::EvalFailed | RunStatusEnum::EvalAborted | RunStatusEnum::CarrotFailed | RunStatusEnum::TestFailed | RunStatusEnum::TestAborted => {
-            RunChangeset {
-                name: None,
-                status: Some(status.clone()),
-                test_cromwell_job_id: None,
-                eval_cromwell_job_id: None,
-                finished_at: Some(Utc::now().naive_utc()),
-            }
+        RunStatusEnum::BuildFailed
+        | RunStatusEnum::Succeeded
+        | RunStatusEnum::EvalFailed
+        | RunStatusEnum::EvalAborted
+        | RunStatusEnum::CarrotFailed
+        | RunStatusEnum::TestFailed
+        | RunStatusEnum::TestAborted => RunChangeset {
+            name: None,
+            status: Some(status.clone()),
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            finished_at: Some(Utc::now().naive_utc()),
         },
-        _ => {
-            RunChangeset {
-                name: None,
-                status: Some(status.clone()),
-                test_cromwell_job_id: None,
-                eval_cromwell_job_id: None,
-                finished_at: None,
-            }
-        }
+        _ => RunChangeset {
+            name: None,
+            status: Some(status.clone()),
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            finished_at: None,
+        },
     };
 
     match RunData::update(conn, run_id, run_update) {
@@ -633,23 +639,6 @@ fn get_template(conn: &PgConnection, test_id: Uuid) -> Result<TemplateData, Erro
     }
 }
 
-/// Retrieves a WDL from `address` using `client`
-///
-/// Returns the WDL retrieved from `address` using `client`, or an error if retrieving the WDL
-/// fails
-async fn get_wdl(client: &Client, address: &str) -> Result<String, Error> {
-    match test_resource_requests::get_resource_as_string(&client, address).await {
-        Ok(wdl) => Ok(wdl),
-        Err(e) => {
-            error!(
-                "Encountered error while attempting to retrieve WDL from address {} : {}",
-                address, e
-            );
-            Err(Error::WdlRequest(e, address.to_string()))
-        }
-    }
-}
-
 /// Returns json object with necessary changes applied to `inputs` for submitting test inputs to
 /// cromwell as an input json
 ///
@@ -703,7 +692,10 @@ fn format_test_json_for_cromwell(inputs: &Value) -> Result<Value, Error> {
 ///     will be
 ///  2. Extract the values for `test_output:` inputs from `test_outputs` and fill them in for those
 ///     inputs in `inputs`
-fn format_eval_json_for_cromwell(inputs: &Value, test_outputs: &Map<String, Value>) -> Result<Value, Error> {
+fn format_eval_json_for_cromwell(
+    inputs: &Value,
+    test_outputs: &Map<String, Value>,
+) -> Result<Value, Error> {
     // Get inputs as map
     let object_map = match inputs.as_object() {
         Some(map) => map,
@@ -743,7 +735,7 @@ fn format_eval_json_for_cromwell(inputs: &Value, test_outputs: &Map<String, Valu
                 match test_outputs.get(output_key) {
                     Some(val) => {
                         new_val = val.to_owned();
-                    },
+                    }
                     // If we didn't find it, that's a problem, so return an error
                     None => {
                         error!("Missing output key {}", output_key);
@@ -827,7 +819,11 @@ fn create_run_in_db(
 mod tests {
     use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
     use crate::manager::test_runner::Error::Build;
-    use crate::manager::test_runner::{check_if_run_with_name_exists, create_run, create_run_in_db, format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building, Error, RunBuildStatus, format_eval_json_for_cromwell, start_run_eval, start_run_test};
+    use crate::manager::test_runner::{
+        check_if_run_with_name_exists, create_run, create_run_in_db, format_eval_json_for_cromwell,
+        format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building,
+        start_run_eval, start_run_test, Error, RunBuildStatus,
+    };
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
@@ -928,7 +924,10 @@ mod tests {
         RunData::create(conn, new_run).expect("Failed inserting test run")
     }
 
-    fn insert_test_run_with_test_id_and_status_test_submitted(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_test_run_with_test_id_and_status_test_submitted(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunData {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
@@ -1181,7 +1180,10 @@ mod tests {
 
         cromwell_mock.assert();
 
-        assert_eq!(result.test_cromwell_job_id.unwrap(), "34958601-d114-4194-a7f7-9e41211ca2ce");
+        assert_eq!(
+            result.test_cromwell_job_id.unwrap(),
+            "34958601-d114-4194-a7f7-9e41211ca2ce"
+        );
     }
 
     #[actix_rt::test]
@@ -1191,7 +1193,8 @@ mod tests {
 
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
+        let test_run =
+            insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
 
         let test_results = json!({
             "test_test.TestKey": "TestVal",
@@ -1209,11 +1212,16 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result = start_run_eval(&conn, &client, &test_run, test_results.as_object().unwrap()).await.unwrap();
+        let result = start_run_eval(&conn, &client, &test_run, test_results.as_object().unwrap())
+            .await
+            .unwrap();
 
         cromwell_mock.assert();
 
-        assert_eq!(result.eval_cromwell_job_id.unwrap(), "34958601-d114-4194-a7f7-9e41211ca2ce");
+        assert_eq!(
+            result.eval_cromwell_job_id.unwrap(),
+            "34958601-d114-4194-a7f7-9e41211ca2ce"
+        );
     }
 
     #[actix_rt::test]
@@ -1223,7 +1231,8 @@ mod tests {
 
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
+        let test_run =
+            insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
 
         let test_results = json!({
             "test_test.UnimportantKey": "Who Cares?"
@@ -1235,7 +1244,8 @@ mod tests {
             .expect(0)
             .create();
 
-        let result = start_run_eval(&conn, &client, &test_run, test_results.as_object().unwrap()).await;
+        let result =
+            start_run_eval(&conn, &client, &test_run, test_results.as_object().unwrap()).await;
 
         cromwell_mock.assert();
 
@@ -1286,7 +1296,8 @@ mod tests {
         let test_output = json!({"test_workflow.test":"2"});
 
         let formatted_json =
-            format_eval_json_for_cromwell(&test_json, test_output.as_object().unwrap()).expect("Failed to format test json");
+            format_eval_json_for_cromwell(&test_json, test_output.as_object().unwrap())
+                .expect("Failed to format test json");
 
         let expected_json = json!({"eval_workflow.test":"2","eval_workflow.image":"https://example.com/example_project:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 

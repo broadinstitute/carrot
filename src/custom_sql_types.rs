@@ -34,7 +34,7 @@ pub enum RunStatusEnum {
     TestRunning,
     TestStarting,
     TestSubmitted,
-    TestWaitingForQueueSpace
+    TestWaitingForQueueSpace,
 }
 
 impl fmt::Display for RunStatusEnum {

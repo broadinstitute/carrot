@@ -250,29 +250,33 @@ async fn check_and_update_run_status(
 ) -> Result<(), UpdateStatusError> {
     match run.status {
         // If this run has a status of 'Created', skip it, because it's still getting started
-        RunStatusEnum::Created => {
-            Ok(())
-        },
+        RunStatusEnum::Created => Ok(()),
         // If it's building, check if it's ready to run
-        RunStatusEnum::Building => {
-            update_run_status_for_building(conn, client, run).await
-        },
+        RunStatusEnum::Building => update_run_status_for_building(conn, client, run).await,
         // If it's in the testing phase, check and update its status based on that
-        RunStatusEnum::TestSubmitted | RunStatusEnum::TestAborting | RunStatusEnum::TestQueuedInCromwell | RunStatusEnum::TestRunning | RunStatusEnum::TestStarting | RunStatusEnum::TestWaitingForQueueSpace => {
+        RunStatusEnum::TestSubmitted
+        | RunStatusEnum::TestAborting
+        | RunStatusEnum::TestQueuedInCromwell
+        | RunStatusEnum::TestRunning
+        | RunStatusEnum::TestStarting
+        | RunStatusEnum::TestWaitingForQueueSpace => {
             update_run_status_for_testing(conn, client, run).await
-        },
+        }
         // If it's in the evaluating phase, check and update its status based on that
-        RunStatusEnum::EvalSubmitted | RunStatusEnum::EvalAborting | RunStatusEnum::EvalQueuedInCromwell | RunStatusEnum::EvalRunning | RunStatusEnum::EvalStarting | RunStatusEnum::EvalWaitingForQueueSpace => {
+        RunStatusEnum::EvalSubmitted
+        | RunStatusEnum::EvalAborting
+        | RunStatusEnum::EvalQueuedInCromwell
+        | RunStatusEnum::EvalRunning
+        | RunStatusEnum::EvalStarting
+        | RunStatusEnum::EvalWaitingForQueueSpace => {
             update_run_status_for_evaluating(conn, client, run).await
-        },
+        }
         // Any other statuses shouldn't be showing up here
         _ => {
             error!("Checking and updating run status for run with status {} when that shouldn't happen", run.status);
             Ok(())
         }
-
     }
-
 }
 
 /// Checks status of builds for `run` and updates status accordingly (including starting run if
@@ -281,7 +285,7 @@ async fn update_run_status_for_building(
     conn: &PgConnection,
     client: &Client,
     run: &RunData,
-) -> Result<(), UpdateStatusError>{
+) -> Result<(), UpdateStatusError> {
     // If all the builds associated with this run have completed, start the run
     match test_runner::run_finished_building(conn, run.run_id)? {
         RunBuildStatus::Finished => {
@@ -327,11 +331,13 @@ async fn update_run_status_for_testing(
 ) -> Result<(), UpdateStatusError> {
     // Get metadata
     let metadata =
-        get_status_metadata_from_cromwell(client, &run.test_cromwell_job_id.as_ref().unwrap()).await?;
+        get_status_metadata_from_cromwell(client, &run.test_cromwell_job_id.as_ref().unwrap())
+            .await?;
     // If the status is different from what's stored in the DB currently, update it
     let status = match metadata.get("status") {
         Some(status) => {
-            match get_run_status_for_cromwell_status(&status.as_str().unwrap().to_lowercase(), true) {
+            match get_run_status_for_cromwell_status(&status.as_str().unwrap().to_lowercase(), true)
+            {
                 Some(status) => status,
                 None => {
                     return Err(UpdateStatusError::Cromwell(format!(
@@ -366,25 +372,23 @@ async fn update_run_status_for_testing(
                 return Err(e);
             }
             // Then attempt to start the eval job
-            if let Err(e) = test_runner::start_run_eval(conn, client, run, &outputs).await{
+            if let Err(e) = test_runner::start_run_eval(conn, client, run, &outputs).await {
                 // Send notifications that the run failed
                 send_notifications(conn, client, run).await?;
                 return Err(UpdateStatusError::Run(e));
             }
         }
         // Otherwise, just update the status
-        else{
+        else {
             // Set the changes based on the status
             let run_update: RunChangeset = match status {
-                RunStatusEnum::TestFailed | RunStatusEnum::TestAborted => {
-                    RunChangeset {
-                        name: None,
-                        status: Some(status.clone()),
-                        test_cromwell_job_id: None,
-                        eval_cromwell_job_id: None,
-                        finished_at: Some(get_end(&metadata)?),
-                    }
-                }
+                RunStatusEnum::TestFailed | RunStatusEnum::TestAborted => RunChangeset {
+                    name: None,
+                    status: Some(status.clone()),
+                    test_cromwell_job_id: None,
+                    eval_cromwell_job_id: None,
+                    finished_at: Some(get_end(&metadata)?),
+                },
                 _ => RunChangeset {
                     name: None,
                     status: Some(status.clone()),
@@ -404,13 +408,10 @@ async fn update_run_status_for_testing(
                 _ => {}
             };
             // If it ended unsuccessfully, send notifications
-            if status == RunStatusEnum::TestFailed
-                || status == RunStatusEnum::TestAborted
-            {
+            if status == RunStatusEnum::TestFailed || status == RunStatusEnum::TestAborted {
                 send_notifications(conn, client, run).await?;
             }
         }
-
     }
 
     Ok(())
@@ -429,11 +430,15 @@ async fn update_run_status_for_evaluating(
 ) -> Result<(), UpdateStatusError> {
     // Get metadata
     let metadata =
-        get_status_metadata_from_cromwell(client, &run.eval_cromwell_job_id.as_ref().unwrap()).await?;
+        get_status_metadata_from_cromwell(client, &run.eval_cromwell_job_id.as_ref().unwrap())
+            .await?;
     // If the status is different from what's stored in the DB currently, update it
     let status = match metadata.get("status") {
         Some(status) => {
-            match get_run_status_for_cromwell_status(&status.as_str().unwrap().to_lowercase(), false) {
+            match get_run_status_for_cromwell_status(
+                &status.as_str().unwrap().to_lowercase(),
+                false,
+            ) {
                 Some(status) => status,
                 None => {
                     return Err(UpdateStatusError::Cromwell(format!(
@@ -518,13 +523,11 @@ async fn send_notifications(
     run: &RunData,
 ) -> Result<(), UpdateStatusError> {
     #[cfg(not(test))] // Skip the email step when testing
-        notification_handler::send_run_complete_emails(conn, run.run_id)?;
+    notification_handler::send_run_complete_emails(conn, run.run_id)?;
     // If triggering runs from GitHub is enabled, check if this run was triggered from a
     // a GitHub comment and reply if so
     if *gcloud_subscriber::ENABLE_GITHUB_REQUESTS {
-        notification_handler::post_run_complete_comment_if_from_github(
-            conn, client, run.run_id,
-        )
+        notification_handler::post_run_complete_comment_if_from_github(conn, client, run.run_id)
             .await?;
     }
     Ok(())
@@ -688,7 +691,10 @@ async fn get_status_metadata_from_cromwell(
 
 /// Returns equivalent RunStatusEnum for `cromwell_status`, with the Test-prefixed status if
 /// `is_test_step`, and the Eval-prefixed status if not
-fn get_run_status_for_cromwell_status(cromwell_status: &str, is_test_step: bool) -> Option<RunStatusEnum> {
+fn get_run_status_for_cromwell_status(
+    cromwell_status: &str,
+    is_test_step: bool,
+) -> Option<RunStatusEnum> {
     if is_test_step {
         match cromwell_status {
             "running" => Some(RunStatusEnum::TestRunning),
@@ -701,8 +707,7 @@ fn get_run_status_for_cromwell_status(cromwell_status: &str, is_test_step: bool)
             "aborting" => Some(RunStatusEnum::TestAborting),
             _ => None,
         }
-    }
-    else {
+    } else {
         match cromwell_status {
             "running" => Some(RunStatusEnum::EvalRunning),
             "starting" => Some(RunStatusEnum::EvalStarting),
@@ -896,7 +901,10 @@ mod tests {
         TestData::create(&conn, new_test).expect("Failed to insert test")
     }
 
-    fn insert_test_run_with_test_id_and_status_test_submitted(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_test_run_with_test_id_and_status_test_submitted(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunData {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
@@ -912,7 +920,10 @@ mod tests {
         RunData::create(conn, new_run).expect("Failed inserting test run")
     }
 
-    fn insert_test_run_with_test_id_and_status_eval_submitted(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_test_run_with_test_id_and_status_eval_submitted(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunData {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
@@ -1049,7 +1060,10 @@ mod tests {
             template_id,
             test_result.result_id,
         );
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id.clone());
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
         // Create results map
         let results_map = json!({
             "test_test.TestKey": "TestVal",
@@ -1078,7 +1092,10 @@ mod tests {
             template.template_id,
             test_result.result_id,
         );
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id.clone());
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
         // Define mockito mapping for cromwell submit response
@@ -1106,15 +1123,15 @@ mod tests {
             "GET",
             "/api/workflows/v1/53709600-d114-4194-a7f7-9e41211ca2ce/metadata",
         )
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
-                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
-                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
-            ]))
-            .create();
+        .with_status(201)
+        .with_header("content_type", "application/json")
+        .with_body(mock_response_body.to_string())
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+        ]))
+        .create();
         // Check and update status
         check_and_update_run_status(&test_run, &Client::default(), &conn)
             .await
@@ -1143,7 +1160,10 @@ mod tests {
             template_id,
             test_result.result_id,
         );
-        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(&conn, test_test.test_id.clone());
+        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
         // Define mockito mapping for cromwell response
@@ -1193,7 +1213,10 @@ mod tests {
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
         let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id.clone());
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
         // Define mockito mapping for cromwell response
@@ -1237,7 +1260,10 @@ mod tests {
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
         let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id.clone());
+        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1274,7 +1300,10 @@ mod tests {
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
         let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
-        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(&conn, test_test.test_id.clone());
+        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
@@ -1286,15 +1315,15 @@ mod tests {
             "GET",
             "/api/workflows/v1/12345612-d114-4194-a7f7-9e41211ca2ce/metadata",
         )
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
-                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
-                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
-            ]))
-            .create();
+        .with_status(201)
+        .with_header("content_type", "application/json")
+        .with_body(mock_response_body.to_string())
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+        ]))
+        .create();
         // Check and update status
         check_and_update_run_status(&test_run, &Client::default(), &conn)
             .await

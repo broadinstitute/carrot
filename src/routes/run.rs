@@ -439,14 +439,6 @@ async fn run_for_test(
                     status: 500,
                     detail: "Encountered error while attempting to parse input json".to_string(),
                 },
-                test_runner::Error::WdlRequest(_, m) => ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: format!(
-                        "Error while attempting to retrieve WDL from {}",
-                        m
-                    ),
-                },
                 test_runner::Error::SoftwareNotFound(name) => ErrorBody {
                     title: "No such software exists".to_string(),
                     status: 400,
