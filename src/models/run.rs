@@ -26,7 +26,8 @@ pub struct RunData {
     pub status: RunStatusEnum,
     pub test_input: Value,
     pub eval_input: Value,
-    pub cromwell_job_id: Option<String>,
+    pub test_cromwell_job_id: Option<String>,
+    pub eval_cromwell_job_id: Option<String>,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
@@ -44,7 +45,8 @@ pub struct RunWithResultData {
     pub status: RunStatusEnum,
     pub test_input: Value,
     pub eval_input: Value,
-    pub cromwell_job_id: Option<String>,
+    pub test_cromwell_job_id: Option<String>,
+    pub eval_cromwell_job_id: Option<String>,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
@@ -65,7 +67,8 @@ pub struct RunQuery {
     pub status: Option<RunStatusEnum>,
     pub test_input: Option<Value>,
     pub eval_input: Option<Value>,
-    pub cromwell_job_id: Option<String>,
+    pub test_cromwell_job_id: Option<String>,
+    pub eval_cromwell_job_id: Option<String>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -89,7 +92,8 @@ pub struct NewRun {
     pub status: RunStatusEnum,
     pub test_input: Value,
     pub eval_input: Value,
-    pub cromwell_job_id: Option<String>,
+    pub test_cromwell_job_id: Option<String>,
+    pub eval_cromwell_job_id: Option<String>,
     pub created_by: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
 }
@@ -102,7 +106,8 @@ pub struct NewRun {
 pub struct RunChangeset {
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
-    pub cromwell_job_id: Option<String>,
+    pub test_cromwell_job_id: Option<String>,
+    pub eval_cromwell_job_id: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
 }
 
@@ -165,8 +170,11 @@ impl RunData {
         if let Some(param) = params.eval_input {
             query = query.filter(eval_input.eq(param));
         }
-        if let Some(param) = params.cromwell_job_id {
-            query = query.filter(cromwell_job_id.eq(param));
+        if let Some(param) = params.test_cromwell_job_id {
+            query = query.filter(test_cromwell_job_id.eq(param));
+        }
+        if let Some(param) = params.eval_cromwell_job_id {
+            query = query.filter(eval_cromwell_job_id.eq(param));
         }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
@@ -231,11 +239,18 @@ impl RunData {
                             query = query.then_order_by(eval_input.desc());
                         }
                     }
-                    "cromwell_job_id" => {
+                    "test_cromwell_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(cromwell_job_id.asc());
+                            query = query.then_order_by(test_cromwell_job_id.asc());
                         } else {
-                            query = query.then_order_by(cromwell_job_id.desc());
+                            query = query.then_order_by(test_cromwell_job_id.desc());
+                        }
+                    }
+                    "eval_cromwell_job_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_cromwell_job_id.asc());
+                        } else {
+                            query = query.then_order_by(eval_cromwell_job_id.desc());
                         }
                     }
                     "created_at" => {
@@ -331,7 +346,8 @@ impl RunWithResultData {
                 status,
                 test_input,
                 eval_input,
-                cromwell_job_id,
+                test_cromwell_job_id,
+                eval_cromwell_job_id,
                 created_at,
                 created_by,
                 finished_at,
@@ -387,8 +403,11 @@ impl RunWithResultData {
         if let Some(param) = params.eval_input {
             query = query.filter(eval_input.eq(param));
         }
-        if let Some(param) = params.cromwell_job_id {
-            query = query.filter(cromwell_job_id.eq(param));
+        if let Some(param) = params.test_cromwell_job_id {
+            query = query.filter(test_cromwell_job_id.eq(param));
+        }
+        if let Some(param) = params.eval_cromwell_job_id {
+            query = query.filter(eval_cromwell_job_id.eq(param));
         }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
@@ -453,11 +472,18 @@ impl RunWithResultData {
                             query = query.then_order_by(eval_input.desc());
                         }
                     }
-                    "cromwell_job_id" => {
+                    "test_cromwell_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(cromwell_job_id.asc());
+                            query = query.then_order_by(test_cromwell_job_id.asc());
                         } else {
-                            query = query.then_order_by(cromwell_job_id.desc());
+                            query = query.then_order_by(test_cromwell_job_id.desc());
+                        }
+                    }
+                    "eval_cromwell_job_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_cromwell_job_id.asc());
+                        } else {
+                            query = query.then_order_by(eval_cromwell_job_id.desc());
                         }
                     }
                     "created_at" => {
@@ -503,7 +529,8 @@ impl RunWithResultData {
                 status,
                 test_input,
                 eval_input,
-                cromwell_job_id,
+                test_cromwell_job_id,
+                eval_cromwell_job_id,
                 created_at,
                 created_by,
                 finished_at,
@@ -543,7 +570,8 @@ mod tests {
             status: test_run.status,
             test_input: test_run.test_input,
             eval_input: test_run.eval_input,
-            cromwell_job_id: test_run.cromwell_job_id,
+            test_cromwell_job_id: test_run.test_cromwell_job_id,
+            eval_cromwell_job_id: test_run.eval_cromwell_job_id,
             created_at: test_run.created_at,
             created_by: test_run.created_by,
             finished_at: test_run.finished_at,
@@ -611,7 +639,8 @@ mod tests {
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
-            cromwell_job_id: Some(String::from("123456789")),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
         };
@@ -664,7 +693,8 @@ mod tests {
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
-            cromwell_job_id: Some(String::from("1234567890")),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
         };
@@ -674,10 +704,11 @@ mod tests {
         let new_run = NewRun {
             test_id: id,
             name: String::from("name2"),
-            status: RunStatusEnum::Submitted,
+            status: RunStatusEnum::TestSubmitted,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
-            cromwell_job_id: None,
+            test_cromwell_job_id: Some(String::from("123456789012")),
+            eval_cromwell_job_id: None,
             created_by: None,
             finished_at: None,
         };
@@ -690,7 +721,8 @@ mod tests {
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
-            cromwell_job_id: Some(String::from("1234567890")),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
         };
@@ -750,7 +782,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -784,7 +817,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -818,7 +852,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -849,7 +884,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -877,10 +913,11 @@ mod tests {
             template_id: None,
             test_id: None,
             name: None,
-            status: Some(RunStatusEnum::Submitted),
+            status: Some(RunStatusEnum::TestSubmitted),
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -912,7 +949,8 @@ mod tests {
             status: None,
             test_input: Some(test_run.test_input.clone()),
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -943,7 +981,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: Some(test_runs[0].eval_input.clone()),
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -961,7 +1000,7 @@ mod tests {
     }
 
     #[test]
-    fn find_with_cromwell_job_id() {
+    fn find_with_test_cromwell_job_id() {
         let conn = get_test_db_connection();
 
         insert_test_runs_with_test_id(&conn, Uuid::new_v4());
@@ -975,7 +1014,41 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: Some(test_run.cromwell_job_id.clone().unwrap()),
+            test_cromwell_job_id: Some(test_run.test_cromwell_job_id.clone().unwrap()),
+            eval_cromwell_job_id: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            finished_before: None,
+            finished_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
+
+        assert_eq!(found_runs.len(), 1);
+        assert_eq!(found_runs[0], test_run);
+    }
+
+    #[test]
+    fn find_with_eval_cromwell_job_id() {
+        let conn = get_test_db_connection();
+
+        insert_test_runs_with_test_id(&conn, Uuid::new_v4());
+        let test_run = insert_test_run(&conn);
+
+        let test_query = RunQuery {
+            pipeline_id: None,
+            template_id: None,
+            test_id: None,
+            name: None,
+            status: None,
+            test_input: None,
+            eval_input: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: Some(test_run.eval_cromwell_job_id.clone().unwrap()),
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1007,7 +1080,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1032,7 +1106,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1063,7 +1138,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_by: None,
@@ -1086,7 +1162,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_after: None,
             created_by: None,
@@ -1116,7 +1193,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1139,7 +1217,8 @@ mod tests {
             status: None,
             test_input: None,
             eval_input: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1175,8 +1254,9 @@ mod tests {
 
         let changes = RunChangeset {
             name: Some(String::from("TestTestTestTest")),
-            status: Some(RunStatusEnum::Failed),
-            cromwell_job_id: None,
+            status: Some(RunStatusEnum::CarrotFailed),
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
         };
 
@@ -1184,7 +1264,7 @@ mod tests {
             RunData::update(&conn, test_run.run_id, changes).expect("Failed to update run");
 
         assert_eq!(updated_run.name, String::from("TestTestTestTest"));
-        assert_eq!(updated_run.status, RunStatusEnum::Failed);
+        assert_eq!(updated_run.status, RunStatusEnum::CarrotFailed);
         assert_eq!(
             updated_run.finished_at.unwrap(),
             "2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()
@@ -1200,7 +1280,8 @@ mod tests {
         let changes = RunChangeset {
             name: Some(test_runs[0].name.clone()),
             status: None,
-            cromwell_job_id: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
             finished_at: None,
         };
 

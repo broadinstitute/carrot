@@ -9,7 +9,6 @@ mod requests;
 mod routes;
 mod schema;
 mod util;
-mod wdl;
 
 #[cfg(test)]
 mod unit_test_util;
