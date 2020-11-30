@@ -226,11 +226,12 @@ pub async fn start_software_build(
 ) -> Result<SoftwareBuildData, Error> {
     // Include docker build wdls in project build
     let docker_build_wdl = include_str!("../../scripts/wdl/docker_build.wdl");
-    let docker_build_with_github_auth_wdl = include_str!("../../scripts/wdl/docker_build_with_github_auth.wdl");
+    let docker_build_with_github_auth_wdl =
+        include_str!("../../scripts/wdl/docker_build_with_github_auth.wdl");
 
     let wdl_to_use = match *ENABLE_PRIVATE_GITHUB_ACCESS {
         true => docker_build_with_github_auth_wdl,
-        false => docker_build_wdl
+        false => docker_build_wdl,
     };
 
     // Put it in a temporary file to be sent with cromwell request
@@ -261,7 +262,7 @@ pub async fn start_software_build(
             "docker_build.software_name": software_name,
             "docker_build.commit_hash": commit,
             "docker_build.registry_host": *IMAGE_REGISTRY_HOST
-        })
+        }),
     };
 
     // Write json to temp file so it can be submitted to cromwell

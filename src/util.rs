@@ -3,8 +3,8 @@
 //! Should and will probably be moved to a module where it is relevant, in favor of having a
 //! forever-growing util module
 
-use std::process::Command;
 use std::env;
+use std::process::Command;
 
 /// Defines a sort clause to be used in DB queries
 #[derive(PartialEq, Debug)]
@@ -59,7 +59,6 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
 /// if the command is successful, and Ok(false) if it fails.  Returns an error if there is some
 /// error trying to execute the command
 pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
-
     lazy_static! {
         static ref ENABLE_PRIVATE_GITHUB_ACCESS: bool = match env::var("ENABLE_PRIVATE_GITHUB_ACCESS") {
             Ok(val) => {
@@ -82,7 +81,11 @@ pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
     }
 
     let url_to_check = if *ENABLE_PRIVATE_GITHUB_ACCESS && url.contains("github.com") {
-        format_github_url_with_creds(url, &*PRIVATE_GITHUB_CLIENT_ID.as_ref().unwrap(), &*PRIVATE_GITHUB_CLIENT_TOKEN.as_ref().unwrap())
+        format_github_url_with_creds(
+            url,
+            &*PRIVATE_GITHUB_CLIENT_ID.as_ref().unwrap(),
+            &*PRIVATE_GITHUB_CLIENT_TOKEN.as_ref().unwrap(),
+        )
     } else {
         url.to_string()
     };
@@ -103,7 +106,9 @@ pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
 /// credentials, in the form https://username:password@github.com/some/repo.git
 fn format_github_url_with_creds(url: &str, username: &str, password: &str) -> String {
     // Trim https://www. from start of url so we can stick the credentials in there
-    let trimmed_url = url.trim_start_matches("https://").trim_start_matches("www.");
+    let trimmed_url = url
+        .trim_start_matches("https://")
+        .trim_start_matches("www.");
     // Format url with auth creds and return
     format!("https://{}:{}@{}", username, password, trimmed_url)
 }
@@ -228,22 +233,43 @@ mod tests {
 
     #[test]
     fn format_github_url_with_creds_with_www() {
-        let test = format_github_url_with_creds("https://www.example.com/example/project.git", "test_user", "test_pass");
+        let test = format_github_url_with_creds(
+            "https://www.example.com/example/project.git",
+            "test_user",
+            "test_pass",
+        );
 
-        assert_eq!(test, "https://test_user:test_pass@example.com/example/project.git");
+        assert_eq!(
+            test,
+            "https://test_user:test_pass@example.com/example/project.git"
+        );
     }
 
     #[test]
     fn format_github_url_with_creds_without_www() {
-        let test = format_github_url_with_creds("https://example.com/example/project.git", "test_user", "test_pass");
+        let test = format_github_url_with_creds(
+            "https://example.com/example/project.git",
+            "test_user",
+            "test_pass",
+        );
 
-        assert_eq!(test, "https://test_user:test_pass@example.com/example/project.git");
+        assert_eq!(
+            test,
+            "https://test_user:test_pass@example.com/example/project.git"
+        );
     }
 
     #[test]
     fn format_github_url_with_creds_without_https() {
-        let test = format_github_url_with_creds("example.com/example/project.git", "test_user", "test_pass");
+        let test = format_github_url_with_creds(
+            "example.com/example/project.git",
+            "test_user",
+            "test_pass",
+        );
 
-        assert_eq!(test, "https://test_user:test_pass@example.com/example/project.git");
+        assert_eq!(
+            test,
+            "https://test_user:test_pass@example.com/example/project.git"
+        );
     }
 }
