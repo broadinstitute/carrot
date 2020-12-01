@@ -413,7 +413,7 @@ mod tests {
         let new_software = NewSoftware {
             name: String::from("Kevin's test"),
             description: Some(String::from("Kevin's test description")),
-            repository_url: String::from("git://github.com/broadinstitute/gatk.git"),
+            repository_url: String::from("https://github.com/broadinstitute/gatk.git"),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -455,7 +455,7 @@ mod tests {
         let new_software = NewSoftware {
             name: software.name.clone(),
             description: Some(String::from("Kevin's test description")),
-            repository_url: String::from("git://github.com/broadinstitute/gatk.git"),
+            repository_url: String::from("https://github.com/broadinstitute/gatk.git"),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

@@ -35,7 +35,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
 * A Dockerfile is provided in the project root directory that can be used to run CARROT in a Docker container
     * The image can be built by running `docker build .` from the project root.
     * For development purposes, the `docker-compose.yml` file can be used to run CARROT with a PostreSQL server and a Cromwell server in their own containers.  This can be done using `docker-compose up` within that directory.
-        * Environment variables must be set within the `docker-compose.yml` file before running.
+        * Environment variables must be set (following the `.env.example` file) within the `docker-compose.yml` file before running.
     * To run unit tests in Docker, use `docker-compose up --abort-on-container-exit --exit-code-from carrot-test` within the `/scripts/docker/test` directory.
 
 ## <a name="style">Style</a>
