@@ -26,9 +26,11 @@ lazy_static!{
             .parse()
             .expect("DB_THREADS environment variable must be an integer");
 
-    /// The location of the key file for the service account to use with GCloud services
-    pub static ref GCLOUD_SA_KEY_FILE: String =
-        env::var("GCLOUD_SA_KEY_FILE").expect("GCLOUD_SA_KEY_FILE environment variable not set");
+    // Config
+    /// The address for the cromwell server that will be used to run tests
+    pub static ref CROMWELL_ADDRESS: String  = {
+        env::var("CROMWELL_ADDRESS").expect("CROMWELL_ADDRESS environment variable not set")
+    };
 
     // Status-checking config
     /// Time to wait between status check queries, or default to 5 minutes
@@ -92,7 +94,18 @@ lazy_static!{
         }
     };
 
+    // GCloud
+    /// The location of the key file for the service account to use with GCloud services
+    pub static ref GCLOUD_SA_KEY_FILE: String =
+        env::var("GCLOUD_SA_KEY_FILE").expect("GCLOUD_SA_KEY_FILE environment variable not set");
+
     // GITHUB
+    /// User ID for authentication with github api
+    pub static ref GITHUB_CLIENT_ID: String = env::var("GITHUB_CLIENT_ID")
+        .expect("GITHUB_CLIENT_ID environment variable not set");
+    /// User token for authentication with github api
+    pub static ref GITHUB_CLIENT_TOKEN: String = env::var("GITHUB_CLIENT_TOKEN")
+        .expect("GITHUB_CLIENT_TOKEN environment variable not set");
     /// If true, enables triggering carrot test runs from github
     pub static ref ENABLE_GITHUB_REQUESTS: bool = match env::var("ENABLE_GITHUB_REQUESTS") {
         Ok(val) => {
@@ -145,6 +158,11 @@ lazy_static!{
         false => None,
         true => Some(env::var("PRIVATE_GITHUB_CLIENT_ID").expect("PRIVATE_GITHUB_CLIENT_ID environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
     };
+    /// The github user token for the user to use to access private repositories
+    pub static ref PRIVATE_GITHUB_CLIENT_TOKEN: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
+        false => None,
+        true => Some(env::var("PRIVATE_GITHUB_CLIENT_TOKEN").expect("PRIVATE_GITHUB_CLIENT_TOKEN environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
+    };
     /// The GCS URL of a google kms encrypted file containing the password for the account specified by `PRIVATE_GITHUB_CLIENT_ID`
     pub static ref PRIVATE_GITHUB_CLIENT_PASS_URI: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
         false => None,
@@ -174,6 +192,9 @@ pub fn initialize() {
     lazy_static::initialize(&DATABASE_URL);
     lazy_static::initialize(&DB_THREADS);
 
+    // Cromwell
+    lazy_static::initialize(&CROMWELL_ADDRESS);
+
     // Status-checking config
     lazy_static::initialize(&STATUS_CHECK_WAIT_TIME_IN_SECS);
     lazy_static::initialize(&ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
@@ -186,6 +207,8 @@ pub fn initialize() {
     lazy_static::initialize(&EMAIL_PASSWORD);
 
     // GITHUB
+    lazy_static::initialize(&GITHUB_CLIENT_ID);
+    lazy_static::initialize(&GITHUB_CLIENT_TOKEN);
     lazy_static::initialize(&ENABLE_GITHUB_REQUESTS);
     // If github support is enabled, initialize the other relevant config variables
     if *ENABLE_GITHUB_REQUESTS {
@@ -198,6 +221,7 @@ pub fn initialize() {
     lazy_static::initialize(&IMAGE_REGISTRY_HOST);
     lazy_static::initialize(&ENABLE_PRIVATE_GITHUB_ACCESS);
     lazy_static::initialize(&PRIVATE_GITHUB_CLIENT_ID);
+    lazy_static::initialize(&PRIVATE_GITHUB_CLIENT_TOKEN);
     lazy_static::initialize(&PRIVATE_GITHUB_CLIENT_PASS_URI);
     lazy_static::initialize(&PRIVATE_GITHUB_KMS_KEYRING);
     lazy_static::initialize(&PRIVATE_GITHUB_KMS_KEY);

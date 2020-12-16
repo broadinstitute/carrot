@@ -1,15 +1,12 @@
 //! Module for making requests to Cromwell
-//!
-//!
 
+use crate::config;
 use actix_multipart_rfc7578::client::multipart;
 use actix_web::client::{Client, SendRequestError};
 use actix_web::error::PayloadError;
-use dotenv;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::env;
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
@@ -17,14 +14,6 @@ use std::str::Utf8Error;
 
 #[cfg(test)]
 use mockito;
-
-lazy_static! {
-    static ref CROMWELL_ADDRESS: String  = {
-        // Load environment variables from env file
-        dotenv::from_filename(".env").ok();
-        env::var("CROMWELL_ADDRESS").expect("CROMWELL_ADDRESS environment variable not set")
-    };
-}
 
 /// Parameters for submitting a job to cromwell
 ///
@@ -222,7 +211,7 @@ pub async fn start_job(
 ) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
     // Set address to query based on whether we're running a unit test or not
     #[cfg(not(test))]
-    let cromwell_address = &*CROMWELL_ADDRESS;
+    let cromwell_address = &*config::CROMWELL_ADDRESS;
     #[cfg(test)]
     let cromwell_address = &mockito::server_url();
 
@@ -284,7 +273,7 @@ pub async fn get_metadata(
 ) -> Result<Value, CromwellRequestError> {
     // Set address to query based on whether we're running a unit test or not
     #[cfg(not(test))]
-    let cromwell_address = &*CROMWELL_ADDRESS;
+    let cromwell_address = &*config::CROMWELL_ADDRESS;
     #[cfg(test)]
     let cromwell_address = &mockito::server_url();
 
