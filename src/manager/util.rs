@@ -1,22 +1,17 @@
 //! Contains utility functions shared by multiple of the modules within the `manager` module
 
+use crate::config;
 use crate::requests::cromwell_requests;
 use crate::requests::cromwell_requests::{
     CromwellRequestError, WorkflowIdAndStatus, WorkflowTypeEnum,
 };
 use actix_web::client::Client;
 use log::error;
-use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 use tempfile::NamedTempFile;
-
-lazy_static! {
-    // Url for the docker repo where images will be stored
-    static ref IMAGE_REGISTRY_HOST: String = env::var("IMAGE_REGISTRY_HOST").expect("IMAGE_REGISTRY_HOST environment variable not set");
-}
 
 /// Sends a request to cromwell to start a job from a WDL file
 ///
@@ -112,7 +107,7 @@ pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
 /// This function basically exists to reduce the number of places where an image url is built, so if
 /// we ever need to change it, we don't have to do it in a bunch of places in the code
 pub fn get_formatted_image_url(software_name: &str, commit_hash: &str) -> String {
-    format!("{}/{}:{}", *IMAGE_REGISTRY_HOST, software_name, commit_hash)
+    format!("{}/{}:{}", *config::IMAGE_REGISTRY_HOST, software_name, commit_hash)
 }
 
 /// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel

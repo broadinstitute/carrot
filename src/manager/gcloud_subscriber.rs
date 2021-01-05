@@ -4,11 +4,11 @@
 //! contains messages for starting test runs.  Should poll the subscription on a schedule and
 //! process any messages it finds by starting test runs as specified in the messages
 
+use crate::config;
 use crate::db::DbPool;
 use crate::manager::github_runner;
 use crate::manager::github_runner::GithubRunRequest;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
-use crate::requests::github_requests;
 use actix_rt::System;
 use actix_web::client::Client;
 use base64;
@@ -19,39 +19,8 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use std::{env, fmt, thread};
+use std::{fmt, thread};
 use yup_oauth2;
-
-lazy_static! {
-    pub static ref ENABLE_GITHUB_REQUESTS: bool = match env::var("ENABLE_GITHUB_REQUESTS") {
-        Ok(val) => {
-            if val == "true" {
-                true
-            } else {
-                false
-            }
-        }
-        Err(_) => false,
-    };
-    static ref GCLOUD_SA_KEY_FILE: String =
-        env::var("GCLOUD_SA_KEY_FILE").expect("GCLOUD_SA_KEY_FILE environment variable not set");
-    static ref PUBSUB_SUBSCRIPTION_NAME: String = env::var("PUBSUB_SUBSCRIPTION_NAME")
-        .expect("PUBSUB_SUBSCRIPTION_NAME environment variable not set");
-    static ref PUBSUB_MAX_MESSAGES_PER: i32 = match env::var("PUBSUB_MAX_MESSAGES_PER") {
-        Ok(s) => s.parse::<i32>().unwrap(),
-        Err(_) => {
-            info!("No PUBSUB_MAX_MESSAGES_PER specified.  Defaulting to 20 messages");
-            20
-        }
-    };
-    static ref PUBSUB_WAIT_TIME_IN_SECS: u64 = match env::var("PUBSUB_WAIT_TIME_IN_SECS") {
-        Ok(s) => s.parse::<u64>().unwrap(),
-        Err(_) => {
-            info!("No PUBSUB_WAIT_TIME_IN_SECS specified.  Defaulting to 1 minute");
-            60
-        }
-    };
-}
 
 type PubsubClient = Pubsub<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
 
@@ -102,9 +71,7 @@ impl From<std::string::FromUtf8Error> for ParseMessageError {
 /// set
 pub fn init_or_not(pool: DbPool) -> (Option<Sender<()>>, Option<JoinHandle<()>>) {
     // If we're enabling github requests, start the subscriber
-    if *ENABLE_GITHUB_REQUESTS {
-        // Make sure all the environment variables we need are set
-        initialize_lazy_static_variables();
+    if *config::ENABLE_GITHUB_REQUESTS {
         // Start the gcloud_subscriber server and return the channel sender to communicate with
         // it and the thread to join on it
         let (gcloud_subscriber_send, gcloud_subscriber_receive) = mpsc::channel();
@@ -125,19 +92,6 @@ pub fn init_or_not(pool: DbPool) -> (Option<Sender<()>>, Option<JoinHandle<()>>)
     }
 }
 
-/// Initialize any lazy static variables in this module or modules that are necessary for this one
-/// to run correctly
-///
-/// # Panics
-/// Panics if certain required variables cannot be initialized
-fn initialize_lazy_static_variables() {
-    lazy_static::initialize(&GCLOUD_SA_KEY_FILE);
-    lazy_static::initialize(&PUBSUB_SUBSCRIPTION_NAME);
-    lazy_static::initialize(&PUBSUB_MAX_MESSAGES_PER);
-    lazy_static::initialize(&PUBSUB_WAIT_TIME_IN_SECS);
-    github_requests::initialize_lazy_static_variables();
-}
-
 /// Main loop function for this manager. Initializes the manager, then loops checking the pubsub
 /// subscription for requests, and attempts to start a test run for each request
 async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Receiver<()>) {
@@ -156,7 +110,7 @@ async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Rec
         // PUBSUB_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
         debug!("Finished gcloud subscription check.  Sleeping . . .");
         let wait_timeout =
-            Duration::new(*PUBSUB_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
+            Duration::new(*config::PUBSUB_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
         if let Some(timeout) = wait_timeout {
             if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout) {
                 return;
@@ -176,9 +130,9 @@ async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Rec
 fn initialize_pubsub() -> PubsubClient {
     // Load GCloud SA key so we can use it for authentication
     let client_secret =
-        yup_oauth2::service_account_key_from_file(&*GCLOUD_SA_KEY_FILE).expect(&format!(
+        yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE).expect(&format!(
             "Failed to load service account key from file at: {}",
-            &*GCLOUD_SA_KEY_FILE
+            &*config::GCLOUD_SA_KEY_FILE
         ));
     // Create hyper client for connecting to GCloud
     let auth_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
@@ -203,12 +157,12 @@ async fn pull_message_data_from_subscription(
     // and retrieve, at max, the number of messages set in the environment variable
     let message_req = google_pubsub1::PullRequest {
         return_immediately: None,
-        max_messages: Some(*PUBSUB_MAX_MESSAGES_PER),
+        max_messages: Some(*config::PUBSUB_MAX_MESSAGES_PER),
     };
     // Send the request to get the messages
     match pubsub_client
         .projects()
-        .subscriptions_pull(message_req, &*PUBSUB_SUBSCRIPTION_NAME)
+        .subscriptions_pull(message_req, &*config::PUBSUB_SUBSCRIPTION_NAME)
         .doit()
     {
         Ok((_, response)) => {
@@ -281,7 +235,7 @@ fn acknowledge_messages(pubsub_client: &PubsubClient, messages: &Vec<ReceivedMes
         };
         match pubsub_client
             .projects()
-            .subscriptions_acknowledge(ack_request, &*PUBSUB_SUBSCRIPTION_NAME)
+            .subscriptions_acknowledge(ack_request, &*config::PUBSUB_SUBSCRIPTION_NAME)
             .doit()
         {
             Ok(_) => debug!("Acknowledged message"),

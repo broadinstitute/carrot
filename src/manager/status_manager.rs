@@ -5,11 +5,12 @@
 //! Cromwell, and then updating accordingly.  It will also pull result data and add that to the DB
 //! for any tests runs that complete
 
+use crate::config;
 use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::db::DbPool;
 use crate::manager::test_runner::RunBuildStatus;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
-use crate::manager::{gcloud_subscriber, notification_handler, software_builder, test_runner};
+use crate::manager::{notification_handler, software_builder, test_runner};
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_result::{NewRunResult, RunResultData};
 use crate::models::software_build::{SoftwareBuildChangeset, SoftwareBuildData};
@@ -18,9 +19,8 @@ use crate::requests::cromwell_requests;
 use actix_web::client::Client;
 use chrono::{NaiveDateTime, Utc};
 use diesel::PgConnection;
-use log::{debug, error, info};
+use log::{debug, error};
 use serde_json::{Map, Value};
-use std::env;
 use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
@@ -86,42 +86,6 @@ pub async fn manage(
     client: Client,
     channel_recv: mpsc::Receiver<()>,
 ) -> Result<(), StatusManagerError> {
-    lazy_static! {
-        // Get environment variable value for time to wait between queries, or default to 5 minutes
-        static ref STATUS_CHECK_WAIT_TIME_IN_SECS: u64 = {
-            // Load environment variables from env file
-            dotenv::from_filename(".env").ok();
-            match env::var("STATUS_CHECK_WAIT_TIME_IN_SECS") {
-                Ok(s) => s.parse::<u64>().unwrap(),
-                Err(_) => {
-                    info!("No status check wait time specified.  Defaulting to 5 minutes");
-                    300
-                }
-            }
-        };
-        // Get environment variable value for number of consecutive failures to allow before panicking, or default to 5
-        static ref ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES: u32 = {
-            // Load environment variables from env file
-            dotenv::from_filename(".env").ok();
-            match env::var("ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES") {
-                Ok(s) => s.parse::<u32>().unwrap(),
-                Err(_) => {
-                    info!("No allowed consecutive status check failures specified.  Defaulting to 5 failures");
-                    5
-                }
-            }
-        };
-        // Get environment variable value for number of threads to use for updating statuses, or default to 4
-        static ref STATUS_MANAGER_THREADS: usize = {
-            match env::var("STATUS_MANAGER_THREADS") {
-                Ok(s) => s.parse::<usize>().unwrap(),
-                Err(_) => {
-                    info!("No value specified for number of status manager threads.  Defaulting to 4 threads");
-                    4
-                }
-            }
-        };
-    }
     // Track consecutive failures to retrieve runs/builds so we can panic if there are too many
     let mut consecutive_failures: u32 = 0;
     // Main loop
@@ -156,8 +120,8 @@ pub async fn manage(
                     "Failed to retrieve run/build statuses from the DB {} time(s), this time due to: {}",
                     consecutive_failures, e
                 );
-                if consecutive_failures > *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
-                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+                if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
+                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
                     return Err(StatusManagerError {
                         msg: String::from("Exceed allowed consecutive failures"),
                     });
@@ -203,8 +167,8 @@ pub async fn manage(
                     "Failed to retrieve run/build statuses from the DB {} time(s), this time due to: {}",
                     consecutive_failures, e
                 );
-                if consecutive_failures > *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
-                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+                if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
+                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
                     return Err(StatusManagerError {
                         msg: String::from("Exceed allowed consecutive failures"),
                     });
@@ -215,7 +179,7 @@ pub async fn manage(
         debug!("Finished status check.  Status manager sleeping . . .");
         // While the time since we last started a status check hasn't exceeded
         // STATUS_CHECK_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
-        let wait_timeout = Duration::new(*STATUS_CHECK_WAIT_TIME_IN_SECS, 0)
+        let wait_timeout = Duration::new(*config::STATUS_CHECK_WAIT_TIME_IN_SECS, 0)
             .checked_sub(Instant::now() - query_time);
         if let Some(timeout) = wait_timeout {
             if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout) {
@@ -303,7 +267,7 @@ async fn update_run_status_for_building(
             notification_handler::send_run_complete_emails(conn, run.run_id)?;
             // If triggering runs from GitHub is enabled, check if this run was triggered from a
             // a GitHub comment and reply if so
-            if *gcloud_subscriber::ENABLE_GITHUB_REQUESTS {
+            if *config::ENABLE_GITHUB_REQUESTS {
                 notification_handler::post_run_complete_comment_if_from_github(
                     conn, client, run.run_id,
                 )
@@ -526,7 +490,7 @@ async fn send_notifications(
     notification_handler::send_run_complete_emails(conn, run.run_id)?;
     // If triggering runs from GitHub is enabled, check if this run was triggered from a
     // a GitHub comment and reply if so
-    if *gcloud_subscriber::ENABLE_GITHUB_REQUESTS {
+    if *config::ENABLE_GITHUB_REQUESTS {
         notification_handler::post_run_complete_comment_if_from_github(conn, client, run.run_id)
             .await?;
     }

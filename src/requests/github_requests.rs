@@ -1,20 +1,15 @@
+//! Contains functionality for making requests to the GitHub api
+//! (currently only for posting comments)
+
+use crate::config;
 use actix_web::client::{Client, SendRequestError};
 use serde_json::json;
-use std::{env, error, fmt};
+use std::{error, fmt};
 
 #[cfg(test)]
 use mockito;
 
 static GITHUB_BASE_ADDRESS: &'static str = "https://api.github.com";
-
-lazy_static! {
-    // User ID for authentication with github api
-    static ref GITHUB_CLIENT_ID: String = env::var("GITHUB_CLIENT_ID")
-        .expect("GITHUB_CLIENT_ID environment variable not set");
-    // User token for authentication with github api
-    static ref GITHUB_CLIENT_TOKEN: String = env::var("GITHUB_CLIENT_TOKEN")
-        .expect("GITHUB_CLIENT_TOKEN environment variable not set");
-}
 
 /// Enum of possible errors from submitting a request to github
 #[derive(Debug)]
@@ -41,15 +36,6 @@ impl From<SendRequestError> for Error {
     }
 }
 
-/// Initialize any lazy static variables in this module
-///
-/// # Panics
-/// Panics if required variables (GITHUB_CLIENT_ID, GITHUB_CLIENT_TOKEN) cannot be initialized
-pub fn initialize_lazy_static_variables() {
-    lazy_static::initialize(&GITHUB_CLIENT_ID);
-    lazy_static::initialize(&GITHUB_CLIENT_TOKEN);
-}
-
 /// Sends a request using `client` to post a comment to github on the repo belonging to `owner` and
 /// specified by `repo`, on the issue identified by `issue_number`, with the body `comment_body`
 /// Returns an error if there is some issue sending the request or if it doesn't return a
@@ -74,7 +60,7 @@ pub async fn post_comment(
             "{}/repos/{}/{}/issues/{}/comments",
             base_address, owner, repo, issue_number
         ))
-        .basic_auth(&*GITHUB_CLIENT_ID, Some(&*GITHUB_CLIENT_TOKEN))
+        .basic_auth(&*config::GITHUB_CLIENT_ID, Some(&*config::GITHUB_CLIENT_TOKEN))
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "Carrot-App")
         .send_json(&body_json)

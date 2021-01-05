@@ -1,63 +1,16 @@
 //! Contains functionality for sending notification emails to users for entities to which they've
 //! subscribed
 
+use crate::config;
 #[cfg(test)]
 use lettre::FileTransport;
 use lettre::{smtp::authentication::Credentials, SendmailTransport, SmtpClient, Transport};
 use lettre_email::{Email, EmailBuilder};
-use log::info;
-use std::env;
 #[cfg(test)]
 use std::env::temp_dir;
 use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
-
-lazy_static! {
-    // Get environment variable for the mode we'll use for sending mail
-    pub static ref EMAIL_MODE: EmailMode = EmailMode::from_str(&env::var("EMAIL_MODE")
-        .expect("EMAIL_MODE environment variable not set"))
-        .expect("EMAIL_MODE must be one of three values: SERVER, SENDMAIL, or NONE");
-
-    // Get environment variable for 'from' field in email notifications (if mode isn't None)
-    static ref EMAIL_FROM: Option<String> = {
-        match *EMAIL_MODE {
-            EmailMode::None => None,
-            _ => Some(env::var("EMAIL_FROM").expect("EMAIL_FROM environment variable not set"))
-        }
-    };
-
-    // Get environment variable for domain for email server for notifications
-    static ref EMAIL_DOMAIN: Option<String> = {
-        match *EMAIL_MODE {
-            EmailMode::Server => Some(env::var("EMAIL_DOMAIN").expect("EMAIL_DOMAIN environment variable not set")),
-            _ => None,
-        }
-    };
-
-    // Get environment variable for server username if it exists
-    static ref EMAIL_USERNAME: Option<String> = {
-        match env::var("EMAIL_USERNAME") {
-            Ok(s) => Some(s),
-            Err(_) =>  {
-                info!("No value specified for EMAIL_USERNAME");
-                None
-            }
-        }
-    };
-
-    // Get environment variable for server password if it exists
-    static ref EMAIL_PASSWORD: Option<String> = {
-        match env::var("EMAIL_PASSWORD") {
-            Ok(s) => Some(s),
-            Err(_) =>  {
-                info!("No value specified for EMAIL_PASSWORD");
-                None
-            }
-        }
-    };
-
-}
 
 /// Enum of possible email modes to be specified in env variables, corresponding to how we will or
 /// will not send emails.
@@ -135,24 +88,6 @@ impl From<lettre::file::error::Error> for SendEmailError {
     }
 }
 
-/// Initializes the (possibly-)required email-related static variables to verify that they have
-/// been set correctly
-///
-/// lazy_static does not actually initialize variables right away. Since we're loading from env
-/// variables and applying some logic when initializing them, we need to use lazy_static for the
-/// email config variables.  We want to make sure they are set at runtime, though, so this
-/// function initializes the ones that could possibly be required (depending on the email mode),
-/// so, if the user does not set these variables properly, we can have the application panic right
-/// away instead of waiting until it first tries to send an email
-///
-/// # Panics
-/// Panics if a required environment variable is unavailable
-pub fn setup() {
-    lazy_static::initialize(&EMAIL_MODE);
-    lazy_static::initialize(&EMAIL_FROM);
-    lazy_static::initialize(&EMAIL_DOMAIN);
-}
-
 /// Sends an email bcc'd to `addresses` with `subject` and `message`
 ///
 /// Sends an email via an SMTP server if `EMAIL_MODE` is `Server`, via the Sendmail utility if the
@@ -167,7 +102,7 @@ pub fn send_email(
 
     // Send email based on email mode
     #[cfg(not(test))]
-    match *EMAIL_MODE {
+    match *config::EMAIL_MODE {
         EmailMode::Server => send_email_server_mode(email),
         EmailMode::Sendmail => send_email_sendmail_mode(email),
         EmailMode::None => Err(SendEmailError::Config(String::from(
@@ -195,7 +130,7 @@ fn build_email(
 ) -> Result<Email, lettre_email::error::Error> {
     // Set up email to send
     let mut email = EmailBuilder::new()
-        .from((*EMAIL_FROM).clone().unwrap())
+        .from((*config::EMAIL_FROM).clone().unwrap())
         .subject(subject)
         .text(message);
 
@@ -215,14 +150,14 @@ fn build_email(
 /// used as credentials for connecting to the mail server
 fn send_email_server_mode(email: Email) -> Result<(), SendEmailError> {
     // Start to set up client for connecting to email server
-    let mut mailer = SmtpClient::new_simple(&(*EMAIL_DOMAIN).clone().unwrap())
+    let mut mailer = SmtpClient::new_simple(&(*config::EMAIL_DOMAIN).clone().unwrap())
         .expect("Failed to create smtp client for sending email");
 
     // If we have credentials, add those to the client setup
-    if (*EMAIL_USERNAME).is_some() && (*EMAIL_PASSWORD).is_some() {
+    if (*config::EMAIL_USERNAME).is_some() && (*config::EMAIL_PASSWORD).is_some() {
         mailer = mailer.credentials(Credentials::new(
-            (*EMAIL_USERNAME).clone().unwrap(),
-            (*EMAIL_PASSWORD).clone().unwrap(),
+            (*config::EMAIL_USERNAME).clone().unwrap(),
+            (*config::EMAIL_PASSWORD).clone().unwrap(),
         ));
     }
 

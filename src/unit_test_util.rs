@@ -43,7 +43,7 @@ pub fn get_test_db_pool() -> db::DbPool {
     // Get the DB url
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
     // Connect
-    let conn = db::get_pool(db_url, 1);
+    let conn = db::get_pool(&db_url, 1);
     // Initialize schema if necessary
     initialize_db_schema(&conn.get().unwrap());
     // Start a test transaction, so test changes will not be committed

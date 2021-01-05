@@ -13,7 +13,7 @@ pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 ///
 /// # Panics
 /// Panics if an error is encountered when trying to create the connection pool
-pub fn get_pool(db_url: String, threads: u32) -> DbPool {
+pub fn get_pool(db_url: &str, threads: u32) -> DbPool {
     let manager = ConnectionManager::<PgConnection>::new(db_url);
     r2d2::Pool::builder()
         .max_size(threads)

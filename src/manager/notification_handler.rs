@@ -1,5 +1,6 @@
 //! Contains functions for sending notifications to users
 
+use crate::config;
 use crate::models::run::RunWithResultData;
 use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::subscription::SubscriptionData;
@@ -60,7 +61,7 @@ impl From<github_commenter::Error> for Error {
 /// run_id
 pub fn send_run_complete_emails(conn: &PgConnection, run_id: Uuid) -> Result<(), Error> {
     // If the email mode is None, just return
-    if matches!(*emailer::EMAIL_MODE, emailer::EmailMode::None) {
+    if matches!(*config::EMAIL_MODE, emailer::EmailMode::None) {
         return Ok(());
     }
     // Get run with result data
@@ -103,7 +104,7 @@ pub fn send_notification_emails_for_test(
     message: &str,
 ) -> Result<(), Error> {
     // If the email mode is None, just return
-    if matches!(*emailer::EMAIL_MODE, emailer::EmailMode::None) {
+    if matches!(*config::EMAIL_MODE, emailer::EmailMode::None) {
         return Ok(());
     }
     // Get subscriptions

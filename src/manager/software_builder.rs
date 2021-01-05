@@ -1,5 +1,6 @@
 //! This module contains functions for managing software builds
 
+use crate::config;
 use crate::custom_sql_types::BuildStatusEnum;
 use crate::manager::util;
 use crate::models::software_build::{
@@ -12,42 +13,9 @@ use crate::requests::cromwell_requests::CromwellRequestError;
 use actix_web::client::Client;
 use diesel::PgConnection;
 use serde_json::json;
-use std::env;
 use std::fmt;
 use std::path::Path;
 use uuid::Uuid;
-
-// Load static variables needed for building
-lazy_static! {
-    static ref IMAGE_REGISTRY_HOST: String =
-        env::var("IMAGE_REGISTRY_HOST").expect("IMAGE_REGISTRY_HOST environment variable not set");
-    static ref ENABLE_PRIVATE_GITHUB_ACCESS: bool = match env::var("ENABLE_PRIVATE_GITHUB_ACCESS") {
-        Ok(val) => {
-            if val == "true" {
-                true
-            } else {
-                false
-            }
-        }
-        Err(_) => false,
-    };
-    static ref PRIVATE_GITHUB_CLIENT_ID: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
-        false => None,
-        true => Some(env::var("PRIVATE_GITHUB_CLIENT_ID").expect("PRIVATE_GITHUB_CLIENT_ID environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
-    };
-    static ref PRIVATE_GITHUB_CLIENT_PASS_URI: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
-        false => None,
-        true => Some(env::var("PRIVATE_GITHUB_CLIENT_PASS_URI").expect("PRIVATE_GITHUB_CLIENT_PASS_URI environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
-    };
-    static ref PRIVATE_GITHUB_KMS_KEYRING: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
-        false => None,
-        true => Some(env::var("PRIVATE_GITHUB_KMS_KEYRING").expect("PRIVATE_GITHUB_KMS_KEYRING environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
-    };
-    static ref PRIVATE_GITHUB_KMS_KEY: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
-        false => None,
-        true => Some(env::var("PRIVATE_GITHUB_KMS_KEY").expect("PRIVATE_GITHUB_KMS_KEY environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
-    };
-}
 
 #[derive(Debug)]
 pub enum Error {
@@ -84,26 +52,6 @@ impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
         Error::TempFile(e)
     }
-}
-
-/// Initializes the required IMAGE_REGISTRY_HOST static variables to verify that it has been set
-/// correctly
-///
-/// lazy_static does not actually initialize variables right away. Since we're loading from env
-/// variables, we need to use lazy_static for this config variable.  We want to make sure it is set
-/// at runtime, though, so this function initializes it so, if the user does not set this variable
-/// properly, we can have the application panic right away instead of waiting until it first tries
-/// to start a build
-///
-/// # Panics
-/// Panics if a required environment variable is unavailable
-pub fn setup() {
-    lazy_static::initialize(&IMAGE_REGISTRY_HOST);
-    lazy_static::initialize(&ENABLE_PRIVATE_GITHUB_ACCESS);
-    lazy_static::initialize(&PRIVATE_GITHUB_CLIENT_ID);
-    lazy_static::initialize(&PRIVATE_GITHUB_CLIENT_PASS_URI);
-    lazy_static::initialize(&PRIVATE_GITHUB_KMS_KEYRING);
-    lazy_static::initialize(&PRIVATE_GITHUB_KMS_KEY);
 }
 
 /// Attempts to retrieve a software_version record with the specified `software_id` and `commit`,
@@ -229,7 +177,7 @@ pub async fn start_software_build(
     let docker_build_with_github_auth_wdl =
         include_str!("../../scripts/wdl/docker_build_with_github_auth.wdl");
 
-    let wdl_to_use = match *ENABLE_PRIVATE_GITHUB_ACCESS {
+    let wdl_to_use = match *config::ENABLE_PRIVATE_GITHUB_ACCESS {
         true => docker_build_with_github_auth_wdl,
         false => docker_build_wdl,
     };
@@ -246,22 +194,22 @@ pub async fn start_software_build(
 
     // Build input json, including github credential stuff if we might be accessing a private
     // github repo
-    let json_to_submit = match *ENABLE_PRIVATE_GITHUB_ACCESS {
+    let json_to_submit = match *config::ENABLE_PRIVATE_GITHUB_ACCESS {
         true => json!({
             "docker_build.repo_url": repo_url,
             "docker_build.software_name": software_name,
             "docker_build.commit_hash": commit,
-            "docker_build.registry_host": *IMAGE_REGISTRY_HOST,
-            "docker_build.github_user": *PRIVATE_GITHUB_CLIENT_ID,
-            "docker_build.github_pass_encrypted": *PRIVATE_GITHUB_CLIENT_PASS_URI,
-            "docker_build.gcloud_kms_keyring": *PRIVATE_GITHUB_KMS_KEYRING,
-            "docker_build.gcloud_kms_key": *PRIVATE_GITHUB_KMS_KEY
+            "docker_build.registry_host": *config::IMAGE_REGISTRY_HOST,
+            "docker_build.github_user": *config::PRIVATE_GITHUB_CLIENT_ID,
+            "docker_build.github_pass_encrypted": *config::PRIVATE_GITHUB_CLIENT_PASS_URI,
+            "docker_build.gcloud_kms_keyring": *config::PRIVATE_GITHUB_KMS_KEYRING,
+            "docker_build.gcloud_kms_key": *config::PRIVATE_GITHUB_KMS_KEY
         }),
         false => json!({
             "docker_build.repo_url": repo_url,
             "docker_build.software_name": software_name,
             "docker_build.commit_hash": commit,
-            "docker_build.registry_host": *IMAGE_REGISTRY_HOST
+            "docker_build.registry_host": *config::IMAGE_REGISTRY_HOST
         }),
     };
 

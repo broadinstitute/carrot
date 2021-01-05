@@ -1,5 +1,6 @@
 // Declare all modules that are children of main
 mod app;
+mod config;
 mod custom_sql_types;
 mod db;
 mod manager;
@@ -28,7 +29,6 @@ use actix_web::client::Client;
 use dotenv;
 use futures::executor::block_on;
 use log::{error, info};
-use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -41,20 +41,8 @@ fn main() {
     // Initializes logger with config from .env file
     env_logger::init();
 
-    // Load env variables and terminate if any cannot be found
-    let host = env::var("HOST").expect("HOST environment variable not set");
-    let port = env::var("PORT").expect("PORT environment variable not set");
-    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
-    let db_threads = env::var("DB_THREADS").expect("DB_THREADS environment variable not set");
-    // Parse db_threads variable into an integer and terminate if unsuccessful
-    let db_threads: u32 = db_threads
-        .parse()
-        .expect("DB_THREADS environment variable must be an integer");
-
-    // Make sure we have values for necessary email config variables
-    notifications::emailer::setup();
-    // Make sure we have values for necessary software build config variables
-    manager::software_builder::setup();
+    // Initialize configuration variables
+    config::initialize();
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));
@@ -67,7 +55,7 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     info!("Starting DB Connection Pool");
-    let pool = db::get_pool(db_url, db_threads);
+    let pool = db::get_pool(&*config::DATABASE_URL, *config::DB_THREADS);
 
     info!("Running DB schema migrations, if necessary");
     let migrations_result =
@@ -100,7 +88,7 @@ fn main() {
 
     info!("Starting app server");
     thread::spawn(move || {
-        app::run_app(app_send, pool, host, port).expect("Failed to start app server");
+        app::run_app(app_send, pool, (*config::HOST).clone(), (*config::PORT).clone()).expect("Failed to start app server");
     });
 
     // Receive app server controller
