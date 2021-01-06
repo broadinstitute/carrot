@@ -251,10 +251,29 @@ fn acknowledge_messages(pubsub_client: &PubsubClient, messages: &Vec<ReceivedMes
 fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, ParseMessageError> {
     // Convert message from base64 to utf8 (pubsub sends messages as base64
     // but rust strings are utf8)
-    let message_unicode = String::from_utf8(base64::decode(message)?)?;
+    let message_unicode: String = String::from_utf8(base64::decode(message)?)?;
     debug!("Received message: {}", message_unicode);
     // Parse as a GithubRunRequest
-    Ok(serde_json::from_str(&message_unicode)?)
+    let mut request: GithubRunRequest = serde_json::from_str(&message_unicode)?;
+    // If either of the input keys for docker images is an empty string, set it to null
+    match &request.test_input_key {
+        Some(key) => {
+            if key.is_empty() {
+                request.test_input_key = None;
+            }
+        },
+        None => {}
+    }
+    match &request.eval_input_key {
+        Some(key) => {
+            if key.is_empty() {
+                request.eval_input_key = None;
+            }
+        },
+        None => {}
+    }
+
+    Ok(request)
 }
 
 #[cfg(test)]
@@ -545,6 +564,33 @@ mod tests {
         let parsed_request = parse_github_request_from_message(&base64_message).unwrap();
         assert_eq!(parsed_request.test_name, "test_test");
         assert_eq!(parsed_request.test_input_key.unwrap(), "test_key");
+        assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
+        assert_eq!(parsed_request.software_name, "test_software");
+        assert_eq!(
+            parsed_request.commit,
+            "ca82a6dff817ec66f44342007202690a93763949"
+        );
+        assert_eq!(parsed_request.author, "me");
+    }
+
+    #[test]
+    fn test_parse_github_request_from_message_success_empty_key() {
+        let message_json = json!({
+            "test_name": "test_test",
+            "test_input_key": "",
+            "eval_input_key": "eval_key",
+            "software_name": "test_software",
+            "commit": "ca82a6dff817ec66f44342007202690a93763949",
+            "owner":"TestOwner",
+            "repo":"TestRepo",
+            "issue_number":4,
+            "author": "me"
+        });
+        let message_string = serde_json::to_string(&message_json).unwrap();
+        let base64_message = base64::encode(&message_string);
+        let parsed_request = parse_github_request_from_message(&base64_message).unwrap();
+        assert_eq!(parsed_request.test_name, "test_test");
+        assert_eq!(parsed_request.test_input_key.is_none(), true);
         assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
         assert_eq!(parsed_request.software_name, "test_software");
         assert_eq!(
