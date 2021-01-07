@@ -286,6 +286,9 @@ mod tests {
     use crate::unit_test_util::*;
     use chrono::Utc;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
 
     fn insert_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
         let new_software = NewSoftware {
@@ -422,13 +425,47 @@ mod tests {
         software_builds
     }
 
-    fn insert_run_software_version_with_software_version_id(
+    fn insert_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test2"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
+
+    fn insert_run_software_version_with_software_version_id_and_test_id(
         conn: &PgConnection,
         id: Uuid,
+        id2: Uuid,
         run_name: &str,
     ) -> RunSoftwareVersionData {
+
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: id2,
             name: String::from(run_name),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -500,15 +537,19 @@ mod tests {
         let test_software_build = insert_test_software_build(&conn);
         let (_, test_software_builds) = insert_software_builds_with_versions(&conn);
 
-        let test_run_software_version1 = insert_run_software_version_with_software_version_id(
+        let test = insert_test_test(&conn);
+
+        let test_run_software_version1 = insert_run_software_version_with_software_version_id_and_test_id(
             &conn,
             test_software_builds[0].software_version_id,
+            test.test_id,
             "run1",
         );
 
-        let test_run_software_version2 = insert_run_software_version_with_software_version_id(
+        let test_run_software_version2 = insert_run_software_version_with_software_version_id_and_test_id(
             &conn,
             test_software_build.software_version_id,
+            test.test_id,
             "run2",
         );
 

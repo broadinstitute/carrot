@@ -496,9 +496,40 @@ mod tests {
     use serde_json::json;
     use std::fs::read_to_string;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
-        create_test_run_with_results_and_test_id(conn, Uuid::new_v4())
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: None,
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
+            created_by: None,
+        };
+
+        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        create_test_run_with_results_and_test_id(conn, test.test_id)
     }
 
     fn create_test_run_with_results_and_test_id(
@@ -589,9 +620,17 @@ mod tests {
     }
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
             eval_wdl: format!("{}/eval", mockito::server_url()),
@@ -984,7 +1023,8 @@ mod tests {
     async fn run_test_failure_taken_name() {
         let pool = get_test_db_pool();
 
-        let test_test = create_test_test_with_template_id(&pool.get().unwrap(), Uuid::new_v4());
+        let test_template = create_test_template(&pool.get().unwrap());
+        let test_test = create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
         let test_run = create_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
         let test_input = json!({"in_greeted": "Cool Person"});

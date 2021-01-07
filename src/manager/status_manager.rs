@@ -811,6 +811,7 @@ mod tests {
         ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage,
         ServiceAccountKey,
     };
+    use crate::models::pipeline::{PipelineData, NewPipeline};
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -840,9 +841,17 @@ mod tests {
     }
 
     fn insert_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test_software_params", mockito::server_url()),
             eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
@@ -1016,7 +1025,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_result = insert_test_result(&conn);
         let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
         insert_test_template_result_with_template_id_and_result_id(
@@ -1116,7 +1126,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_result = insert_test_result(&conn);
         let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
         insert_test_template_result_with_template_id_and_result_id(
@@ -1176,7 +1187,9 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
-        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(
             &conn,
             test_test.test_id.clone(),
@@ -1223,7 +1236,9 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
-        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(
             &conn,
             test_test.test_id.clone(),
@@ -1263,7 +1278,9 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
-        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
         let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
             &conn,
             test_test.test_id.clone(),
@@ -1303,7 +1320,9 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert build, test, and run we'll use for testing
-        let test_test = insert_test_test_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
         let test_run = insert_test_run_with_test_id_and_status(
             &conn,
             test_test.test_id.clone(),
@@ -1394,7 +1413,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_build = insert_test_software_build(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -1443,7 +1463,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_build = insert_test_software_build(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -1486,7 +1507,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_build = insert_test_software_build(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -1529,7 +1551,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_software_version = insert_test_software_version(&conn);
         let test_build = insert_test_software_build_for_version_with_status(
             &conn,
@@ -1566,7 +1589,8 @@ mod tests {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
-        let template_id = Uuid::new_v4();
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
         let test_build = insert_test_software_build(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({

@@ -283,11 +283,31 @@ mod tests {
     use crate::models::template::TemplateData;
     use crate::unit_test_util::*;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
 
     fn insert_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
-            template_id: Uuid::new_v4(),
+            template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
@@ -305,9 +325,17 @@ mod tests {
     }
 
     fn insert_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtesttest"),
             eval_wdl: String::from("evalevaleval"),
@@ -384,7 +412,8 @@ mod tests {
     fn find_with_test_id() {
         let conn = get_test_db_connection();
 
-        insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        insert_test_tests_with_template_id(&conn, template.template_id);
         let test_test = insert_test_test(&conn);
 
         let test_query = TestQuery {
@@ -413,7 +442,8 @@ mod tests {
     fn find_with_template_id() {
         let conn = get_test_db_connection();
 
-        insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        insert_test_tests_with_template_id(&conn, template.template_id);
         let test_test = insert_test_test(&conn);
 
         let test_query = TestQuery {
@@ -442,7 +472,8 @@ mod tests {
     fn find_with_name() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let test_query = TestQuery {
             test_id: None,
@@ -501,7 +532,8 @@ mod tests {
     fn find_with_description() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let test_query = TestQuery {
             test_id: None,
@@ -529,7 +561,8 @@ mod tests {
     fn find_with_test_input_defaults() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let test_query = TestQuery {
             test_id: None,
@@ -557,7 +590,8 @@ mod tests {
     fn find_with_eval_input_defaults() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let test_query = TestQuery {
             test_id: None,
@@ -585,7 +619,8 @@ mod tests {
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let test_query = TestQuery {
             test_id: None,
@@ -635,7 +670,8 @@ mod tests {
     fn find_with_created_before_and_created_after() {
         let conn = get_test_db_connection();
 
-        insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        insert_test_tests_with_template_id(&conn, template.template_id);
 
         let test_query = TestQuery {
             test_id: None,
@@ -682,7 +718,8 @@ mod tests {
     fn find_id_by_name_exists() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let found_id = TestData::find_id_by_name(&conn, &test_tests[0].name).unwrap();
 
@@ -693,7 +730,8 @@ mod tests {
     fn find_name_by_id_exists() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let found_name = TestData::find_name_by_id(&conn, test_tests[0].test_id).unwrap();
 
@@ -782,7 +820,8 @@ mod tests {
     fn update_failure_same_name() {
         let conn = get_test_db_connection();
 
-        let test_tests = insert_test_tests_with_template_id(&conn, Uuid::new_v4());
+        let template = insert_test_template(&conn);
+        let test_tests = insert_test_tests_with_template_id(&conn, template.template_id);
 
         let changes = TestChangeset {
             name: Some(test_tests[0].name.clone()),

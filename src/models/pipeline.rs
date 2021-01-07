@@ -62,6 +62,12 @@ pub struct PipelineChangeset {
     pub name: Option<String>,
     pub description: Option<String>,
 }
+/*
+/// An error encountered while attempting to update a pipeline row
+pub enum UpdateError {
+    DB(diesel::result::error),
+
+}*/
 
 impl PipelineData {
     /// Queries the DB for a pipeline with the specified id
@@ -189,6 +195,14 @@ impl PipelineData {
             .set(params)
             .get_result(conn)
     }
+
+    pub fn delete(
+        conn: &PgConnection,
+        id: Uuid
+    ) -> Result<usize, diesel::result::Error> {
+        diesel::delete(pipeline.filter(pipeline_id.eq(id)))
+            .execute(conn)
+    }
 }
 
 #[cfg(test)]
@@ -197,6 +211,8 @@ mod tests {
     use super::*;
     use crate::unit_test_util::*;
     use uuid::Uuid;
+    use crate::custom_sql_types::EntityTypeEnum::Pipeline;
+    use crate::models::template::{TemplateData, NewTemplate};
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
         let new_pipeline = NewPipeline {
@@ -206,6 +222,19 @@ mod tests {
         };
 
         PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+    }
+
+    fn insert_test_template_with_pipeline_id(conn: &PgConnection, id: Uuid) -> TemplateData {
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template"),
+            pipeline_id: id,
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtesttest"),
+            eval_wdl: String::from("evalevaleval"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TemplateData::create(conn, new_template).expect("Failed inserting test template")
     }
 
     fn insert_test_pipelines(conn: &PgConnection) -> Vec<PipelineData> {
@@ -517,5 +546,32 @@ mod tests {
                 ),
             )
         ));
+    }
+
+    #[test]
+    fn delete_success() {
+        let conn = get_test_db_connection();
+
+        let test_pipeline = insert_test_pipeline(&conn);
+
+        let delete_result = PipelineData::delete(&conn, test_pipeline.pipeline_id).unwrap();
+
+        assert_eq!(delete_result, 1);
+
+        let deleted_pipeline = PipelineData::find_by_id(&conn, test_pipeline.pipeline_id);
+
+        assert!(matches!(deleted_pipeline, Err(diesel::result::Error::NotFound)));
+    }
+
+    #[test]
+    fn delete_failure_foreign_key() {
+        let conn = get_test_db_connection();
+
+        let test_pipeline = insert_test_pipeline(&conn);
+        insert_test_template_with_pipeline_id(&conn, test_pipeline.pipeline_id);
+
+        let delete_result = PipelineData::delete(&conn, test_pipeline.pipeline_id);
+
+        assert!(matches!(delete_result, Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::ForeignKeyViolation, _))));
     }
 }

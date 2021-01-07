@@ -841,11 +841,20 @@ mod tests {
     use std::fs::read_to_string;
     use std::path::Path;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
 
     fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test_no_software_params", mockito::server_url()),
             eval_wdl: format!("{}/eval_no_software_params", mockito::server_url()),
@@ -856,9 +865,17 @@ mod tests {
     }
 
     fn insert_test_template_software_params(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test_software_params", mockito::server_url()),
             eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
@@ -869,6 +886,7 @@ mod tests {
     }
 
     fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+
         let new_test = NewTest {
             name: String::from("Kevin's test test"),
             template_id: id,
@@ -893,8 +911,11 @@ mod tests {
     }
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
+        let template = insert_test_template_no_software_params(conn);
+        let test = insert_test_test_with_template_id(conn, template.template_id);
+
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -1339,9 +1360,12 @@ mod tests {
     fn test_create_run_in_db_success() {
         let conn = get_test_db_connection();
 
+        let template = insert_test_template_no_software_params(&conn);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+
         let run = create_run_in_db(
             &conn,
-            Uuid::new_v4(),
+            test.test_id,
             String::from("Kevin's test run"),
             json!({"test":"1"}),
             json!({"eval":"2"}),

@@ -194,10 +194,43 @@ mod tests {
     use crate::unit_test_util::*;
     use chrono::Utc;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
 
     fn insert_test_run_is_from_github(conn: &PgConnection) -> RunIsFromGithubData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test2"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -241,8 +274,38 @@ mod tests {
     fn insert_test_runs(conn: &PgConnection) -> Vec<RunData> {
         let mut runs = Vec::new();
 
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("name1"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
@@ -256,7 +319,7 @@ mod tests {
         runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
 
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("name2"),
             status: RunStatusEnum::TestSubmitted,
             test_input: serde_json::from_str("{}").unwrap(),
@@ -270,7 +333,7 @@ mod tests {
         runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
 
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("name3"),
             status: RunStatusEnum::Building,
             test_input: serde_json::from_str("{}").unwrap(),

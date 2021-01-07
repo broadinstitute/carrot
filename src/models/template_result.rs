@@ -208,11 +208,47 @@ mod tests {
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use uuid::Uuid;
+    use crate::models::pipeline::{PipelineData, NewPipeline};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::result::{NewResult, ResultData};
+    use crate::custom_sql_types::ResultTypeEnum;
+
+    fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+    }
 
     fn insert_test_template_result(conn: &PgConnection) -> TemplateResultData {
+        let pipeline = insert_test_pipeline(conn);
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result2"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         let new_template_result = NewTemplateResult {
-            template_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            template_id: template.template_id,
+            result_id: result.result_id,
             result_key: String::from("TestKey"),
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -224,9 +260,31 @@ mod tests {
     fn insert_test_template_results(conn: &PgConnection) -> Vec<TemplateResultData> {
         let mut template_results = Vec::new();
 
+        let pipeline = insert_test_pipeline(conn);
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         let new_template_result = NewTemplateResult {
-            template_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            template_id: template.template_id,
+            result_id: result.result_id,
             result_key: String::from("TestKey"),
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -236,9 +294,29 @@ mod tests {
                 .expect("Failed inserting test template_result"),
         );
 
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template3"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result3"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         let new_template_result = NewTemplateResult {
-            template_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            template_id: template.template_id,
+            result_id: result.result_id,
             result_key: String::from("TestKey2"),
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -248,9 +326,29 @@ mod tests {
                 .expect("Failed inserting test template_result"),
         );
 
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template4"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin4@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result4"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin4@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         let new_template_result = NewTemplateResult {
-            template_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            template_id: template.template_id,
+            result_id: result.result_id,
             result_key: String::from("TestKey3"),
             created_by: None,
         };

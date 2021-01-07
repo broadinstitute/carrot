@@ -278,11 +278,50 @@ mod tests {
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::result::{NewResult, ResultData};
+    use crate::custom_sql_types::ResultTypeEnum;
+
+    fn create_test_template_and_result(conn: &PgConnection) -> (TemplateData, ResultData) {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result2"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        (template, result)
+    }
 
     fn create_test_template_result(conn: &PgConnection) -> TemplateResultData {
+
+        let (template, result) = create_test_template_and_result(conn);
+
         let new_template_result = NewTemplateResult {
-            template_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            template_id: template.template_id,
+            result_id: result.result_id,
             result_key: String::from("TestKey"),
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -448,6 +487,9 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
+
+        let (template, result) = create_test_template_and_result(&pool.get().unwrap());
+
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let new_template_result = NewTemplateResultIncomplete {
@@ -458,8 +500,8 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!(
                 "/templates/{}/results/{}",
-                Uuid::new_v4(),
-                Uuid::new_v4()
+                template.template_id,
+                result.result_id
             ))
             .set_json(&new_template_result)
             .to_request();

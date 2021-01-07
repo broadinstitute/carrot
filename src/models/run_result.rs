@@ -191,11 +191,77 @@ mod tests {
     use crate::unit_test_util::*;
     use std::collections::HashSet;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::custom_sql_types::{RunStatusEnum, ResultTypeEnum};
+    use chrono::Utc;
+    use crate::models::result::{NewResult, ResultData};
+
+
+    fn insert_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test2"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing2")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
 
     fn insert_test_run_result(conn: &PgConnection) -> RunResultData {
+
+        let test = insert_test_test(conn);
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run2"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin2@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result2"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         let new_run_result = NewRunResult {
-            run_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            run_id: run.run_id,
+            result_id: result.result_id,
             value: String::from("TestVal"),
         };
 
@@ -205,21 +271,92 @@ mod tests {
     fn insert_test_run_results(conn: &PgConnection) -> Vec<RunResultData> {
         let mut run_results = Vec::new();
 
+        let test = insert_test_test(conn);
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         run_results.push(NewRunResult {
-            run_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            run_id: run.run_id,
+            result_id: result.result_id,
             value: String::from("TestVal"),
         });
 
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run3"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin3@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result3"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         run_results.push(NewRunResult {
-            run_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            run_id: run.run_id,
+            result_id: result.result_id,
             value: String::from("TestVal2"),
         });
 
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run4"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin4@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result4"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin4@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
         run_results.push(NewRunResult {
-            run_id: Uuid::new_v4(),
-            result_id: Uuid::new_v4(),
+            run_id: run.run_id,
+            result_id: result.result_id,
             value: String::from("TestVal3"),
         });
 

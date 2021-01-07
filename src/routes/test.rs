@@ -244,11 +244,31 @@ mod tests {
     use std::fs::read_to_string;
     use std::str::from_utf8;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
 
     fn create_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: None,
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
+            created_by: None,
+        };
+
+        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
-            template_id: Uuid::new_v4(),
+            template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
@@ -259,9 +279,17 @@ mod tests {
     }
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
             eval_wdl: format!("{}/eval", mockito::server_url()),
@@ -402,11 +430,14 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
+
+        let template = create_test_template(&pool.get().unwrap());
+
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let new_test = NewTest {
             name: String::from("Kevin's test"),
-            template_id: Uuid::new_v4(),
+            template_id: template.template_id,
             description: Some(String::from("Kevin's test description")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),

@@ -264,9 +264,17 @@ mod tests {
     use uuid::Uuid;
 
     fn insert_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtest"),
             eval_wdl: String::from("evaltest"),
@@ -366,7 +374,8 @@ mod tests {
     fn find_with_template_id() {
         let conn = get_test_db_connection();
 
-        insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
         let test_template = insert_test_template(&conn);
 
         let test_query = TemplateQuery {
@@ -396,7 +405,8 @@ mod tests {
     fn find_with_pipeline_id() {
         let conn = get_test_db_connection();
 
-        insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
         let test_template = insert_test_template(&conn);
 
         let test_query = TemplateQuery {
@@ -426,7 +436,8 @@ mod tests {
     fn find_with_name() {
         let conn = get_test_db_connection();
 
-        let test_templates = insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let test_templates = insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let test_query = TemplateQuery {
             template_id: None,
@@ -487,7 +498,8 @@ mod tests {
     fn find_with_description() {
         let conn = get_test_db_connection();
 
-        let test_templates = insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let test_templates = insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let test_query = TemplateQuery {
             template_id: None,
@@ -516,7 +528,8 @@ mod tests {
     fn find_with_test_wdl() {
         let conn = get_test_db_connection();
 
-        let test_templates = insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let test_templates = insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let test_query = TemplateQuery {
             template_id: None,
@@ -545,7 +558,8 @@ mod tests {
     fn find_with_eval_wdl() {
         let conn = get_test_db_connection();
 
-        let test_templates = insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let test_templates = insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let test_query = TemplateQuery {
             template_id: None,
@@ -574,7 +588,8 @@ mod tests {
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
 
-        let test_templates = insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let test_templates = insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let test_query = TemplateQuery {
             template_id: None,
@@ -626,7 +641,8 @@ mod tests {
     fn find_with_created_before_and_created_after() {
         let conn = get_test_db_connection();
 
-        insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let test_query = TemplateQuery {
             template_id: None,
@@ -747,7 +763,8 @@ mod tests {
     fn update_failure_same_name() {
         let conn = get_test_db_connection();
 
-        let test_templates = insert_test_templates_with_pipeline_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let test_templates = insert_test_templates_with_pipeline_id(&conn, pipeline.pipeline_id);
 
         let changes = TemplateChangeset {
             name: Some(test_templates[0].name.clone()),

@@ -641,9 +641,17 @@ mod tests {
     }
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline2"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtesttest"),
             eval_wdl: String::from("evalevaleval"),
@@ -654,9 +662,28 @@ mod tests {
     }
 
     fn create_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline3"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template3"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtesttest"),
+            eval_wdl: String::from("evalevaleval"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
-            template_id: Uuid::new_v4(),
+            template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),

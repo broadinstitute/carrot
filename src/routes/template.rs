@@ -238,11 +238,25 @@ mod tests {
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+
+    fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+    }
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
+
+        let pipeline = insert_test_pipeline(conn);
+
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtesttest"),
             eval_wdl: String::from("evalevaleval"),
@@ -372,11 +386,14 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
+
+        let pipeline = insert_test_pipeline(&pool.get().unwrap());
+
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin's test description")),
             test_wdl: String::from("testwdlwdlwdlwdlwdl"),
             eval_wdl: String::from("evalwdlwdlwdlwdlwdl"),
@@ -422,7 +439,7 @@ mod tests {
 
         let new_template = NewTemplate {
             name: template.name.clone(),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: template.pipeline_id,
             description: Some(String::from("Kevin's test description")),
             test_wdl: String::from("testwdlwdlwdlwdlwdl"),
             eval_wdl: String::from("evalwdlwdlwdlwdlwdl"),

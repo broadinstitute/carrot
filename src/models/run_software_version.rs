@@ -169,10 +169,45 @@ mod tests {
     use chrono::Utc;
     use std::cmp::Ordering;
     use uuid::Uuid;
+    use crate::models::pipeline::{PipelineData, NewPipeline};
+
+    fn insert_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test2"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing2")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
 
     fn insert_test_run_software_version(conn: &PgConnection) -> RunSoftwareVersionData {
+        let test = insert_test_test(conn);
+
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -215,8 +250,10 @@ mod tests {
     fn insert_test_run_software_versions(conn: &PgConnection) -> Vec<RunSoftwareVersionData> {
         let mut run_software_versions = Vec::new();
 
+        let test = insert_test_test(conn);
+
         let new_run = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("Kevin's test run2"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -230,7 +267,7 @@ mod tests {
         let new_run = RunData::create(&conn, new_run).expect("Failed to insert run");
 
         let new_run2 = NewRun {
-            test_id: Uuid::new_v4(),
+            test_id: test.test_id,
             name: String::from("Kevin's test run3"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
