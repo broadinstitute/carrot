@@ -8,6 +8,7 @@ use crate::models::result::{NewResult, ResultChangeset, ResultData, ResultQuery}
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
+use serde_json::json;
 use uuid::Uuid;
 
 /// Handles requests to /results/{id} for retrieving result info by result_id
@@ -214,6 +215,83 @@ async fn update(
     })
 }
 
+/// Handles DELETE requests to /results/{id} for deleting result rows by result_id
+///
+/// This function is called by Actix-Web when a delete request is made to the /results/{id}
+/// mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
+/// delete the specified result, returning the number or rows deleted or an error message if some
+/// error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+    // Pull id param from path
+    let id = &req.match_info().get("id").unwrap();
+
+    // Parse ID into Uuid
+    let id = match Uuid::parse_str(id) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                title: "ID formatted incorrectly".to_string(),
+                status: 400,
+                detail: "ID must be formatted as a Uuid".to_string(),
+            }));
+        }
+    };
+
+    //Query DB for pipeline in new thread
+    web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match ResultData::delete(&conn, id) {
+            Ok(delete_count) => Ok(delete_count),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await
+    // If there is no error, verify that a row was deleted
+    .map(|results| {
+        if results > 0 {
+            let message = format!("Successfully deleted {} row", results);
+            HttpResponse::Ok().json(json!({ "message": message }))
+        } else {
+            HttpResponse::NotFound().json(ErrorBody {
+                title: "No result found".to_string(),
+                status: 404,
+                detail: "No result found for the specified id".to_string(),
+            })
+        }
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        match e {
+            // If no template is found, return a 404
+            BlockingError::Error(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            )) => HttpResponse::Forbidden().json(ErrorBody {
+                title: "Cannot delete".to_string(),
+                status: 403,
+                detail: "Cannot delete a result if there is a template_result mapped to it"
+                    .to_string(),
+            }),
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: "Error while attempting to delete requested result from DB".to_string(),
+            }),
+        }
+    })
+}
+
 /// Attaches the REST mappings in this file to a service config
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
@@ -222,7 +300,8 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/results/{id}")
             .route(web::get().to(find_by_id))
-            .route(web::put().to(update)),
+            .route(web::put().to(update))
+            .route(web::delete().to(delete_by_id)),
     );
     cfg.service(
         web::resource("/results")
@@ -235,9 +314,13 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 mod tests {
     use super::*;
     use crate::custom_sql_types::ResultTypeEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
+    use serde_json::Value;
     use uuid::Uuid;
 
     fn create_test_result(conn: &PgConnection) -> ResultData {
@@ -249,6 +332,42 @@ mod tests {
         };
 
         ResultData::create(conn, new_result).expect("Failed inserting test result")
+    }
+
+    fn insert_test_template_result_with_result_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> TemplateResultData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: id,
+            result_key: String::from("TestKey"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template_result")
     }
 
     #[actix_rt::test]
@@ -533,5 +652,102 @@ mod tests {
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
         assert_eq!(error_body.detail, "Error while attempting to update result");
+    }
+
+    #[actix_rt::test]
+    async fn delete_success() {
+        let pool = get_test_db_pool();
+
+        let result = create_test_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/results/{}", result.result_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let message: Value = serde_json::from_slice(&result).unwrap();
+
+        let expected_message = json!({
+            "message": "Successfully deleted 1 row"
+        });
+
+        assert_eq!(message, expected_message)
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_no_result() {
+        let pool = get_test_db_pool();
+
+        let result = create_test_result(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/results/{}", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No result found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No result found for the specified id");
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_not_allowed() {
+        let pool = get_test_db_pool();
+
+        let result = create_test_result(&pool.get().unwrap());
+        let template =
+            insert_test_template_result_with_result_id(&pool.get().unwrap(), result.result_id);
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/results/{}", result.result_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Cannot delete");
+        assert_eq!(error_body.status, 403);
+        assert_eq!(
+            error_body.detail,
+            "Cannot delete a result if there is a template_result mapped to it"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri("/results/123456789")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 }

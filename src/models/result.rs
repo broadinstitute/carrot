@@ -201,12 +201,24 @@ impl ResultData {
             .set(params)
             .get_result(conn)
     }
+
+    /// Deletes a specific result in the DB
+    ///
+    /// Deletes the result row in the DB using `conn` specified by `id`
+    /// Returns a result containing either the number of rows deleted or an error if the delete
+    /// fails for some reason
+    pub fn delete(conn: &PgConnection, id: Uuid) -> Result<usize, diesel::result::Error> {
+        diesel::delete(result.filter(result_id.eq(id))).execute(conn)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::unit_test_util::*;
     use uuid::Uuid;
 
@@ -252,6 +264,42 @@ mod tests {
         results.push(ResultData::create(conn, new_result).expect("Failed inserting test result"));
 
         results
+    }
+
+    fn insert_test_template_result_with_result_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> TemplateResultData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: id,
+            result_key: String::from("TestKey"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template_result")
     }
 
     #[test]
@@ -549,6 +597,44 @@ mod tests {
             Err(
                 diesel::result::Error::DatabaseError(
                     diesel::result::DatabaseErrorKind::UniqueViolation,
+                    _,
+                ),
+            )
+        ));
+    }
+
+    #[test]
+    fn delete_success() {
+        let conn = get_test_db_connection();
+
+        let test_result = insert_test_result(&conn);
+
+        let delete_result = ResultData::delete(&conn, test_result.result_id).unwrap();
+
+        assert_eq!(delete_result, 1);
+
+        let deleted_result = ResultData::find_by_id(&conn, test_result.result_id);
+
+        assert!(matches!(
+            deleted_result,
+            Err(diesel::result::Error::NotFound)
+        ));
+    }
+
+    #[test]
+    fn delete_failure_foreign_key() {
+        let conn = get_test_db_connection();
+
+        let test_result = insert_test_result(&conn);
+        insert_test_template_result_with_result_id(&conn, test_result.result_id);
+
+        let delete_result = ResultData::delete(&conn, test_result.result_id);
+
+        assert!(matches!(
+            delete_result,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
                     _,
                 ),
             )

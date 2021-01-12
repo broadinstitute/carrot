@@ -790,6 +790,7 @@ mod tests {
     use crate::manager::status_manager::{
         check_and_update_build_status, check_and_update_run_status, fill_results,
     };
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
@@ -811,7 +812,6 @@ mod tests {
         ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage,
         ServiceAccountKey,
     };
-    use crate::models::pipeline::{PipelineData, NewPipeline};
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -847,7 +847,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),

@@ -107,7 +107,12 @@ pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
 /// This function basically exists to reduce the number of places where an image url is built, so if
 /// we ever need to change it, we don't have to do it in a bunch of places in the code
 pub fn get_formatted_image_url(software_name: &str, commit_hash: &str) -> String {
-    format!("{}/{}:{}", *config::IMAGE_REGISTRY_HOST, software_name, commit_hash)
+    format!(
+        "{}/{}:{}",
+        *config::IMAGE_REGISTRY_HOST,
+        software_name,
+        commit_hash
+    )
 }
 
 /// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel

@@ -182,23 +182,32 @@ impl RunResultData {
             .values(&params)
             .get_results(conn)
     }
+
+    /// Deletes run_results from the DB that are mapped to the run specified by `id`
+    ///
+    /// Returns either the number of run_results deleted, or an error if something goes
+    /// wrong during the delete
+    pub fn delete_by_run_id(conn: &PgConnection, id: Uuid) -> Result<usize, diesel::result::Error> {
+        diesel::delete(run_result)
+            .filter(run_id.eq(id))
+            .execute(conn)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::unit_test_util::*;
-    use std::collections::HashSet;
-    use uuid::Uuid;
+    use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::result::{NewResult, ResultData};
+    use crate::models::run::{NewRun, RunData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
-    use crate::models::run::{NewRun, RunData};
-    use crate::custom_sql_types::{RunStatusEnum, ResultTypeEnum};
+    use crate::unit_test_util::*;
     use chrono::Utc;
-    use crate::models::result::{NewResult, ResultData};
-
+    use std::collections::HashSet;
+    use uuid::Uuid;
 
     fn insert_test_test(conn: &PgConnection) -> TestData {
         let new_pipeline = NewPipeline {
@@ -207,7 +216,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template2"),
@@ -218,7 +228,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test2"),
@@ -233,7 +244,6 @@ mod tests {
     }
 
     fn insert_test_run_result(conn: &PgConnection) -> RunResultData {
-
         let test = insert_test_test(conn);
 
         let new_run = NewRun {
@@ -622,6 +632,28 @@ mod tests {
                     _,
                 ),
             )
+        ));
+    }
+
+    #[test]
+    fn delete_success() {
+        let conn = get_test_db_connection();
+
+        let test_run_result = insert_test_run_result(&conn);
+
+        let delete_result = RunResultData::delete_by_run_id(&conn, test_run_result.run_id).unwrap();
+
+        assert_eq!(delete_result, 1);
+
+        let test_run_result2 = RunResultData::find_by_run_and_result(
+            &conn,
+            test_run_result.run_id.clone(),
+            test_run_result.result_id.clone(),
+        );
+
+        assert!(matches!(
+            test_run_result2,
+            Err(diesel::result::Error::NotFound)
         ));
     }
 }

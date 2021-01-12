@@ -6,7 +6,7 @@
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
-use crate::models::run::{RunQuery, RunWithResultData};
+use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultData};
 use crate::routes::error_body::ErrorBody;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
@@ -14,6 +14,7 @@ use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResp
 use chrono::NaiveDateTime;
 use log::error;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -464,6 +465,80 @@ async fn run_for_test(
     }
 }
 
+/// Handles DELETE requests to /runs/{id} for deleting runs
+///
+/// This function is called by Actix-Web when a delete request is made to the /runs/{id} mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
+/// delete the specified run, returning the number or rows deleted or an error message if some
+/// error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+    // Pull id params from path
+    let id = &req.match_info().get("id").unwrap();
+
+    // Parse ID into Uuid
+    let id = match Uuid::parse_str(id) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                title: "ID formatted incorrectly".to_string(),
+                status: 400,
+                detail: "ID must be formatted as a Uuid".to_string(),
+            }));
+        }
+    };
+
+    //Query DB for pipeline in new thread
+    web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match RunData::delete(&conn, id) {
+            Ok(delete_count) => Ok(delete_count),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await
+    // If there is no error, verify that a row was deleted
+    .map(|results| {
+        if results > 0 {
+            let message = format!("Successfully deleted {} row", results);
+            HttpResponse::Ok().json(json!({ "message": message }))
+        } else {
+            HttpResponse::NotFound().json(ErrorBody {
+                title: "No run found".to_string(),
+                status: 404,
+                detail: "No run found for the specified id".to_string(),
+            })
+        }
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        match e {
+            // If the run is not allowed to be deleted, return a forbidden status
+            BlockingError::Error(DeleteError::Prohibited(_)) => {
+                HttpResponse::Forbidden().json(ErrorBody {
+                    title: "Cannot delete".to_string(),
+                    status: 403,
+                    detail: "Cannot delete a run if it has a non-failed status".to_string(),
+                })
+            },
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: "Error while attempting to delete requested run from DB".to_string(),
+            }),
+        }
+    })
+}
+
 /// Attaches the REST mappings in this file to a service config
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
@@ -474,7 +549,11 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route(web::get().to(find_for_test))
             .route(web::post().to(run_for_test)),
     );
-    cfg.service(web::resource("/runs/{id}").route(web::get().to(find_by_id)));
+    cfg.service(
+        web::resource("/runs/{id}")
+            .route(web::get().to(find_by_id))
+            .route(web::delete().to(delete_by_id)),
+    );
     cfg.service(web::resource("/templates/{id}/runs").route(web::get().to(find_for_template)));
     cfg.service(web::resource("/pipelines/{id}/runs").route(web::get().to(find_for_pipeline)));
 }
@@ -483,6 +562,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 mod tests {
     use super::*;
     use crate::custom_sql_types::ResultTypeEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_result::{NewRunResult, RunResultData};
@@ -496,7 +576,6 @@ mod tests {
     use serde_json::json;
     use std::fs::read_to_string;
     use uuid::Uuid;
-    use crate::models::pipeline::{NewPipeline, PipelineData};
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         let new_pipeline = NewPipeline {
@@ -505,7 +584,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test template2"),
@@ -626,7 +706,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
@@ -658,6 +739,100 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
+            test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
+            eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn create_test_run_with_nonfailed_state(conn: &PgConnection) -> RunData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: pipeline.pipeline_id,
+            description: None,
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
+            created_by: None,
+        };
+
+        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: template.template_id,
+            description: None,
+            test_input_defaults: Some(json!({"in_greeting": "Yo"})),
+            eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
+            created_by: None,
+        };
+
+        let test = TestData::create(&conn, new_test).expect("Failed to insert test");
+
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: test.test_id,
+            status: RunStatusEnum::TestSubmitted,
+            test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
+            eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn create_test_run_with_failed_state(conn: &PgConnection) -> RunData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template"),
+            pipeline_id: pipeline.pipeline_id,
+            description: None,
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
+            created_by: None,
+        };
+
+        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's test test"),
+            template_id: template.template_id,
+            description: None,
+            test_input_defaults: Some(json!({"in_greeting": "Yo"})),
+            eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
+            created_by: None,
+        };
+
+        let test = TestData::create(&conn, new_test).expect("Failed to insert test");
+
+        let new_run = NewRun {
+            name: String::from("Kevin's Run"),
+            test_id: test.test_id,
+            status: RunStatusEnum::TestFailed,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
             test_cromwell_job_id: Some(String::from("123456789")),
@@ -1024,7 +1199,8 @@ mod tests {
         let pool = get_test_db_pool();
 
         let test_template = create_test_template(&pool.get().unwrap());
-        let test_test = create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
+        let test_test =
+            create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
         let test_run = create_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
         let test_input = json!({"in_greeted": "Cool Person"});
@@ -1065,5 +1241,100 @@ mod tests {
                 detail: "If a custom run name is specified, it must be unique.".to_string(),
             }
         );
+    }
+
+    #[actix_rt::test]
+    async fn delete_success() {
+        let pool = get_test_db_pool();
+
+        let run = create_test_run_with_failed_state(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/runs/{}", run.run_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let message: Value = serde_json::from_slice(&result).unwrap();
+
+        let expected_message = json!({
+            "message": "Successfully deleted 1 row"
+        });
+
+        assert_eq!(message, expected_message)
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_no_run() {
+        let pool = get_test_db_pool();
+
+        let run = create_test_run_with_failed_state(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/runs/{}", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No run found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No run found for the specified id");
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_not_allowed() {
+        let pool = get_test_db_pool();
+
+        let run = create_test_run_with_nonfailed_state(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/runs/{}", run.run_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Cannot delete");
+        assert_eq!(error_body.status, 403);
+        assert_eq!(
+            error_body.detail,
+            "Cannot delete a run if it has a non-failed status"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri("/runs/123456789")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 }

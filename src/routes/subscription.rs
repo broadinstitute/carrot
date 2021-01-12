@@ -647,7 +647,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
@@ -668,7 +669,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template3"),
@@ -679,7 +681,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test"),

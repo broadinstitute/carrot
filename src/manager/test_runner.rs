@@ -824,6 +824,7 @@ mod tests {
         format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building,
         start_run_eval, start_run_test, Error, RunBuildStatus,
     };
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
@@ -841,7 +842,6 @@ mod tests {
     use std::fs::read_to_string;
     use std::path::Path;
     use uuid::Uuid;
-    use crate::models::pipeline::{NewPipeline, PipelineData};
 
     fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {
         let new_pipeline = NewPipeline {
@@ -850,7 +850,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
@@ -871,7 +872,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
@@ -886,7 +888,6 @@ mod tests {
     }
 
     fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
-
         let new_test = NewTest {
             name: String::from("Kevin's test test"),
             template_id: id,

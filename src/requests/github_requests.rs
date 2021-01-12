@@ -60,7 +60,10 @@ pub async fn post_comment(
             "{}/repos/{}/{}/issues/{}/comments",
             base_address, owner, repo, issue_number
         ))
-        .basic_auth(&*config::GITHUB_CLIENT_ID, Some(&*config::GITHUB_CLIENT_TOKEN))
+        .basic_auth(
+            &*config::GITHUB_CLIENT_ID,
+            Some(&*config::GITHUB_CLIENT_TOKEN),
+        )
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "Carrot-App")
         .send_json(&body_json)

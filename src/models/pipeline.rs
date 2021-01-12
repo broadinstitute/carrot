@@ -62,12 +62,6 @@ pub struct PipelineChangeset {
     pub name: Option<String>,
     pub description: Option<String>,
 }
-/*
-/// An error encountered while attempting to update a pipeline row
-pub enum UpdateError {
-    DB(diesel::result::error),
-
-}*/
 
 impl PipelineData {
     /// Queries the DB for a pipeline with the specified id
@@ -196,12 +190,13 @@ impl PipelineData {
             .get_result(conn)
     }
 
-    pub fn delete(
-        conn: &PgConnection,
-        id: Uuid
-    ) -> Result<usize, diesel::result::Error> {
-        diesel::delete(pipeline.filter(pipeline_id.eq(id)))
-            .execute(conn)
+    /// Deletes a specific pipeline in the DB
+    ///
+    /// Deletes the pipeline row in the DB using `conn` specified by `id`
+    /// Returns a result containing either the number of rows deleted or an error if the delete
+    /// fails for some reason
+    pub fn delete(conn: &PgConnection, id: Uuid) -> Result<usize, diesel::result::Error> {
+        diesel::delete(pipeline.filter(pipeline_id.eq(id))).execute(conn)
     }
 }
 
@@ -209,10 +204,10 @@ impl PipelineData {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::EntityTypeEnum::Pipeline;
+    use crate::models::template::{NewTemplate, TemplateData};
     use crate::unit_test_util::*;
     use uuid::Uuid;
-    use crate::custom_sql_types::EntityTypeEnum::Pipeline;
-    use crate::models::template::{TemplateData, NewTemplate};
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
         let new_pipeline = NewPipeline {
@@ -560,7 +555,10 @@ mod tests {
 
         let deleted_pipeline = PipelineData::find_by_id(&conn, test_pipeline.pipeline_id);
 
-        assert!(matches!(deleted_pipeline, Err(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            deleted_pipeline,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 
     #[test]
@@ -572,6 +570,14 @@ mod tests {
 
         let delete_result = PipelineData::delete(&conn, test_pipeline.pipeline_id);
 
-        assert!(matches!(delete_result, Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::ForeignKeyViolation, _))));
+        assert!(matches!(
+            delete_result,
+            Err(
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                    _,
+                ),
+            )
+        ));
     }
 }

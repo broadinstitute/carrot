@@ -190,13 +190,13 @@ mod tests {
 
     use super::*;
     use crate::custom_sql_types::RunStatusEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use chrono::Utc;
     use uuid::Uuid;
-    use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::template::{NewTemplate, TemplateData};
-    use crate::models::test::{NewTest, TestData};
 
     fn insert_test_run_is_from_github(conn: &PgConnection) -> RunIsFromGithubData {
         let new_pipeline = NewPipeline {
@@ -205,7 +205,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template2"),
@@ -216,7 +217,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test2"),
@@ -280,7 +282,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
@@ -291,7 +294,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test"),

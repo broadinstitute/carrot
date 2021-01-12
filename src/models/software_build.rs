@@ -279,16 +279,16 @@ mod tests {
 
     use super::*;
     use crate::custom_sql_types::RunStatusEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use chrono::Utc;
     use uuid::Uuid;
-    use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::template::{NewTemplate, TemplateData};
-    use crate::models::test::{NewTest, TestData};
 
     fn insert_test_software_build(conn: &PgConnection) -> SoftwareBuildData {
         let new_software = NewSoftware {
@@ -432,7 +432,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template2"),
@@ -443,7 +444,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test2"),
@@ -463,7 +465,6 @@ mod tests {
         id2: Uuid,
         run_name: &str,
     ) -> RunSoftwareVersionData {
-
         let new_run = NewRun {
             test_id: id2,
             name: String::from(run_name),
@@ -539,19 +540,21 @@ mod tests {
 
         let test = insert_test_test(&conn);
 
-        let test_run_software_version1 = insert_run_software_version_with_software_version_id_and_test_id(
-            &conn,
-            test_software_builds[0].software_version_id,
-            test.test_id,
-            "run1",
-        );
+        let test_run_software_version1 =
+            insert_run_software_version_with_software_version_id_and_test_id(
+                &conn,
+                test_software_builds[0].software_version_id,
+                test.test_id,
+                "run1",
+            );
 
-        let test_run_software_version2 = insert_run_software_version_with_software_version_id_and_test_id(
-            &conn,
-            test_software_build.software_version_id,
-            test.test_id,
-            "run2",
-        );
+        let test_run_software_version2 =
+            insert_run_software_version_with_software_version_id_and_test_id(
+                &conn,
+                test_software_build.software_version_id,
+                test.test_id,
+                "run2",
+            );
 
         let found_software_builds = SoftwareBuildData::find_most_recent_builds_for_run(
             &conn,

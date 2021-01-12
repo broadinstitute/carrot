@@ -153,6 +153,16 @@ impl RunSoftwareVersionData {
             .values(&params)
             .get_result(conn)
     }
+
+    /// Deletes run_software_versions from the DB that are mapped to the run specified by `id`
+    ///
+    /// Returns either the number of run_software_versions deleted, or an error if something goes
+    /// wrong during the delete
+    pub fn delete_by_run_id(conn: &PgConnection, id: Uuid) -> Result<usize, diesel::result::Error> {
+        diesel::delete(run_software_version)
+            .filter(run_id.eq(id))
+            .execute(conn)
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +170,7 @@ mod tests {
 
     use super::*;
     use crate::custom_sql_types::RunStatusEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
@@ -169,7 +180,6 @@ mod tests {
     use chrono::Utc;
     use std::cmp::Ordering;
     use uuid::Uuid;
-    use crate::models::pipeline::{PipelineData, NewPipeline};
 
     fn insert_test_test(conn: &PgConnection) -> TestData {
         let new_pipeline = NewPipeline {
@@ -178,7 +188,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let pipeline = PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template2"),
@@ -189,7 +200,8 @@ mod tests {
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
-        let template = TemplateData::create(conn, new_template).expect("Failed inserting test template");
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test2"),
@@ -563,6 +575,30 @@ mod tests {
                     _,
                 ),
             )
+        ));
+    }
+
+    #[test]
+    fn delete_success() {
+        let conn = get_test_db_connection();
+
+        let test_run_software_version = insert_test_run_software_version(&conn);
+
+        let delete_result =
+            RunSoftwareVersionData::delete_by_run_id(&conn, test_run_software_version.run_id)
+                .unwrap();
+
+        assert_eq!(delete_result, 1);
+
+        let test_run_software_version2 = RunSoftwareVersionData::find_by_run_and_software_version(
+            &conn,
+            test_run_software_version.run_id.clone(),
+            test_run_software_version.software_version_id.clone(),
+        );
+
+        assert!(matches!(
+            test_run_software_version2,
+            Err(diesel::result::Error::NotFound)
         ));
     }
 }
