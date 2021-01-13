@@ -14,7 +14,6 @@ use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;
 use diesel::prelude::*;
-use diesel::result::Error::DatabaseError;
 use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -372,13 +371,14 @@ impl RunData {
         let run_status = match run
             .filter(run_id.eq(id))
             .select(status)
-            .first::<RunStatusEnum>(conn){
+            .first::<RunStatusEnum>(conn)
+        {
             Ok(run_status) => run_status,
             // Return 0 if we didn't find it to indicate nothing went wrong but there was nothing
             // to delete
             Err(diesel::result::Error::NotFound) => {
                 return Ok(0);
-            },
+            }
             Err(e) => {
                 return Err(DeleteError::DB(e));
             }

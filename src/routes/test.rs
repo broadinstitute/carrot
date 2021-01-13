@@ -731,7 +731,7 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_input_defaults: Some(json!({"test": "test"})),
-            eval_input_defaults: None,
+            eval_input_defaults: Some(json!({"eval": "eval"})),
         };
 
         let req = test::TestRequest::put()

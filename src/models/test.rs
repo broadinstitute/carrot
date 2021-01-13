@@ -12,7 +12,7 @@ use crate::schema::test::dsl::*;
 use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;
-use diesel::dsl::{all, any};
+use diesel::dsl::all;
 use diesel::prelude::*;
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -320,6 +320,7 @@ impl TestData {
                         .cloned()
                         .collect::<Vec<RunStatusEnum>>())),
                 )
+                .filter(run::dsl::test_id.eq(id))
                 .select(run::dsl::run_id)
                 .first::<Uuid>(conn);
             match non_failed_runs_count {

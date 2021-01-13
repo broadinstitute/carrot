@@ -528,7 +528,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     status: 403,
                     detail: "Cannot delete a run if it has a non-failed status".to_string(),
                 })
-            },
+            }
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
