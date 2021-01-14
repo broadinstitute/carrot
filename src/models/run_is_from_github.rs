@@ -183,6 +183,16 @@ impl RunIsFromGithubData {
             .values(&params)
             .get_result(conn)
     }
+
+    /// Deletes run_is_from_github rows from the DB that are mapped to the run specified by `id`
+    ///
+    /// Returns either the number of run_is_from_github rows deleted, or an error if something goes
+    /// wrong during the delete
+    pub fn delete_by_run_id(conn: &PgConnection, id: Uuid) -> Result<usize, diesel::result::Error> {
+        diesel::delete(run_is_from_github)
+            .filter(run_id.eq(id))
+            .execute(conn)
+    }
 }
 
 #[cfg(test)]
@@ -657,5 +667,28 @@ mod tests {
         let test_run_is_from_github = insert_test_run_is_from_github(&conn);
 
         assert_eq!(test_run_is_from_github.repo, "ExampleRepo");
+    }
+
+    #[test]
+    fn delete_success() {
+        let conn = get_test_db_connection();
+
+        let test_run_is_from_github = insert_test_run_is_from_github(&conn);
+
+        let delete_result =
+            RunIsFromGithubData::delete_by_run_id(&conn, test_run_is_from_github.run_id)
+                .unwrap();
+
+        assert_eq!(delete_result, 1);
+
+        let test_run_is_from_github2 = RunIsFromGithubData::find_by_run_id(
+            &conn,
+            test_run_is_from_github.run_id
+        );
+
+        assert!(matches!(
+            test_run_is_from_github2,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 }

@@ -18,6 +18,7 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+use crate::models::run_is_from_github::RunIsFromGithubData;
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -394,9 +395,10 @@ impl RunData {
         }
         // Do all the actual deleting in a closure so we can run it in a transaction
         let delete_closure = || {
-            // Delete run_software_version and run_result rows tied to this run
+            // Delete run_software_version, run_result, and run_is_from_github rows tied to this run
             RunSoftwareVersionData::delete_by_run_id(conn, id)?;
             RunResultData::delete_by_run_id(conn, id)?;
+            RunIsFromGithubData::delete_by_run_id(conn, id)?;
 
             // Delete and return result
             Ok(diesel::delete(run.filter(run_id.eq(id))).execute(conn)?)
@@ -646,6 +648,7 @@ mod tests {
     use rand::prelude::*;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::run_is_from_github::{RunIsFromGithubData, NewRunIsFromGithub, RunIsFromGithubQuery};
 
     fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         let test_run = insert_test_run(&conn);
@@ -996,6 +999,19 @@ mod tests {
         );
 
         run_software_versions
+    }
+
+    fn insert_test_run_is_from_github_with_run_id(conn: &PgConnection, id: Uuid) -> RunIsFromGithubData {
+        let new_run_is_from_github = NewRunIsFromGithub {
+            run_id: id,
+            owner: String::from("ExampleOwner"),
+            repo: String::from("ExampleRepo"),
+            issue_number: 4,
+            author: String::from("ExampleUser"),
+        };
+
+        RunIsFromGithubData::create(conn, new_run_is_from_github)
+            .expect("Failed inserting test run_is_from_github")
     }
 
     #[test]
@@ -1584,6 +1600,7 @@ mod tests {
         let run_software_versions =
             insert_test_run_software_versions_with_run_id(&conn, test_run.run_id);
         let results = insert_test_results_with_run_id(&conn, &test_run.run_id);
+        let run_is_from_github = insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
 
         let delete_result = RunData::delete(&conn, test_run.run_id).unwrap();
 
@@ -1614,6 +1631,21 @@ mod tests {
         };
         let deleted_run_results = RunResultData::find(&conn, deleted_rows_query).unwrap();
         assert!(deleted_run_results.is_empty());
+
+        let deleted_rows_query = RunIsFromGithubQuery {
+            run_id: Some(test_run.run_id),
+            owner: None,
+            repo: None,
+            issue_number: None,
+            author: None,
+            created_before: None,
+            created_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let deleted_run_is_from_github = RunIsFromGithubData::find(&conn, deleted_rows_query).unwrap();
+        assert!(deleted_run_is_from_github.is_empty());
 
         let deleted_run = RunData::find_by_id(&conn, test_run.run_id);
         assert!(matches!(deleted_run, Err(diesel::result::Error::NotFound)));
