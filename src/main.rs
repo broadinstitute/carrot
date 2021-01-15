@@ -10,6 +10,7 @@ mod requests;
 mod routes;
 mod schema;
 mod util;
+mod validation;
 
 #[cfg(test)]
 mod unit_test_util;

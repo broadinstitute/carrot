@@ -178,6 +178,11 @@ lazy_static!{
         false => None,
         true => Some(env::var("PRIVATE_GITHUB_KMS_KEY").expect("PRIVATE_GITHUB_KMS_KEY environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
     };
+
+    // Validation
+    /// The location of the womtool jar to use to validate WDLs
+    pub static ref WOMTOOL_LOCATION: String =
+        match env::var("WOMTOOL_LOCATION").expect("WOMTOOL_LOCATION environment variable not set");
 }
 
 /// Initializes all the necessary configuration variables
@@ -225,4 +230,7 @@ pub fn initialize() {
     lazy_static::initialize(&PRIVATE_GITHUB_CLIENT_PASS_URI);
     lazy_static::initialize(&PRIVATE_GITHUB_KMS_KEYRING);
     lazy_static::initialize(&PRIVATE_GITHUB_KMS_KEY);
+
+    // Validation
+    lazy_static::initialize(&WOMTOOL_LOCATION);
 }
