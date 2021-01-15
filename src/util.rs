@@ -5,6 +5,7 @@
 
 use std::env;
 use std::process::Command;
+use crate::config;
 
 /// Defines a sort clause to be used in DB queries
 #[derive(PartialEq, Debug)]
@@ -59,32 +60,12 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
 /// if the command is successful, and Ok(false) if it fails.  Returns an error if there is some
 /// error trying to execute the command
 pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
-    lazy_static! {
-        static ref ENABLE_PRIVATE_GITHUB_ACCESS: bool = match env::var("ENABLE_PRIVATE_GITHUB_ACCESS") {
-            Ok(val) => {
-                if val == "true" {
-                    true
-                } else {
-                    false
-                }
-            }
-            Err(_) => false,
-        };
-        static ref PRIVATE_GITHUB_CLIENT_ID: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
-            false => None,
-            true => Some(env::var("PRIVATE_GITHUB_CLIENT_ID").expect("PRIVATE_GITHUB_CLIENT_ID environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
-        };
-        static ref PRIVATE_GITHUB_CLIENT_TOKEN: Option<String> = match *ENABLE_PRIVATE_GITHUB_ACCESS {
-            false => None,
-            true => Some(env::var("PRIVATE_GITHUB_CLIENT_TOKEN").expect("PRIVATE_GITHUB_CLIENT_TOKEN environment variable is not set and is required if ENABLE_PRIVATE_GITHUB_ACCESS is true"))
-        };
-    }
 
-    let url_to_check = if *ENABLE_PRIVATE_GITHUB_ACCESS && url.contains("github.com") {
+    let url_to_check = if *config::ENABLE_PRIVATE_GITHUB_ACCESS && url.contains("github.com") {
         format_github_url_with_creds(
             url,
-            &*PRIVATE_GITHUB_CLIENT_ID.as_ref().unwrap(),
-            &*PRIVATE_GITHUB_CLIENT_TOKEN.as_ref().unwrap(),
+            &*config::PRIVATE_GITHUB_CLIENT_ID.as_ref().unwrap(),
+            &*config::PRIVATE_GITHUB_CLIENT_TOKEN.as_ref().unwrap(),
         )
     } else {
         url.to_string()
