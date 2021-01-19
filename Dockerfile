@@ -8,5 +8,6 @@ RUN apt-get update \
     && apt-get -y --no-install-recommends install libpq-dev ca-certificates \
     && apt-get -y --no-install-recommends install git
 COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
+COPY https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar /usr/local/bin/womtool/
 EXPOSE 80
 CMD ["carrot"]

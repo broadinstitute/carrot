@@ -182,7 +182,7 @@ lazy_static!{
     // Validation
     /// The location of the womtool jar to use to validate WDLs
     pub static ref WOMTOOL_LOCATION: String =
-        match env::var("WOMTOOL_LOCATION").expect("WOMTOOL_LOCATION environment variable not set");
+        env::var("WOMTOOL_LOCATION").expect("WOMTOOL_LOCATION environment variable not set");
 }
 
 /// Initializes all the necessary configuration variables

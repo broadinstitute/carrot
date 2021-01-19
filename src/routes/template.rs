@@ -7,8 +7,11 @@ use crate::db;
 use crate::models::template::{NewTemplate, TemplateChangeset, TemplateData, TemplateQuery};
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
-use log::error;
+use log::{debug, error};
 use uuid::Uuid;
+use crate::validation::wdl_validator;
+use actix_web::client::Client;
+use futures::Future;
 
 /// Handles requests to /templates/{id} for retrieving template info by template_id
 ///
@@ -133,8 +136,13 @@ async fn find(
 async fn create(
     web::Json(new_template): web::Json<NewTemplate>,
     pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
 ) -> impl Responder {
-    //Insert in new thread
+    // Start by validating the WDLs
+    validate_wdl(&client, &new_template.test_wdl, "test", &new_template.name).await?;
+    validate_wdl(&client, &new_template.eval_wdl, "eval", &new_template.name).await?;
+
+    // Insert in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
@@ -214,6 +222,39 @@ async fn update(
     })
 }
 
+/// Validates the specified WDL and returns either the unit type if it's valid or an appropriate
+/// http response if it's invalid or there is some error
+///
+/// Retrieves the wdl located at `wdl` using `client` and then validates it.  If it is a valid wdl,
+/// returns the unit type.  If it's invalid, returns a 400 response with a message explaining that
+/// the `wdl_type` WDL is invalid for the template named `template_name` (e.g. Submitted test WDL
+/// failed WDL validation).  If the validation errors out for some reason, returns a 500 response
+/// with a message explaining that the validation failed
+async fn validate_wdl(client: &Client, wdl: &str, wdl_type: &str, template_name: &str) -> Result<(), HttpResponse> {
+    match wdl_validator::wdl_is_valid(client, wdl).await {
+        // If it's a valid WDL, that's fine, so return OK
+        Ok(true) => Ok(()),
+        // If it's not a valid WDL, return an error to inform the user
+        Ok(false) => {
+            debug!("Invalid {} WDL submitted for template named: {}", wdl_type, template_name);
+            Err(HttpResponse::BadRequest().json(ErrorBody {
+                title: "Invalid WDL".to_string(),
+                status: 400,
+                detail: format!("Submitted {} WDL failed WDL validation", wdl_type),
+            }))
+        },
+        // If there is some error validating, return an appropriate message
+        Err(e) => {
+            error!("{}", e);
+            Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: format!("Error while attempting to validate the {} WDL", wdl_type),
+            }))
+        }
+    }
+}
+
 /// Attaches the REST mappings in this file to a service config
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
@@ -238,6 +279,7 @@ mod tests {
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
+    use std::fs::read_to_string;
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
         let new_template = NewTemplate {
@@ -250,6 +292,20 @@ mod tests {
         };
 
         TemplateData::create(conn, new_template).expect("Failed inserting test template")
+    }
+
+    fn setup_valid_wdl_address() -> String {
+        // Get valid wdl test file
+        let test_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("GET", "/test/resource")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl)
+            .create();
+
+        format!("{}/test/resource", mockito::server_url())
     }
 
     #[actix_rt::test]
@@ -374,12 +430,14 @@ mod tests {
         let pool = get_test_db_pool();
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
+        let valid_wdl_address = setup_valid_wdl_address();
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test"),
             pipeline_id: Uuid::new_v4(),
             description: Some(String::from("Kevin's test description")),
-            test_wdl: String::from("testwdlwdlwdlwdlwdl"),
-            eval_wdl: String::from("evalwdlwdlwdlwdlwdl"),
+            test_wdl: valid_wdl_address.clone(),
+            eval_wdl: valid_wdl_address,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -413,7 +471,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_failure() {
+    async fn create_failure_duplicate_name() {
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
