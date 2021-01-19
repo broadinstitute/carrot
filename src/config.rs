@@ -7,8 +7,7 @@ use log::info;
 use std::env;
 use std::str::FromStr;
 
-
-lazy_static!{
+lazy_static! {
 
     // API Config
     /// Host address for the application
