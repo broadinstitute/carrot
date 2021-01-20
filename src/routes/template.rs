@@ -280,6 +280,7 @@ mod tests {
     use diesel::PgConnection;
     use uuid::Uuid;
     use std::fs::read_to_string;
+    use mockito::Mock;
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
         let new_template = NewTemplate {
@@ -294,7 +295,7 @@ mod tests {
         TemplateData::create(conn, new_template).expect("Failed inserting test template")
     }
 
-    fn setup_valid_wdl_address() -> String {
+    fn setup_valid_wdl_address() -> (String, Mock) {
         // Get valid wdl test file
         let test_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
 
@@ -305,7 +306,19 @@ mod tests {
             .with_body(test_wdl)
             .create();
 
-        format!("{}/test/resource", mockito::server_url())
+        (format!("{}/test/resource", mockito::server_url()), mock)
+    }
+
+    fn setup_invalid_wdl_address() -> (String, Mock) {
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("GET", "/test/resource")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body("test")
+            .create();
+
+        (format!("{}/test/resource", mockito::server_url()), mock)
     }
 
     #[actix_rt::test]
@@ -386,7 +399,6 @@ mod tests {
         let req = test::TestRequest::get()
             .uri("/templates?name=Kevin%27s%20Template")
             .to_request();
-        println!("{:?}", req);
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -427,10 +439,12 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_success() {
+        load_env_config();
+        let client = Client::default();
         let pool = get_test_db_pool();
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
-        let valid_wdl_address = setup_valid_wdl_address();
+        let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test"),
@@ -450,6 +464,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
+
         let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_template.name, new_template.name);
@@ -472,18 +487,21 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_failure_duplicate_name() {
+        load_env_config();
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (valid_wdl_address, mock)  = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: template.name.clone(),
             pipeline_id: Uuid::new_v4(),
             description: Some(String::from("Kevin's test description")),
-            test_wdl: String::from("testwdlwdlwdlwdlwdl"),
-            eval_wdl: String::from("evalwdlwdlwdlwdlwdl"),
+            test_wdl: valid_wdl_address.clone(),
+            eval_wdl: valid_wdl_address,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -504,6 +522,46 @@ mod tests {
         assert_eq!(
             error_body.detail,
             "Error while attempting to insert new template"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_failure_invalid_wdl() {
+        load_env_config();
+        let pool = get_test_db_pool();
+
+        let template = create_test_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (invalid_wdl_address, mock)  = setup_invalid_wdl_address();
+
+        let new_template = NewTemplate {
+            name: template.name.clone(),
+            pipeline_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin's test description")),
+            test_wdl: invalid_wdl_address.clone(),
+            eval_wdl: invalid_wdl_address,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/templates")
+            .set_json(&new_template)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Invalid WDL");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(
+            error_body.detail,
+            "Submitted test WDL failed WDL validation"
         );
     }
 

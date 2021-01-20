@@ -3,11 +3,16 @@ WORKDIR /usr/src/carrot
 COPY . .
 RUN cargo install --path .
 
-FROM debian:buster-slim
-RUN apt-get update \
-    && apt-get -y --no-install-recommends install libpq-dev ca-certificates \
-    && apt-get -y --no-install-recommends install git
+FROM debian:buster
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get -y --no-install-recommends install \
+    libpq-dev \
+    ca-certificates \
+    git \
+    openjdk-11-jre
+
 COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
-COPY https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar /usr/local/bin/womtool/
+ADD https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar /usr/local/bin/womtool/
 EXPOSE 80
 CMD ["carrot"]
