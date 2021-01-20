@@ -89,7 +89,13 @@ fn main() {
 
     info!("Starting app server");
     thread::spawn(move || {
-        app::run_app(app_send, pool, (*config::HOST).clone(), (*config::PORT).clone()).expect("Failed to start app server");
+        app::run_app(
+            app_send,
+            pool,
+            (*config::HOST).clone(),
+            (*config::PORT).clone(),
+        )
+        .expect("Failed to start app server");
     });
 
     // Receive app server controller

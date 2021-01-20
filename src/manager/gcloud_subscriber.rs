@@ -109,8 +109,8 @@ async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Rec
         // While the time since we last started a check of the subscription hasn't exceeded
         // PUBSUB_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
         debug!("Finished gcloud subscription check.  Sleeping . . .");
-        let wait_timeout =
-            Duration::new(*config::PUBSUB_WAIT_TIME_IN_SECS, 0).checked_sub(Instant::now() - query_time);
+        let wait_timeout = Duration::new(*config::PUBSUB_WAIT_TIME_IN_SECS, 0)
+            .checked_sub(Instant::now() - query_time);
         if let Some(timeout) = wait_timeout {
             if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout) {
                 return;
@@ -129,8 +129,8 @@ async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Rec
 /// by GCLOUD_SA_KEY_FILE
 fn initialize_pubsub() -> PubsubClient {
     // Load GCloud SA key so we can use it for authentication
-    let client_secret =
-        yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE).expect(&format!(
+    let client_secret = yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE)
+        .expect(&format!(
             "Failed to load service account key from file at: {}",
             &*config::GCLOUD_SA_KEY_FILE
         ));

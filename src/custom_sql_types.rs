@@ -65,6 +65,15 @@ impl fmt::Display for RunStatusEnum {
     }
 }
 
+pub static RUN_FAILURE_STATUSES: [RunStatusEnum; 6] = [
+    RunStatusEnum::BuildFailed,
+    RunStatusEnum::CarrotFailed,
+    RunStatusEnum::TestFailed,
+    RunStatusEnum::EvalFailed,
+    RunStatusEnum::TestAborted,
+    RunStatusEnum::EvalAborted,
+];
+
 /// Maps to the custom type `build_status_enum` in the DB
 ///
 /// Represents the enum used in the DB for storing the status of a run

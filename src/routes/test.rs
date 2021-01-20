@@ -4,10 +4,11 @@
 //! their URI mappings
 
 use crate::db;
-use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery};
+use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery, UpdateError};
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
+use serde_json::json;
 use uuid::Uuid;
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
@@ -189,7 +190,7 @@ async fn update(
         }
     };
 
-    //Insert in new thread
+    //Update in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
@@ -206,12 +207,97 @@ async fn update(
     .map(|results| HttpResponse::Ok().json(results))
     .map_err(|e| {
         error!("{}", e);
-        // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to update test".to_string(),
-        })
+        match e {
+            BlockingError::Error(UpdateError::Prohibited(_)) => {
+                HttpResponse::Forbidden().json(ErrorBody {
+                    title: "Update params not allowed".to_string(),
+                    status: 403,
+                    detail: "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded".to_string(),
+                })
+            },
+            _ => {
+                HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: "Error while attempting to update test".to_string(),
+                })
+            }
+        }
+    })
+}
+
+/// Handles DELETE requests to /tests/{id} for deleting test rows by test_id
+///
+/// This function is called by Actix-Web when a delete request is made to the /tests/{id}
+/// mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
+/// delete the specified test, or an error message if some error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+    // Pull id param from path
+    let id = &req.match_info().get("id").unwrap();
+
+    // Parse ID into Uuid
+    let id = match Uuid::parse_str(id) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                title: "ID formatted incorrectly".to_string(),
+                status: 400,
+                detail: "ID must be formatted as a Uuid".to_string(),
+            }));
+        }
+    };
+
+    //Query DB for template in new thread
+    web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match TestData::delete(&conn, id) {
+            Ok(delete_count) => Ok(delete_count),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await
+    // If there is no error, verify that a row was deleted
+    .map(|results| {
+        if results > 0 {
+            let message = format!("Successfully deleted {} row", results);
+            HttpResponse::Ok().json(json!({ "message": message }))
+        } else {
+            HttpResponse::NotFound().json(ErrorBody {
+                title: "No test found".to_string(),
+                status: 404,
+                detail: "No test found for the specified id".to_string(),
+            })
+        }
+    })
+    .map_err(|e| {
+        error!("{}", e);
+        match e {
+            // If no template is found, return a 404
+            BlockingError::Error(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            )) => HttpResponse::Forbidden().json(ErrorBody {
+                title: "Cannot delete".to_string(),
+                status: 403,
+                detail: "Cannot delete a test if there are runs mapped to it".to_string(),
+            }),
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: "Error while attempting to delete requested test from DB".to_string(),
+            }),
+        }
     })
 }
 
@@ -223,7 +309,8 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/tests/{id}")
             .route(web::get().to(find_by_id))
-            .route(web::put().to(update)),
+            .route(web::put().to(update))
+            .route(web::delete().to(delete_by_id)),
     );
     cfg.service(
         web::resource("/tests")
@@ -235,20 +322,44 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::custom_sql_types::RunStatusEnum;
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::run::{NewRun, RunData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::unit_test_util::*;
     use actix_web::client::Client;
     use actix_web::{http, test, App};
+    use chrono::Utc;
     use diesel::PgConnection;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::fs::read_to_string;
     use std::str::from_utf8;
     use uuid::Uuid;
 
     fn create_test_test(conn: &PgConnection) -> TestData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's test template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: None,
+            test_wdl: format!("{}/test", mockito::server_url()),
+            eval_wdl: format!("{}/eval", mockito::server_url()),
+            created_by: None,
+        };
+
+        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
-            template_id: Uuid::new_v4(),
+            template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
@@ -259,9 +370,18 @@ mod tests {
     }
 
     fn create_test_template(conn: &PgConnection) -> TemplateData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline"),
+            description: Some(String::from("Kevin made this pipeline for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
         let new_template = NewTemplate {
             name: String::from("Kevin's test template"),
-            pipeline_id: Uuid::new_v4(),
+            pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
             eval_wdl: format!("{}/eval", mockito::server_url()),
@@ -282,6 +402,112 @@ mod tests {
         };
 
         TestData::create(&conn, new_test).expect("Failed to insert test")
+    }
+
+    fn insert_non_failed_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name1"),
+            status: RunStatusEnum::EvalRunning,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn insert_failed_test_runs_with_test_id(conn: &PgConnection, id: Uuid) -> Vec<RunData> {
+        let mut runs = Vec::new();
+
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name1"),
+            status: RunStatusEnum::CarrotFailed,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
+
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name2"),
+            status: RunStatusEnum::TestFailed,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789012")),
+            eval_cromwell_job_id: None,
+            created_by: None,
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
+
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name3"),
+            status: RunStatusEnum::EvalFailed,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
+
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name4"),
+            status: RunStatusEnum::TestAborted,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789012")),
+            eval_cromwell_job_id: None,
+            created_by: None,
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
+
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name5"),
+            status: RunStatusEnum::EvalAborted,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("1234567890")),
+            eval_cromwell_job_id: Some(String::from("12345678901")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
+
+        let new_run = NewRun {
+            test_id: id,
+            name: String::from("name6"),
+            status: RunStatusEnum::BuildFailed,
+            test_input: serde_json::from_str("{}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
+
+        runs
     }
 
     #[actix_rt::test]
@@ -402,11 +628,14 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
+
+        let template = create_test_template(&pool.get().unwrap());
+
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let new_test = NewTest {
             name: String::from("Kevin's test"),
-            template_id: Uuid::new_v4(),
+            template_id: template.template_id,
             description: Some(String::from("Kevin's test description")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
@@ -494,12 +723,15 @@ mod tests {
         let pool = get_test_db_pool();
 
         let test = create_test_test(&pool.get().unwrap());
+        insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test.test_id);
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let test_change = TestChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            test_input_defaults: Some(json!({"test": "test"})),
+            eval_input_defaults: Some(json!({"eval": "eval"})),
         };
 
         let req = test::TestRequest::put()
@@ -533,6 +765,8 @@ mod tests {
         let test_change = TestChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            test_input_defaults: None,
+            eval_input_defaults: None,
         };
 
         let req = test::TestRequest::put()
@@ -553,6 +787,42 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn update_failure_prohibited_params() {
+        let pool = get_test_db_pool();
+
+        let test_test = create_test_test(&pool.get().unwrap());
+        insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let test_change = TestChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+            test_input_defaults: Some(json!({"test": "test"})),
+            eval_input_defaults: None,
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/tests/{}", test_test.test_id))
+            .set_json(&test_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Update params not allowed");
+        assert_eq!(error_body.status, 403);
+        assert_eq!(
+            error_body.detail,
+            "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded"
+        );
+    }
+
+    #[actix_rt::test]
     async fn update_failure() {
         let pool = get_test_db_pool();
 
@@ -563,6 +833,8 @@ mod tests {
         let test_change = TestChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            test_input_defaults: None,
+            eval_input_defaults: None,
         };
 
         let req = test::TestRequest::put()
@@ -580,5 +852,101 @@ mod tests {
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
         assert_eq!(error_body.detail, "Error while attempting to update test");
+    }
+
+    #[actix_rt::test]
+    async fn delete_success() {
+        let pool = get_test_db_pool();
+
+        let test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/tests/{}", test.test_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let message: Value = serde_json::from_slice(&result).unwrap();
+
+        let expected_message = json!({
+            "message": "Successfully deleted 1 row"
+        });
+
+        assert_eq!(message, expected_message)
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_no_test() {
+        let pool = get_test_db_pool();
+
+        let test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/tests/{}", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No test found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No test found for the specified id");
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_not_allowed() {
+        let pool = get_test_db_pool();
+
+        let test = create_test_test(&pool.get().unwrap());
+        insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test.test_id);
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/tests/{}", test.test_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Cannot delete");
+        assert_eq!(error_body.status, 403);
+        assert_eq!(
+            error_body.detail,
+            "Cannot delete a test if there are runs mapped to it"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn delete_failure_bad_uuid() {
+        let pool = get_test_db_pool();
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::delete()
+            .uri("/tests/123456789")
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 }

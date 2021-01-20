@@ -540,7 +540,10 @@ mod tests {
         let conn = pool.get().unwrap();
         let client = Client::default();
 
-        let test_run = insert_test_run_with_test_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id);
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         let test_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
@@ -575,7 +578,10 @@ mod tests {
         let conn = pool.get().unwrap();
         let client = Client::default();
 
-        let test_run = insert_test_run_with_test_id(&conn, Uuid::new_v4());
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id);
 
         // Define mockito mapping for response
         let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
