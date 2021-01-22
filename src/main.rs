@@ -9,6 +9,7 @@ mod notifications;
 mod requests;
 mod routes;
 mod schema;
+mod storage;
 mod util;
 mod validation;
 
@@ -31,7 +32,7 @@ use dotenv;
 use futures::executor::block_on;
 use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 embed_migrations!("migrations");
@@ -80,6 +81,7 @@ fn main() {
         .expect("Failed to start status manager with StatusManagerSystem");
     });
 
+    info!("Initializing GCloud Subscriber for reading from GitHub");
     // Do the same for the gcloud subscriber thread if configured to use it
     let (gcloud_subscriber_send, gcloud_subscriber_thread) =
         manager::gcloud_subscriber::init_or_not(pool.clone());
@@ -87,11 +89,17 @@ fn main() {
     // Create channel for getting app server controller from app thread
     let (app_send, app_receive) = mpsc::channel();
 
+    // Create a GCloud storage hub for interacting with GCloud storage
+    // Note: Does not implement Sync, so we need to nest it within an Arc and Mutex to allow it to
+    // be shared among multiple threads (necessary since we want to include it in the app data)
+    let storage_hub: Arc<Mutex<storage::gcloud_storage::StorageHub>> = Arc::new(Mutex::new(storage::gcloud_storage::initialize_storage_hub()));
+
     info!("Starting app server");
     thread::spawn(move || {
         app::run_app(
             app_send,
             pool,
+            storage_hub,
             (*config::HOST).clone(),
             (*config::PORT).clone(),
         )

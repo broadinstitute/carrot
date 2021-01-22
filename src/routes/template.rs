@@ -14,7 +14,8 @@ use serde_json::json;
 use uuid::Uuid;
 use crate::validation::wdl_validator;
 use actix_web::client::Client;
-use futures::Future;
+use crate::storage::gcloud_storage::StorageHub;
+use std::sync::{Arc, Mutex};
 
 /// Handles requests to /templates/{id} for retrieving template info by template_id
 ///
@@ -24,7 +25,7 @@ use futures::Future;
 /// error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the detabase results in an error
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
@@ -85,7 +86,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 /// template or some other error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the database results in an error
 async fn find(
     web::Query(query): web::Query<TemplateQuery>,
     pool: web::Data<db::DbPool>,
@@ -135,15 +136,17 @@ async fn find(
 /// an error message if creating the template fails for some reason
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
+/// poisoned
 async fn create(
     web::Json(new_template): web::Json<NewTemplate>,
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
+    storage_hub: web::Data<Arc<Mutex<StorageHub>>>,
 ) -> impl Responder {
     // Start by validating the WDLs
-    validate_wdl(&client, &new_template.test_wdl, "test", &new_template.name).await?;
-    validate_wdl(&client, &new_template.eval_wdl, "eval", &new_template.name).await?;
+    validate_wdl(&client, &new_template.test_wdl, "test", &new_template.name, &**storage_hub).await?;
+    validate_wdl(&client, &new_template.eval_wdl, "eval", &new_template.name, &**storage_hub).await?;
 
     // Insert in new thread
     web::block(move || {
@@ -179,7 +182,7 @@ async fn create(
 /// message if some error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the detabase results in an error
 async fn update(
     id: web::Path<String>,
     web::Json(template_changes): web::Json<TemplateChangeset>,
@@ -319,8 +322,8 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// the `wdl_type` WDL is invalid for the template named `template_name` (e.g. Submitted test WDL
 /// failed WDL validation).  If the validation errors out for some reason, returns a 500 response
 /// with a message explaining that the validation failed
-async fn validate_wdl(client: &Client, wdl: &str, wdl_type: &str, template_name: &str) -> Result<(), HttpResponse> {
-    match wdl_validator::wdl_is_valid(client, wdl).await {
+async fn validate_wdl(client: &Client, wdl: &str, wdl_type: &str, template_name: &str, storage_hub: &Arc<Mutex<StorageHub>>) -> Result<(), HttpResponse> {
+    match wdl_validator::wdl_is_valid(client, wdl, storage_hub).await {
         // If it's a valid WDL, that's fine, so return OK
         Ok(true) => Ok(()),
         // If it's not a valid WDL, return an error to inform the user

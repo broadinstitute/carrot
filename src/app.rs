@@ -1,13 +1,14 @@
 //! Module for configuring app service
 
 use crate::db::DbPool;
+use crate::storage::gcloud_storage::StorageHub;
 use crate::routes;
 use actix_rt::System;
 use actix_web::client::Client;
 use actix_web::dev::Server;
 use actix_web::middleware::Logger;
 use actix_web::{web, App, HttpServer};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 /// Function for configuring and running app server in a separate thread
 ///
@@ -16,6 +17,7 @@ use std::sync::mpsc;
 pub fn run_app(
     sender: mpsc::Sender<Server>,
     pool: DbPool,
+    storage_hub: Arc<Mutex<StorageHub>>,
     host: String,
     port: String,
 ) -> std::io::Result<()> {
@@ -27,6 +29,7 @@ pub fn run_app(
             .wrap(Logger::default()) // Use default logger as configured in .env file
             .data(pool.clone()) // Give app access to clone of DB pool so other threads can use it
             .data(Client::default()) // Allow worker threads to get client for making REST calls
+            .data(storage_hub.clone())
             .service(web::scope("/api/v1/").configure(config)) //Get route mappings for v1 api from app module
     })
     .bind(format!("{}:{}", host, port))?

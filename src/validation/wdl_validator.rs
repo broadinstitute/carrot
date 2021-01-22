@@ -9,6 +9,8 @@ use std::error;
 use crate::requests::test_resource_requests;
 use actix_web::client::Client;
 use tempfile::NamedTempFile;
+use crate::storage::gcloud_storage::StorageHub;
+use std::sync::{Arc, Mutex};
 
 /// Enum of possible errors from submitting a request to github
 #[derive(Debug)]
@@ -41,9 +43,9 @@ impl From<test_resource_requests::Error> for Error {
     }
 }
 
-pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<bool, Error> {
+pub async fn wdl_is_valid(client: &Client, wdl_location: &str, storage_hub: &Arc<Mutex<StorageHub>>) -> Result<bool, Error> {
     // Retrieve the wdl from where it's stored
-    let wdl = test_resource_requests::get_resource_as_string(client, wdl_location).await?;
+    let wdl = test_resource_requests::get_resource_as_string(client, wdl_location, storage_hub).await?;
     // Write it to a temporary file for validating
     let mut wdl_file = NamedTempFile::new()?;
     write!(wdl_file, "{}", wdl)?;

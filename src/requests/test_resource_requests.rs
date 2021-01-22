@@ -5,11 +5,10 @@
 
 use actix_web::client::{Client, SendRequestError};
 use actix_web::error::PayloadError;
-use dotenv;
-use log::warn;
-use std::env;
 use std::fmt;
 use std::str::Utf8Error;
+use crate::storage::gcloud_storage;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub enum Error {
@@ -17,6 +16,7 @@ pub enum Error {
     Payload(PayloadError),
     Utf8(Utf8Error),
     Failed(String),
+    GS(gcloud_storage::Error)
 }
 
 impl fmt::Display for Error {
@@ -26,6 +26,7 @@ impl fmt::Display for Error {
             Error::Payload(e) => write!(f, "ProcessRequestError Payload {}", e),
             Error::Utf8(e) => write!(f, "ProcessRequestError Utf8 {}", e),
             Error::Failed(msg) => write!(f, "ProcessRequestError Failed {}", msg),
+            Error::GS(e) => write!(f, "ProcessRequestError GS {}", e),
         }
     }
 }
@@ -48,6 +49,11 @@ impl From<Utf8Error> for Error {
         Error::Utf8(e)
     }
 }
+impl From<gcloud_storage::Error> for Error {
+    fn from(e: gcloud_storage::Error) -> Error {
+        Error::GS(e)
+    }
+}
 
 /// Returns body of resource at `address` as a String
 ///
@@ -55,10 +61,25 @@ impl From<Utf8Error> for Error {
 pub async fn get_resource_as_string(
     client: &Client,
     address: &str,
+    storage_hub: &Arc<Mutex<gcloud_storage::StorageHub>>,
 ) -> Result<String, Error> {
+    // If the address is a gs address, retrieve the data using the gcloud storage api
+    if address.starts_with("gs://") {
+        // Get storage hub from the mutex (unwrapping because we want to panic if the mutex is poisoned)
+        let borrowed_storage_hub = &*storage_hub.lock().unwrap();
+        // Then use that to get the data
+        Ok(gcloud_storage::retrieve_object_with_gs_uri(borrowed_storage_hub, address)?)
+    }
+    // Otherwise, it's probably a normal location, so we'll retrieve it with a normal http get
+    else{
+        get_resource_from_normal_uri(client, address).await
+    }
+}
 
-    // TODO: Add support for gs urls using the google storage crate
-
+async fn get_resource_from_normal_uri(
+    client: &Client,
+    address: &str,
+) -> Result<String, Error> {
     let request = client.get(format!("{}", address));
 
     // Make the request
