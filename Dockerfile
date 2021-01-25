@@ -12,7 +12,8 @@ RUN apt-get update && \
     git \
     openjdk-11-jre
 
-COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
 ADD https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar /usr/local/bin/womtool/
+ENV WOMTOOL_LOCATION=/usr/local/bin/womtool/
+COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
 EXPOSE 80
 CMD ["carrot"]

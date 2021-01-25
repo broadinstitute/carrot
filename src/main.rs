@@ -32,7 +32,7 @@ use dotenv;
 use futures::executor::block_on;
 use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 embed_migrations!("migrations");
@@ -45,6 +45,8 @@ fn main() {
 
     // Initialize configuration variables
     config::initialize();
+    // Initialize the google storage hub for interacting with google cloud storage
+    storage::gcloud_storage::initialize();
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));
@@ -89,17 +91,11 @@ fn main() {
     // Create channel for getting app server controller from app thread
     let (app_send, app_receive) = mpsc::channel();
 
-    // Create a GCloud storage hub for interacting with GCloud storage
-    // Note: Does not implement Sync, so we need to nest it within an Arc and Mutex to allow it to
-    // be shared among multiple threads (necessary since we want to include it in the app data)
-    let storage_hub: Arc<Mutex<storage::gcloud_storage::StorageHub>> = Arc::new(Mutex::new(storage::gcloud_storage::initialize_storage_hub()));
-
     info!("Starting app server");
     thread::spawn(move || {
         app::run_app(
             app_send,
             pool,
-            storage_hub,
             (*config::HOST).clone(),
             (*config::PORT).clone(),
         )

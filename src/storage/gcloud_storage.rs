@@ -1,8 +1,9 @@
-//! Defines functionality for transferring google cloud storage objects between locations
+//! Defines functionality for interacting with the google cloud storage API
 use google_storage1::Storage;
 use std::fmt;
 use crate::config;
 use std::io::Read;
+use std::sync::Mutex;
 
 /// Shorthand type for google_storage1::Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>
 pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
@@ -11,7 +12,6 @@ pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hy
 pub enum Error {
     Parse(String),
     GCS(google_storage1::Error),
-    Failed(String),
     IO(std::io::Error),
 }
 
@@ -22,7 +22,6 @@ impl fmt::Display for Error {
         match self {
             Error::Parse(e) => write!(f, "GCloud Storage Error Parsing URI {}", e),
             Error::GCS(e) => write!(f, "GCloud Storage GCS Error {}", e),
-            Error::Failed(e) => write!(f, "GCloud Storage Failed Error {}", e),
             Error::IO(e) => write!(f, "GCloud Storage IO Error {}", e)
         }
     }
@@ -40,12 +39,21 @@ impl From<std::io::Error> for Error {
     }
 }
 
+lazy_static!{
+    static ref STORAGE_HUB: Mutex<StorageHub> = Mutex::new(initialize_storage_hub());
+}
+
+/// Initialize the gcloud storage hub that will be used to process gcloud storage requests
+pub fn initialize() {
+    lazy_static::initialize(&STORAGE_HUB);
+}
+
 /// Initializes and returns a GCloud Storage instance
 ///
 /// # Panics
 /// Panics if attempting to load the service account key file specified by the `GCLOUD_SA_KEY_FILE`
 /// config variable fails
-pub fn initialize_storage_hub() -> StorageHub {
+fn initialize_storage_hub() -> StorageHub {
     // Load GCloud SA key so we can use it for authentication
     let client_secret =
         yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE).expect(&format!(
@@ -71,7 +79,6 @@ pub fn initialize_storage_hub() -> StorageHub {
 /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
 /// Storage JSON API, specifically to retrieve the file contents as a String
 pub fn retrieve_object_with_gs_uri(
-    storage_hub: &StorageHub,
     address: &str
 ) -> Result<String, Error> {
     // Parse address to get bucket and object name
@@ -79,8 +86,10 @@ pub fn retrieve_object_with_gs_uri(
     // Percent encode the object name because the Google Cloud Storage JSON API, which the
     // google_storage1 crate uses, requires that (for some reason)
     let object_name = percent_encoding::utf8_percent_encode(&object_name, percent_encoding::NON_ALPHANUMERIC).to_string();
+    // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
+    let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
     // Request the data from its gcloud location
-    let (mut response, _) = storage_hub.objects()
+    let (mut response, _) = borrowed_storage_hub.objects()
         .get(&bucket_name, &object_name)
         .param("alt", "media") // So we actually just get the raw media we want
         .doit()?;
@@ -113,7 +122,7 @@ fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Er
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::gcloud_storage::{parse_bucket_and_object_name, Error, initialize_storage_hub, retrieve_object_with_gs_uri};
+    use crate::storage::gcloud_storage::{parse_bucket_and_object_name, Error, retrieve_object_with_gs_uri};
     use crate::unit_test_util;
 
     #[test]
@@ -131,5 +140,6 @@ mod tests {
         let failure = parse_bucket_and_object_name(test_result_uri);
         assert!(matches!(failure, Err(Error::Parse(_))));
     }
+
 }
 

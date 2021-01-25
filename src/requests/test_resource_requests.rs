@@ -8,7 +8,6 @@ use actix_web::error::PayloadError;
 use std::fmt;
 use std::str::Utf8Error;
 use crate::storage::gcloud_storage;
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub enum Error {
@@ -61,14 +60,10 @@ impl From<gcloud_storage::Error> for Error {
 pub async fn get_resource_as_string(
     client: &Client,
     address: &str,
-    storage_hub: &Arc<Mutex<gcloud_storage::StorageHub>>,
 ) -> Result<String, Error> {
     // If the address is a gs address, retrieve the data using the gcloud storage api
     if address.starts_with("gs://") {
-        // Get storage hub from the mutex (unwrapping because we want to panic if the mutex is poisoned)
-        let borrowed_storage_hub = &*storage_hub.lock().unwrap();
-        // Then use that to get the data
-        Ok(gcloud_storage::retrieve_object_with_gs_uri(borrowed_storage_hub, address)?)
+        Ok(gcloud_storage::retrieve_object_with_gs_uri(address)?)
     }
     // Otherwise, it's probably a normal location, so we'll retrieve it with a normal http get
     else{
