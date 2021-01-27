@@ -10,10 +10,12 @@ RUN apt-get update && \
     libpq-dev \
     ca-certificates \
     git \
-    openjdk-11-jre
+    openjdk-11-jre \
+    wget
 
-ADD https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar /usr/local/bin/womtool/
-ENV WOMTOOL_LOCATION=/usr/local/bin/womtool/
+RUN wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar
+
+ENV WOMTOOL_LOCATION=/usr/local/bin/womtool/womtool-55.jar
 COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
 EXPOSE 80
 CMD ["carrot"]
