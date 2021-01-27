@@ -21,8 +21,8 @@ env:
 before_install:
   - sudo apt-get -y install openjdk-11-jre
   - sudo apt-get -y install wget
-  - mkdir /usr/local/bin/womtool
-  - wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar
+  - sudo mkdir /usr/local/bin/womtool
+  - sudo wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/55/womtool-55.jar
 before_script:
   - sudo -u postgres psql -c 'create database test_framework_db;'
   - sudo -u postgres psql -c "create user test_framework_user with password 'test' superuser;"
