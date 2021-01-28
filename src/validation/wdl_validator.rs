@@ -15,6 +15,7 @@ use tempfile::NamedTempFile;
 pub enum Error {
     IO(std::io::Error),
     Request(test_resource_requests::Error),
+    Invalid(String),
 }
 
 impl fmt::Display for Error {
@@ -22,6 +23,7 @@ impl fmt::Display for Error {
         match self {
             Error::IO(e) => write!(f, "WDL Validate IO Error {}", e),
             Error::Request(e) => write!(f, "WDL Validate Request Error {}", e),
+            Error::Invalid(msg) => write!(f, "WDL Validate Invalid Error {}", msg)
         }
     }
 }
@@ -43,7 +45,7 @@ impl From<test_resource_requests::Error> for Error {
 /// Retrieves the WDL at `wdl_location` and validates it using WOMtool.  Returns true if it's a
 /// valid WDL, false if it's not, or an error if there is some issue retrieving the file or running
 /// WOMtool
-pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<bool, Error> {
+pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Error> {
     // Retrieve the wdl from where it's stored
     let wdl = test_resource_requests::get_resource_as_string(client, wdl_location).await?;
     // Write it to a temporary file for validating
@@ -58,7 +60,7 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<bool, E
 ///
 /// Returns true if the WDL is valid, false if it is not, or an error if there is some error running
 /// womtool
-fn womtool_validate(wdl_path: &Path) -> Result<bool, std::io::Error> {
+fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
     // Run womtool validate on the wdl
     let output = Command::new("sh")
         .arg("-c")
@@ -67,9 +69,13 @@ fn womtool_validate(wdl_path: &Path) -> Result<bool, std::io::Error> {
 
     // Return true or false depending on womtool's exit status
     if output.status.success() {
-        Ok(true)
+        Ok(())
     } else {
-        Ok(false)
+        let error_msg = match String::from_utf8(output.stderr) {
+            Ok(msg) => msg,
+            Err(e) => format!("Failed to get error message from womtool with error {}", e)
+        };
+        Err(Error::Invalid(error_msg))
     }
 }
 
@@ -102,8 +108,6 @@ mod tests {
                 .await.unwrap();
 
         mock.assert();
-
-        assert!(response);
     }
 
     #[actix_rt::test]
@@ -122,11 +126,18 @@ mod tests {
 
         let response =
             wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
-                .await.unwrap();
+                .await;
 
         mock.assert();
 
-        assert!(!response);
+        assert!(matches!(response, Err(Error::Invalid(_))));
+
+        match response {
+            Err(Error::Invalid(msg)) => {
+                println!("Womtool error message: {}", msg)
+            },
+            _ => {}
+        }
     }
 
     #[actix_rt::test]

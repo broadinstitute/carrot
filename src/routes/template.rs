@@ -331,14 +331,14 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 async fn validate_wdl(client: &Client, wdl: &str, wdl_type: &str, identifier: &str) -> Result<(), HttpResponse> {
     match wdl_validator::wdl_is_valid(client, wdl).await {
         // If it's a valid WDL, that's fine, so return OK
-        Ok(true) => Ok(()),
+        Ok(_) => Ok(()),
         // If it's not a valid WDL, return an error to inform the user
-        Ok(false) => {
-            debug!("Invalid {} WDL submitted for template {}", wdl_type, identifier);
+        Err(wdl_validator::Error::Invalid(msg)) => {
+            debug!("Invalid {} WDL submitted for template {} with womtool msg {}", wdl_type, identifier, msg);
             Err(HttpResponse::BadRequest().json(ErrorBody {
                 title: "Invalid WDL".to_string(),
                 status: 400,
-                detail: format!("Submitted {} WDL failed WDL validation", wdl_type),
+                detail: format!("Submitted {} WDL failed WDL validation with womtool message: {}", wdl_type, msg),
             }))
         },
         // If there is some error validating, return an appropriate message
@@ -801,7 +801,7 @@ mod tests {
         assert_eq!(error_body.status, 400);
         assert_eq!(
             error_body.detail,
-            "Submitted test WDL failed WDL validation"
+            "Submitted test WDL failed WDL validation with womtool message: ERROR: Finished parsing without consuming all tokens.\n\ntest\n^\n     \n"
         );
     }
 
@@ -988,7 +988,7 @@ mod tests {
         assert_eq!(error_body.status, 400);
         assert_eq!(
             error_body.detail,
-            "Submitted eval WDL failed WDL validation"
+            "Submitted eval WDL failed WDL validation with womtool message: ERROR: Finished parsing without consuming all tokens.\n\ntest\n^\n     \n"
         );
     }
 
