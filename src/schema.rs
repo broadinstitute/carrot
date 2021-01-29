@@ -185,6 +185,71 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    report(report_id) {
+        report_id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    section(section_id) {
+        section_id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        contents -> Jsonb,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    report_section(report_id, section_id) {
+        report_id -> Uuid,
+        section_id -> Uuid,
+        position -> Integer,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    template_report(template_id, report_id) {
+        template_id -> Uuid,
+        report_id -> Uuid,
+        input_map -> Jsonb,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::custom_sql_types::Report_status_enum;
+
+    run_report(run_id, report_id) {
+        run_id -> Uuid,
+        report_id -> Uuid,
+        status -> Report_status_enum,
+        cromwell_job_id -> Nullable<Text>,
+        results -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+        finished_at -> Nullable<Timestamptz>,
+    }
+}
+
 joinable!(run -> run_id_with_results(run_id));
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
@@ -203,5 +268,10 @@ allow_tables_to_appear_in_same_query!(
     software_build,
     run_software_version,
     subscription,
-    run_is_from_github
+    run_is_from_github,
+    report,
+    section,
+    report_section,
+    template_report,
+    run_report,
 );
