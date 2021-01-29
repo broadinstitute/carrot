@@ -9,9 +9,11 @@ use crate::models::template::{
 };
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
-use log::error;
+use log::{debug, error};
 use serde_json::json;
 use uuid::Uuid;
+use crate::validation::wdl_validator;
+use actix_web::client::Client;
 
 /// Handles requests to /templates/{id} for retrieving template info by template_id
 ///
@@ -21,7 +23,7 @@ use uuid::Uuid;
 /// error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the detabase results in an error
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
@@ -82,7 +84,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 /// template or some other error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the database results in an error
 async fn find(
     web::Query(query): web::Query<TemplateQuery>,
     pool: web::Data<db::DbPool>,
@@ -132,12 +134,18 @@ async fn find(
 /// an error message if creating the template fails for some reason
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
+/// poisoned
 async fn create(
     web::Json(new_template): web::Json<NewTemplate>,
     pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
 ) -> impl Responder {
-    //Insert in new thread
+    // Start by validating the WDLs
+    validate_wdl(&client, &new_template.test_wdl, "test", &new_template.name).await?;
+    validate_wdl(&client, &new_template.eval_wdl, "eval", &new_template.name).await?;
+
+    // Insert in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
@@ -171,14 +179,15 @@ async fn create(
 /// message if some error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database templates in an error
+/// Panics if attempting to connect to the detabase results in an error
 async fn update(
-    id: web::Path<String>,
+    id_param: web::Path<String>,
     web::Json(template_changes): web::Json<TemplateChangeset>,
     pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
 ) -> impl Responder {
     //Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match Uuid::parse_str(&*id_param) {
         Ok(id) => id,
         Err(e) => {
             error!("{}", e);
@@ -190,6 +199,14 @@ async fn update(
             }));
         }
     };
+
+    // If the user wants to update either of the WDLs, validate them
+    if let Some(test_wdl) = &template_changes.test_wdl {
+        validate_wdl(&client, test_wdl, "test", &id_param).await?;
+    }
+    if let Some(eval_wdl) = &template_changes.eval_wdl {
+        validate_wdl(&client, eval_wdl, "eval", &id_param).await?;
+    }
 
     //Update in new thread
     web::block(move || {
@@ -303,6 +320,39 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
     })
 }
 
+/// Validates the specified WDL and returns either the unit type if it's valid or an appropriate
+/// http response if it's invalid or there is some error
+///
+/// Retrieves the wdl located at `wdl` using `client` and then validates it.  If it is a valid wdl,
+/// returns the unit type.  If it's invalid, returns a 400 response with a message explaining that
+/// the `wdl_type` WDL is invalid for the template identified by `identifier` (e.g. Submitted test
+/// WDL failed WDL validation).  If the validation errors out for some reason, returns a 500
+/// response with a message explaining that the validation failed
+async fn validate_wdl(client: &Client, wdl: &str, wdl_type: &str, identifier: &str) -> Result<(), HttpResponse> {
+    match wdl_validator::wdl_is_valid(client, wdl).await {
+        // If it's a valid WDL, that's fine, so return OK
+        Ok(_) => Ok(()),
+        // If it's not a valid WDL, return an error to inform the user
+        Err(wdl_validator::Error::Invalid(msg)) => {
+            debug!("Invalid {} WDL submitted for template {} with womtool msg {}", wdl_type, identifier, msg);
+            Err(HttpResponse::BadRequest().json(ErrorBody {
+                title: "Invalid WDL".to_string(),
+                status: 400,
+                detail: format!("Submitted {} WDL failed WDL validation with womtool message: {}", wdl_type, msg),
+            }))
+        },
+        // If there is some error validating, return an appropriate message
+        Err(e) => {
+            error!("{}", e);
+            Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: format!("Error while attempting to validate the {} WDL", wdl_type),
+            }))
+        }
+    }
+}
+
 /// Attaches the REST mappings in this file to a service config
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
@@ -334,6 +384,8 @@ mod tests {
     use diesel::PgConnection;
     use serde_json::Value;
     use uuid::Uuid;
+    use std::fs::read_to_string;
+    use mockito::Mock;
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
         let new_pipeline = NewPipeline {
@@ -358,6 +410,32 @@ mod tests {
         };
 
         TemplateData::create(conn, new_template).expect("Failed inserting test template")
+    }
+
+    fn setup_valid_wdl_address() -> (String, Mock) {
+        // Get valid wdl test file
+        let test_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("GET", "/test/resource")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl)
+            .create();
+
+        (format!("{}/test/resource", mockito::server_url()), mock)
+    }
+
+    fn setup_invalid_wdl_address() -> (String, Mock) {
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("GET", "/test/resource")
+            .with_status(201)
+            .with_header("content_type", "text/plain")
+            .with_body("test")
+            .create();
+
+        (format!("{}/test/resource", mockito::server_url()), mock)
     }
 
     fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
@@ -479,6 +557,7 @@ mod tests {
         runs
     }
 
+
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
@@ -557,7 +636,6 @@ mod tests {
         let req = test::TestRequest::get()
             .uri("/templates?name=Kevin%27s%20Template")
             .to_request();
-        println!("{:?}", req);
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -598,18 +676,22 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_success() {
+        load_env_config();
+        let client = Client::default();
         let pool = get_test_db_pool();
 
         let pipeline = insert_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+
+        let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test"),
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin's test description")),
-            test_wdl: String::from("testwdlwdlwdlwdlwdl"),
-            eval_wdl: String::from("evalwdlwdlwdlwdlwdl"),
+            test_wdl: valid_wdl_address.clone(),
+            eval_wdl: valid_wdl_address,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -622,6 +704,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
+
         let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_template.name, new_template.name);
@@ -643,19 +726,22 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_failure() {
+    async fn create_failure_duplicate_name() {
+        load_env_config();
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (valid_wdl_address, mock)  = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: template.name.clone(),
             pipeline_id: template.pipeline_id,
             description: Some(String::from("Kevin's test description")),
-            test_wdl: String::from("testwdlwdlwdlwdlwdl"),
-            eval_wdl: String::from("evalwdlwdlwdlwdlwdl"),
+            test_wdl: valid_wdl_address.clone(),
+            eval_wdl: valid_wdl_address,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -680,6 +766,46 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn create_failure_invalid_wdl() {
+        load_env_config();
+        let pool = get_test_db_pool();
+
+        let template = create_test_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (invalid_wdl_address, mock)  = setup_invalid_wdl_address();
+
+        let new_template = NewTemplate {
+            name: template.name.clone(),
+            pipeline_id: Uuid::new_v4(),
+            description: Some(String::from("Kevin's test description")),
+            test_wdl: invalid_wdl_address.clone(),
+            eval_wdl: invalid_wdl_address,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/templates")
+            .set_json(&new_template)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Invalid WDL");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(
+            error_body.detail,
+            "Submitted test WDL failed WDL validation with womtool message: ERROR: Finished parsing without consuming all tokens.\n\ntest\n^\n     \n"
+        );
+    }
+
+    #[actix_rt::test]
     async fn update_success() {
         let pool = get_test_db_pool();
 
@@ -688,12 +814,14 @@ mod tests {
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
-            test_wdl: Some(String::from("wdl")),
+            test_wdl: Some(valid_wdl_address),
             eval_wdl: None,
         };
 
@@ -723,7 +851,7 @@ mod tests {
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -757,12 +885,14 @@ mod tests {
         let test = insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test.test_id);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
-            test_wdl: Some(String::from("testtesttesttesttest")),
+            test_wdl: Some(valid_wdl_address),
             eval_wdl: None,
         };
 
@@ -787,12 +917,12 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn update_failure() {
+    async fn update_failure_nonexistent_template() {
         let pool = get_test_db_pool();
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -818,6 +948,47 @@ mod tests {
         assert_eq!(
             error_body.detail,
             "Error while attempting to update template"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn update_failure_invalid_wdl() {
+        let pool = get_test_db_pool();
+
+        let template = create_test_template(&pool.get().unwrap());
+        let test_test =
+            insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
+        insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
+
+        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+
+        let (valid_wdl_address, valid_mock) = setup_valid_wdl_address();
+        let (invalid_wdl_address, invalid_mock) = setup_invalid_wdl_address();
+
+        let template_change = TemplateChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+            test_wdl: Some(valid_wdl_address),
+            eval_wdl: Some(invalid_wdl_address),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/templates/{}", template.template_id))
+            .set_json(&template_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Invalid WDL");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(
+            error_body.detail,
+            "Submitted eval WDL failed WDL validation with womtool message: ERROR: Finished parsing without consuming all tokens.\n\ntest\n^\n     \n"
         );
     }
 

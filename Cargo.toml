@@ -58,6 +58,10 @@ hyper-rustls = "^0.6"
 yup-oauth2 = "^1.0"
 # For decoding pubsub messages
 base64 = "*"
+# For interacting with data stored in Google Cloud Storage
+google-storage1 = "*"
+# For url encoding (necessary for interacting with the Google Cloud Storage API)
+percent-encoding = "2.1.0"
 
 [dev-dependencies]
 # For generating random values in test data

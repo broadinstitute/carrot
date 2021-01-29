@@ -9,7 +9,9 @@ mod notifications;
 mod requests;
 mod routes;
 mod schema;
+mod storage;
 mod util;
+mod validation;
 
 #[cfg(test)]
 mod unit_test_util;
@@ -43,6 +45,8 @@ fn main() {
 
     // Initialize configuration variables
     config::initialize();
+    // Initialize the google storage hub for interacting with google cloud storage
+    storage::gcloud_storage::initialize();
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));
@@ -79,6 +83,7 @@ fn main() {
         .expect("Failed to start status manager with StatusManagerSystem");
     });
 
+    info!("Initializing GCloud Subscriber for reading from GitHub");
     // Do the same for the gcloud subscriber thread if configured to use it
     let (gcloud_subscriber_send, gcloud_subscriber_thread) =
         manager::gcloud_subscriber::init_or_not(pool.clone());

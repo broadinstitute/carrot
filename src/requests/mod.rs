@@ -3,3 +3,4 @@
 // Declared as public to be accessed elsewhere
 pub mod cromwell_requests;
 pub mod github_requests;
+pub mod test_resource_requests;

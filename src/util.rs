@@ -3,7 +3,6 @@
 //! Should and will probably be moved to a module where it is relevant, in favor of having a
 //! forever-growing util module
 
-use std::env;
 use std::process::Command;
 use crate::config;
 
