@@ -204,7 +204,6 @@ impl PipelineData {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::EntityTypeEnum::Pipeline;
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::unit_test_util::*;
     use uuid::Uuid;

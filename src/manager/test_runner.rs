@@ -818,7 +818,6 @@ fn create_run_in_db(
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
-    use crate::manager::test_runner::Error::Build;
     use crate::manager::test_runner::{
         check_if_run_with_name_exists, create_run, create_run_in_db, format_eval_json_for_cromwell,
         format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building,
@@ -839,8 +838,6 @@ mod tests {
     use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::json;
-    use std::fs::read_to_string;
-    use std::path::Path;
     use uuid::Uuid;
 
     fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {

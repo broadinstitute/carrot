@@ -164,7 +164,7 @@ mod tests {
     use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum};
     use crate::manager::notification_handler::{
         post_run_complete_comment_if_from_github, send_notification_emails_for_test,
-        send_run_complete_emails, Error,
+        send_run_complete_emails,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
@@ -203,7 +203,7 @@ mod tests {
     fn insert_test_test_with_subscriptions_with_entities(
         conn: &PgConnection,
         email_base_name: &str,
-    ) -> (TestData) {
+    ) -> TestData {
         let pipeline = insert_test_pipeline(conn);
         let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
         let test = insert_test_test_with_template_id(conn, template.template_id.clone());

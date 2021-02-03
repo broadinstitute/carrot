@@ -146,6 +146,11 @@ impl fmt::Display for ReportStatusEnum {
     }
 }
 
+pub static REPORT_FAILURE_STATUSES: [ReportStatusEnum; 2] = [
+    ReportStatusEnum::Failed,
+    ReportStatusEnum::Aborted
+];
+
 /// Maps to the custom type `result_type_enum` in the DB
 ///
 /// Represents the enum used in the DB for storing the type of a result

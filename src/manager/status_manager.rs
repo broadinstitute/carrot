@@ -806,12 +806,7 @@ mod tests {
     use chrono::NaiveDateTime;
     use diesel::PgConnection;
     use serde_json::json;
-    use std::fs::read_to_string;
     use uuid::Uuid;
-    use yup_oauth2::{
-        ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage,
-        ServiceAccountKey,
-    };
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {

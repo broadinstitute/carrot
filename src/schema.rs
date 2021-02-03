@@ -192,6 +192,7 @@ table! {
         report_id -> Uuid,
         name -> Text,
         description -> Nullable<Text>,
+        metadata -> Jsonb,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,
     }

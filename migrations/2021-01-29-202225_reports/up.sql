@@ -1,13 +1,14 @@
 create table report (
-    report_id uuid primary key,
+    report_id uuid primary key DEFAULT uuid_generate_v4(),
     name text not null unique,
     description text,
+    metadata jsonb not null,
     created_at timestamptz not null default current_timestamp,
     created_by text
 );
 
 create table section (
-    section_id uuid primary key,
+    section_id uuid primary key DEFAULT uuid_generate_v4(),
     name text not null unique,
     description text,
     contents jsonb not null,
@@ -18,7 +19,6 @@ create table section (
 create table report_section (
     report_id uuid not null references report(report_id),
     section_id uuid not null references section(section_id),
-    name text not null unique,
     position integer not null,
     created_at timestamptz not null default current_timestamp,
     created_by text,
