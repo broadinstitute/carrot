@@ -3,11 +3,11 @@
 //! Provides functions for retrieving resources referenced in test configs, such as WDLs and test
 //! data
 
+use crate::storage::gcloud_storage;
 use actix_web::client::{Client, SendRequestError};
 use actix_web::error::PayloadError;
 use std::fmt;
 use std::str::Utf8Error;
-use crate::storage::gcloud_storage;
 
 #[derive(Debug)]
 pub enum Error {
@@ -15,7 +15,7 @@ pub enum Error {
     Payload(PayloadError),
     Utf8(Utf8Error),
     Failed(String),
-    GS(gcloud_storage::Error)
+    GS(gcloud_storage::Error),
 }
 
 impl fmt::Display for Error {
@@ -57,24 +57,18 @@ impl From<gcloud_storage::Error> for Error {
 /// Returns body of resource at `address` as a String
 ///
 /// Sends a get request to `address` and parses the response body as a String
-pub async fn get_resource_as_string(
-    client: &Client,
-    address: &str,
-) -> Result<String, Error> {
+pub async fn get_resource_as_string(client: &Client, address: &str) -> Result<String, Error> {
     // If the address is a gs address, retrieve the data using the gcloud storage api
     if address.starts_with("gs://") {
         Ok(gcloud_storage::retrieve_object_with_gs_uri(address)?)
     }
     // Otherwise, it's probably a normal location, so we'll retrieve it with a normal http get
-    else{
+    else {
         get_resource_from_normal_uri(client, address).await
     }
 }
 
-async fn get_resource_from_normal_uri(
-    client: &Client,
-    address: &str,
-) -> Result<String, Error> {
+async fn get_resource_from_normal_uri(client: &Client, address: &str) -> Result<String, Error> {
     let request = client.get(format!("{}", address));
 
     // Make the request
@@ -98,9 +92,7 @@ async fn get_resource_from_normal_uri(
 #[cfg(test)]
 mod tests {
 
-    use crate::requests::test_resource_requests::{
-        get_resource_as_string, Error,
-    };
+    use crate::requests::test_resource_requests::{get_resource_as_string, Error};
     use actix_web::client::Client;
 
     #[actix_rt::test]

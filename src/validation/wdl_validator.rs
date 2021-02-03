@@ -1,13 +1,13 @@
 //! Contains functionality for validating WDLs
 
+use crate::config;
+use crate::requests::test_resource_requests;
+use actix_web::client::Client;
+use core::fmt;
+use std::error;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use crate::config;
-use core::fmt;
-use std::error;
-use crate::requests::test_resource_requests;
-use actix_web::client::Client;
 use tempfile::NamedTempFile;
 
 /// Enum of possible errors from submitting a request to github
@@ -23,7 +23,7 @@ impl fmt::Display for Error {
         match self {
             Error::IO(e) => write!(f, "WDL Validate IO Error {}", e),
             Error::Request(e) => write!(f, "WDL Validate Request Error {}", e),
-            Error::Invalid(msg) => write!(f, "WDL Validate Invalid Error {}", msg)
+            Error::Invalid(msg) => write!(f, "WDL Validate Invalid Error {}", msg),
         }
     }
 }
@@ -53,7 +53,6 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
     write!(wdl_file, "{}", wdl)?;
     // Validate
     Ok(womtool_validate(wdl_file.path())?)
-
 }
 
 /// Runs the womtool validate utility on the WDL at the specified path
@@ -64,7 +63,11 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
     // Run womtool validate on the wdl
     let output = Command::new("sh")
         .arg("-c")
-        .arg(format!("java -jar {} validate {}", *config::WOMTOOL_LOCATION, wdl_path.display()))
+        .arg(format!(
+            "java -jar {} validate {}",
+            *config::WOMTOOL_LOCATION,
+            wdl_path.display()
+        ))
         .output()?;
 
     // Return true or false depending on womtool's exit status
@@ -73,7 +76,7 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
     } else {
         let error_msg = match String::from_utf8(output.stderr) {
             Ok(msg) => msg,
-            Err(e) => format!("Failed to get error message from womtool with error {}", e)
+            Err(e) => format!("Failed to get error message from womtool with error {}", e),
         };
         Err(Error::Invalid(error_msg))
     }
@@ -81,10 +84,10 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    use crate::unit_test_util::load_env_config;
+    use crate::validation::wdl_validator::{wdl_is_valid, Error};
     use actix_web::client::Client;
     use std::fs::read_to_string;
-    use crate::validation::wdl_validator::{Error, wdl_is_valid};
-    use crate::unit_test_util::load_env_config;
 
     #[actix_rt::test]
     async fn test_wdl_is_valid_true() {
@@ -103,9 +106,9 @@ mod tests {
             .with_body(test_wdl)
             .create();
 
-        let response =
-            wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
-                .await.unwrap();
+        let response = wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
+            .await
+            .unwrap();
 
         mock.assert();
     }
@@ -125,17 +128,14 @@ mod tests {
             .create();
 
         let response =
-            wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
-                .await;
+            wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url())).await;
 
         mock.assert();
 
         assert!(matches!(response, Err(Error::Invalid(_))));
 
         match response {
-            Err(Error::Invalid(msg)) => {
-                println!("Womtool error message: {}", msg)
-            },
+            Err(Error::Invalid(msg)) => println!("Womtool error message: {}", msg),
             _ => {}
         }
     }
@@ -153,8 +153,7 @@ mod tests {
             .create();
 
         let response =
-            wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
-                .await;
+            wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url())).await;
 
         mock.assert();
 

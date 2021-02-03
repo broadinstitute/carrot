@@ -1,8 +1,11 @@
 //! Contains structs and functions for doing operations on template_report relations.
 //!
-//! A template_report a mapping from a section to a report that will contain it, along with
-//! associated metadata.  Represented in the database by the TEMPLATE_REPORT table.
+//! A template_report is a mapping from a template to a report that can be generated from its runs,
+//! along with associated metadata.  Represented in the database by the TEMPLATE_REPORT table.
 
+use crate::custom_sql_types::{
+    ReportStatusEnum, RunStatusEnum, REPORT_FAILURE_STATUSES, RUN_FAILURE_STATUSES,
+};
 use crate::models::report::ReportData;
 use crate::schema::run;
 use crate::schema::run_report;
@@ -12,13 +15,12 @@ use crate::schema::test;
 use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;
+use diesel::dsl::{all, any};
 use diesel::prelude::*;
 use log::error;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use serde_json::Value;
-use diesel::dsl::{all, any};
-use crate::custom_sql_types::{RUN_FAILURE_STATUSES, RunStatusEnum, REPORT_FAILURE_STATUSES, ReportStatusEnum};
+use uuid::Uuid;
 
 /// Mapping to a template_report mapping as it exists in the TEMPLATE_REPORT table in the
 /// database.
@@ -277,7 +279,7 @@ impl TemplateReportData {
                 .filter(template_id.eq(query_template_id))
                 .filter(report_id.eq(query_report_id)),
         )
-            .execute(conn)?)
+        .execute(conn)?)
     }
 }
 
@@ -285,18 +287,18 @@ impl TemplateReportData {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::{RunStatusEnum, ReportStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::section::{NewSection, SectionData};
-    use crate::models::run::{NewRun, RunData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
+    use crate::models::section::{NewSection, SectionData};
+    use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use chrono::Utc;
-    use uuid::Uuid;
-    use crate::models::run_report::{NewRunReport, RunReportData};
-    use crate::models::template::{NewTemplate, TemplateData};
     use serde_json::json;
+    use uuid::Uuid;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
@@ -391,7 +393,6 @@ mod tests {
     }
 
     fn insert_test_template_report(conn: &PgConnection) -> TemplateReportData {
-
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
@@ -468,7 +469,6 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
@@ -507,8 +507,11 @@ mod tests {
         template_reports
     }
 
-    fn insert_test_run_report_failed_with_report_id_and_template_id(conn: &PgConnection, test_report_id: Uuid, test_template_id: Uuid) -> RunReportData {
-
+    fn insert_test_run_report_failed_with_report_id_and_template_id(
+        conn: &PgConnection,
+        test_report_id: Uuid,
+        test_template_id: Uuid,
+    ) -> RunReportData {
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
             template_id: test_template_id,
@@ -544,12 +547,14 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
-    fn insert_test_run_report_non_failed_with_report_id_and_template_id(conn: &PgConnection, test_report_id: Uuid, test_template_id: Uuid) -> RunReportData {
-
+    fn insert_test_run_report_non_failed_with_report_id_and_template_id(
+        conn: &PgConnection,
+        test_report_id: Uuid,
+        test_template_id: Uuid,
+    ) -> RunReportData {
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
             template_id: test_template_id,
@@ -585,8 +590,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[test]
@@ -600,7 +604,7 @@ mod tests {
             test_template_report.template_id,
             test_template_report.report_id,
         )
-            .expect("Failed to retrieve test template_report by id.");
+        .expect("Failed to retrieve test template_report by id.");
 
         assert_eq!(found_template_report, test_template_report);
     }
@@ -821,14 +825,18 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_template_report = insert_test_template_report(&conn);
-        insert_test_run_report_failed_with_report_id_and_template_id(&conn, test_template_report.report_id, test_template_report.template_id);
+        insert_test_run_report_failed_with_report_id_and_template_id(
+            &conn,
+            test_template_report.report_id,
+            test_template_report.template_id,
+        );
 
         let delete_section = TemplateReportData::delete(
             &conn,
             test_template_report.template_id,
             test_template_report.report_id,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(delete_section, 1);
 
@@ -855,7 +863,7 @@ mod tests {
             test_template_report.template_id,
             test_template_report.report_id,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(delete_section, 1);
 
@@ -876,7 +884,11 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_template_report = insert_test_template_report(&conn);
-        insert_test_run_report_non_failed_with_report_id_and_template_id(&conn, test_template_report.report_id, test_template_report.template_id);
+        insert_test_run_report_non_failed_with_report_id_and_template_id(
+            &conn,
+            test_template_report.report_id,
+            test_template_report.template_id,
+        );
 
         let delete_section = TemplateReportData::delete(
             &conn,

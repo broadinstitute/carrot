@@ -676,15 +676,12 @@ mod tests {
         let test_run_is_from_github = insert_test_run_is_from_github(&conn);
 
         let delete_result =
-            RunIsFromGithubData::delete_by_run_id(&conn, test_run_is_from_github.run_id)
-                .unwrap();
+            RunIsFromGithubData::delete_by_run_id(&conn, test_run_is_from_github.run_id).unwrap();
 
         assert_eq!(delete_result, 1);
 
-        let test_run_is_from_github2 = RunIsFromGithubData::find_by_run_id(
-            &conn,
-            test_run_is_from_github.run_id
-        );
+        let test_run_is_from_github2 =
+            RunIsFromGithubData::find_by_run_id(&conn, test_run_is_from_github.run_id);
 
         assert!(matches!(
             test_run_is_from_github2,

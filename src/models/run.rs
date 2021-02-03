@@ -3,6 +3,7 @@
 //! A run represents a specific run of a test.  Represented in the database by the RUN table.
 
 use crate::custom_sql_types::{RunStatusEnum, RUN_FAILURE_STATUSES};
+use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::run_result::RunResultData;
 use crate::models::run_software_version::RunSoftwareVersionData;
 use crate::schema::run;
@@ -18,7 +19,6 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::models::run_is_from_github::RunIsFromGithubData;
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -634,6 +634,9 @@ mod tests {
     use crate::custom_sql_types::ResultTypeEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
+    use crate::models::run_is_from_github::{
+        NewRunIsFromGithub, RunIsFromGithubData, RunIsFromGithubQuery,
+    };
     use crate::models::run_result::{NewRunResult, RunResultData, RunResultQuery};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionQuery};
     use crate::models::software::{NewSoftware, SoftwareData};
@@ -648,7 +651,6 @@ mod tests {
     use rand::prelude::*;
     use serde_json::json;
     use uuid::Uuid;
-    use crate::models::run_is_from_github::{RunIsFromGithubData, NewRunIsFromGithub, RunIsFromGithubQuery};
 
     fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
         let test_run = insert_test_run(&conn);
@@ -1001,7 +1003,10 @@ mod tests {
         run_software_versions
     }
 
-    fn insert_test_run_is_from_github_with_run_id(conn: &PgConnection, id: Uuid) -> RunIsFromGithubData {
+    fn insert_test_run_is_from_github_with_run_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunIsFromGithubData {
         let new_run_is_from_github = NewRunIsFromGithub {
             run_id: id,
             owner: String::from("ExampleOwner"),
@@ -1644,7 +1649,8 @@ mod tests {
             limit: None,
             offset: None,
         };
-        let deleted_run_is_from_github = RunIsFromGithubData::find(&conn, deleted_rows_query).unwrap();
+        let deleted_run_is_from_github =
+            RunIsFromGithubData::find(&conn, deleted_rows_query).unwrap();
         assert!(deleted_run_is_from_github.is_empty());
 
         let deleted_run = RunData::find_by_id(&conn, test_run.run_id);

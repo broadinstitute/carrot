@@ -5,19 +5,19 @@
 //! contained within the report is defined within the sections mapped to it. Represented in the
 //! database by the REPORT table.
 
+use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::schema::report;
 use crate::schema::report::dsl::*;
 use crate::schema::run_report;
 use crate::util;
 use chrono::NaiveDateTime;
-use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use serde_json::Value;
-use crate::custom_sql_types::{REPORT_FAILURE_STATUSES, ReportStatusEnum};
-use diesel::dsl::all;
 use core::fmt;
+use diesel::dsl::all;
+use diesel::prelude::*;
 use log::error;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
 /// Mapping to a report as it exists in the REPORT table in the database.
 ///
@@ -219,9 +219,7 @@ impl ReportData {
     /// Returns a result containing either the new report that was created or an error if the
     /// insert fails for some reason
     pub fn create(conn: &PgConnection, params: NewReport) -> Result<Self, diesel::result::Error> {
-        diesel::insert_into(report)
-            .values(&params)
-            .get_result(conn)
+        diesel::insert_into(report).values(&params).get_result(conn)
     }
 
     /// Updates a specified report in the DB
@@ -290,7 +288,6 @@ impl ReportData {
             .select(run_report::dsl::run_id)
             .first::<Uuid>(conn);
 
-
         match non_failed_run_reports_count {
             // If we got a result, there is a nonfailed run_report, so return true
             Ok(_) => Ok(true),
@@ -306,16 +303,16 @@ impl ReportData {
 mod tests {
 
     use super::*;
-    use crate::unit_test_util::*;
-    use uuid::Uuid;
-    use crate::models::run_report::{RunReportData, NewRunReport};
-    use chrono::Utc;
-    use crate::models::run::{RunData, NewRun};
+    use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
-    use crate::custom_sql_types::RunStatusEnum;
+    use crate::unit_test_util::*;
+    use chrono::Utc;
     use serde_json::json;
+    use uuid::Uuid;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
@@ -386,9 +383,7 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        reports.push(
-            ReportData::create(conn, new_report).expect("Failed inserting test report"),
-        );
+        reports.push(ReportData::create(conn, new_report).expect("Failed inserting test report"));
 
         let new_report = NewReport {
             name: String::from("Name2"),
@@ -397,9 +392,7 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        reports.push(
-            ReportData::create(conn, new_report).expect("Failed inserting test report"),
-        );
+        reports.push(ReportData::create(conn, new_report).expect("Failed inserting test report"));
 
         let new_report = NewReport {
             name: String::from("Name4"),
@@ -408,9 +401,7 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        reports.push(
-            ReportData::create(conn, new_report).expect("Failed inserting test report"),
-        );
+        reports.push(ReportData::create(conn, new_report).expect("Failed inserting test report"));
 
         reports
     }
@@ -425,7 +416,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let new_report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+        let new_report =
+            ReportData::create(conn, new_report).expect("Failed inserting test report");
 
         let new_run_report = NewRunReport {
             run_id: run.run_id,
@@ -437,8 +429,7 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     fn insert_test_run_report_non_failed(conn: &PgConnection) -> RunReportData {
@@ -451,7 +442,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let new_report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+        let new_report =
+            ReportData::create(conn, new_report).expect("Failed inserting test report");
 
         let new_run_report = NewRunReport {
             run_id: run.run_id,
@@ -463,8 +455,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[test]
@@ -510,8 +501,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 1);
         assert_eq!(found_reports[0], test_reports[0]);
@@ -536,8 +526,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 1);
         assert_eq!(found_reports[0], test_reports[0]);
@@ -562,8 +551,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 1);
         assert_eq!(found_reports[0], test_reports[0]);
@@ -588,8 +576,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 1);
         assert_eq!(found_reports[0], test_reports[0]);
@@ -614,8 +601,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 2);
         assert_eq!(found_reports[0], test_reports[2]);
@@ -634,8 +620,7 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 1);
         assert_eq!(found_reports[0], test_reports[0]);
@@ -660,8 +645,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 0);
 
@@ -678,8 +662,7 @@ mod tests {
             offset: None,
         };
 
-        let found_reports =
-            ReportData::find(&conn, test_query).expect("Failed to find reports");
+        let found_reports = ReportData::find(&conn, test_query).expect("Failed to find reports");
 
         assert_eq!(found_reports.len(), 3);
     }
@@ -775,7 +758,7 @@ mod tests {
                         diesel::result::DatabaseErrorKind::UniqueViolation,
                         _,
                     ),
-                )
+                ),
             )
         ));
     }
@@ -824,7 +807,8 @@ mod tests {
 
         let test_run_report = insert_test_run_report_non_failed(&conn);
 
-        let result = ReportData::has_nonfailed_run_reports(&conn, test_run_report.report_id).unwrap();
+        let result =
+            ReportData::has_nonfailed_run_reports(&conn, test_run_report.report_id).unwrap();
 
         assert!(result);
     }
@@ -835,7 +819,8 @@ mod tests {
 
         let test_run_report = insert_test_run_report_failed(&conn);
 
-        let result = ReportData::has_nonfailed_run_reports(&conn, test_run_report.report_id).unwrap();
+        let result =
+            ReportData::has_nonfailed_run_reports(&conn, test_run_report.report_id).unwrap();
 
         assert!(!result);
     }

@@ -244,7 +244,7 @@ impl ReportSectionData {
                 .filter(report_id.eq(query_report_id))
                 .filter(section_id.eq(query_section_id)),
         )
-            .execute(conn)?)
+        .execute(conn)?)
     }
 }
 
@@ -252,18 +252,18 @@ impl ReportSectionData {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::{RunStatusEnum, ReportStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::section::{NewSection, SectionData};
-    use crate::models::run::{NewRun, RunData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
+    use crate::models::section::{NewSection, SectionData};
+    use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use chrono::Utc;
-    use uuid::Uuid;
-    use crate::models::run_report::{NewRunReport, RunReportData};
-    use crate::models::template::{NewTemplate, TemplateData};
     use serde_json::json;
+    use uuid::Uuid;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
@@ -314,7 +314,6 @@ mod tests {
     }
 
     fn insert_test_report_section(conn: &PgConnection) -> ReportSectionData {
-
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
@@ -331,7 +330,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let section = SectionData::create(conn, new_section).expect("Failed inserting test section");
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
 
         let new_report_section = NewReportSection {
             section_id: section.section_id,
@@ -363,7 +363,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let section = SectionData::create(conn, new_section).expect("Failed inserting test section");
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
 
         let new_report_section = NewReportSection {
             section_id: section.section_id,
@@ -393,7 +394,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let section = SectionData::create(conn, new_section).expect("Failed inserting test section");
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
 
         let new_report_section = NewReportSection {
             section_id: section.section_id,
@@ -423,7 +425,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        let section = SectionData::create(conn, new_section).expect("Failed inserting test section");
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
 
         let new_report_section = NewReportSection {
             section_id: section.section_id,
@@ -440,7 +443,10 @@ mod tests {
         report_sections
     }
 
-    fn insert_test_run_report_failed_with_report_id(conn: &PgConnection, id: Uuid) -> RunReportData {
+    fn insert_test_run_report_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
         let run = insert_test_run(conn);
 
         let new_run_report = NewRunReport {
@@ -453,11 +459,13 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
-    fn insert_test_run_report_non_failed_with_report_id(conn: &PgConnection, id: Uuid) -> RunReportData {
+    fn insert_test_run_report_non_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
         let run = insert_test_run(conn);
 
         let new_run_report = NewRunReport {
@@ -470,8 +478,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[test]
@@ -485,7 +492,7 @@ mod tests {
             test_report_section.report_id,
             test_report_section.section_id,
         )
-            .expect("Failed to retrieve test report_section by id.");
+        .expect("Failed to retrieve test report_section by id.");
 
         assert_eq!(found_report_section, test_report_section);
     }
@@ -713,7 +720,7 @@ mod tests {
             test_report_section.report_id,
             test_report_section.section_id,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(delete_section, 1);
 
@@ -740,7 +747,7 @@ mod tests {
             test_report_section.report_id,
             test_report_section.section_id,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(delete_section, 1);
 

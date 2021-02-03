@@ -8,12 +8,12 @@ use crate::models::template::{
     NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
 };
 use crate::routes::error_body::ErrorBody;
+use crate::validation::wdl_validator;
+use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::{debug, error};
 use serde_json::json;
 use uuid::Uuid;
-use crate::validation::wdl_validator;
-use actix_web::client::Client;
 
 /// Handles requests to /templates/{id} for retrieving template info by template_id
 ///
@@ -328,19 +328,30 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// the `wdl_type` WDL is invalid for the template identified by `identifier` (e.g. Submitted test
 /// WDL failed WDL validation).  If the validation errors out for some reason, returns a 500
 /// response with a message explaining that the validation failed
-async fn validate_wdl(client: &Client, wdl: &str, wdl_type: &str, identifier: &str) -> Result<(), HttpResponse> {
+async fn validate_wdl(
+    client: &Client,
+    wdl: &str,
+    wdl_type: &str,
+    identifier: &str,
+) -> Result<(), HttpResponse> {
     match wdl_validator::wdl_is_valid(client, wdl).await {
         // If it's a valid WDL, that's fine, so return OK
         Ok(_) => Ok(()),
         // If it's not a valid WDL, return an error to inform the user
         Err(wdl_validator::Error::Invalid(msg)) => {
-            debug!("Invalid {} WDL submitted for template {} with womtool msg {}", wdl_type, identifier, msg);
+            debug!(
+                "Invalid {} WDL submitted for template {} with womtool msg {}",
+                wdl_type, identifier, msg
+            );
             Err(HttpResponse::BadRequest().json(ErrorBody {
                 title: "Invalid WDL".to_string(),
                 status: 400,
-                detail: format!("Submitted {} WDL failed WDL validation with womtool message: {}", wdl_type, msg),
+                detail: format!(
+                    "Submitted {} WDL failed WDL validation with womtool message: {}",
+                    wdl_type, msg
+                ),
             }))
-        },
+        }
         // If there is some error validating, return an appropriate message
         Err(e) => {
             error!("{}", e);
@@ -382,10 +393,10 @@ mod tests {
     use actix_web::{http, test, App};
     use chrono::Utc;
     use diesel::PgConnection;
-    use serde_json::Value;
-    use uuid::Uuid;
-    use std::fs::read_to_string;
     use mockito::Mock;
+    use serde_json::Value;
+    use std::fs::read_to_string;
+    use uuid::Uuid;
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
         let new_pipeline = NewPipeline {
@@ -427,7 +438,6 @@ mod tests {
     }
 
     fn setup_invalid_wdl_address() -> (String, Mock) {
-
         // Define mockito mapping for response
         let mock = mockito::mock("GET", "/test/resource")
             .with_status(201)
@@ -557,7 +567,6 @@ mod tests {
         runs
     }
 
-
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
@@ -682,7 +691,8 @@ mod tests {
 
         let pipeline = insert_test_pipeline(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app =
+            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
@@ -732,9 +742,15 @@ mod tests {
 
         let template = create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
-        let (valid_wdl_address, mock)  = setup_valid_wdl_address();
+        let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: template.name.clone(),
@@ -772,9 +788,15 @@ mod tests {
 
         let template = create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
-        let (invalid_wdl_address, mock)  = setup_invalid_wdl_address();
+        let (invalid_wdl_address, mock) = setup_invalid_wdl_address();
 
         let new_template = NewTemplate {
             name: template.name.clone(),
@@ -814,7 +836,13 @@ mod tests {
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
         let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
@@ -851,7 +879,13 @@ mod tests {
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -885,7 +919,13 @@ mod tests {
         let test = insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test.test_id);
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
         let (valid_wdl_address, mock) = setup_valid_wdl_address();
 
@@ -922,7 +962,13 @@ mod tests {
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -960,7 +1006,13 @@ mod tests {
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
-        let mut app = test::init_service(App::new().data(pool).data(Client::default()).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Client::default())
+                .configure(init_routes),
+        )
+        .await;
 
         let (valid_wdl_address, valid_mock) = setup_valid_wdl_address();
         let (invalid_wdl_address, invalid_mock) = setup_invalid_wdl_address();

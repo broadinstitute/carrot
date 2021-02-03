@@ -3,8 +3,8 @@
 //! Should and will probably be moved to a module where it is relevant, in favor of having a
 //! forever-growing util module
 
-use std::process::Command;
 use crate::config;
+use std::process::Command;
 
 /// Defines a sort clause to be used in DB queries
 #[derive(PartialEq, Debug)]
@@ -59,7 +59,6 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
 /// if the command is successful, and Ok(false) if it fails.  Returns an error if there is some
 /// error trying to execute the command
 pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
-
     let url_to_check = if *config::ENABLE_PRIVATE_GITHUB_ACCESS && url.contains("github.com") {
         format_github_url_with_creds(
             url,

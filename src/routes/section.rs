@@ -1,21 +1,24 @@
-//! Defines REST API mappings for operations on pipelines
+//! Defines REST API mappings for operations on sections
 //!
-//! Contains functions for processing requests to create, update, and search pipelines, along with
+//! Contains functions for processing requests to create, update, and search sections, along with
 //! their URI mappings
 
 use crate::db;
-use crate::models::pipeline::{NewPipeline, PipelineChangeset, PipelineData, PipelineQuery};
+use crate::models::section::{
+    NewSection, SectionChangeset, SectionData, SectionQuery, UpdateError,
+};
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use uuid::Uuid;
 
-/// Handles requests to /pipelines/{id} for retrieving pipeline info by pipeline_id
+/// Handles requests to /sections/{id} for retrieving section info by section_id
 ///
-/// This function is called by Actix-Web when a get request is made to the /pipelines/{id} mapping
+/// This function is called by Actix-Web when a get request is made to the /sections/{id} mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, and returns the
-/// retrieved pipeline, or an error message if there is no matching pipeline or some other
+/// retrieved section, or an error message if there is no matching section or some other
 /// error occurs
 ///
 /// # Panics
@@ -41,12 +44,12 @@ async fn find_by_id(
         }
     };
 
-    // Query DB for pipeline in new thread
+    // Query DB for section in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match PipelineData::find_by_id(&conn, id) {
-            Ok(pipeline) => Ok(pipeline),
+        match SectionData::find_by_id(&conn, id) {
+            Ok(section) => Ok(section),
             Err(e) => Err(e),
         }
     })
@@ -56,17 +59,17 @@ async fn find_by_id(
     .map_err(|e| {
         error!("{}", e);
         match e {
-            // If no pipeline is found, return a 404
+            // If no section is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipeline found".to_string(),
+                title: "No section found".to_string(),
                 status: 404,
-                detail: "No pipeline found with the specified ID".to_string(),
+                detail: "No section found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested pipeline from DB".to_string(),
+                detail: "Error while attempting to retrieve requested section from DB".to_string(),
             }),
         }
     })?;
@@ -74,25 +77,25 @@ async fn find_by_id(
     Ok(res)
 }
 
-/// Handles requests to /pipelines for retrieving pipeline info by query parameters
+/// Handles requests to /sections for retrieving section info by query parameters
 ///
-/// This function is called by Actix-Web when a get request is made to the /pipelines mapping
-/// It deserializes the query params to a PipelineQuery, connects to the db via a connection from
-/// `pool`, and returns the retrieved pipelines, or an error message if there is no matching
-/// pipeline or some other error occurs
+/// This function is called by Actix-Web when a get request is made to the /sections mapping
+/// It deserializes the query params to a SectionQuery, connects to the db via a connection from
+/// `pool`, and returns the retrieved sections, or an error message if there is no matching
+/// section or some other error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn find(
-    web::Query(query): web::Query<PipelineQuery>,
+    web::Query(query): web::Query<SectionQuery>,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    // Query DB for pipelines in new thread
+    // Query DB for sections in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match PipelineData::find(&conn, query) {
-            Ok(pipeline) => Ok(pipeline),
+        match SectionData::find(&conn, query) {
+            Ok(section) => Ok(section),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -104,9 +107,9 @@ async fn find(
         // If there are no results, return a 404
         if results.len() < 1 {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipelines found".to_string(),
+                title: "No sections found".to_string(),
                 status: 404,
-                detail: "No pipelines found with the specified parameters".to_string(),
+                detail: "No sections found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
@@ -119,32 +122,32 @@ async fn find(
         HttpResponse::InternalServerError().json(ErrorBody {
             title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to retrieve requested pipeline(s) from DB".to_string(),
+            detail: "Error while attempting to retrieve requested section(s) from DB".to_string(),
         })
     })?;
 
     Ok(res)
 }
 
-/// Handles requests to /pipelines for creating pipelines
+/// Handles requests to /sections for creating sections
 ///
-/// This function is called by Actix-Web when a post request is made to the /pipelines mapping
-/// It deserializes the request body to a NewPipeline, connects to the db via a connection from
-/// `pool`, creates a pipeline with the specified parameters, and returns the created pipeline, or
-/// an error message if creating the pipeline fails for some reason
+/// This function is called by Actix-Web when a post request is made to the /sections mapping
+/// It deserializes the request body to a NewSection, connects to the db via a connection from
+/// `pool`, creates a section with the specified parameters, and returns the created section, or
+/// an error message if creating the section fails for some reason
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn create(
-    web::Json(new_pipeline): web::Json<NewPipeline>,
+    web::Json(new_section): web::Json<NewSection>,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Insert in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match PipelineData::create(&conn, new_pipeline) {
-            Ok(pipeline) => Ok(pipeline),
+        match SectionData::create(&conn, new_section) {
+            Ok(section) => Ok(section),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -152,7 +155,7 @@ async fn create(
         }
     })
     .await
-    // If there is no error, return a response with the created pipeline
+    // If there is no error, return a response with the created section
     .map(|results| HttpResponse::Ok().json(results))
     .map_err(|e| {
         error!("{}", e);
@@ -160,24 +163,24 @@ async fn create(
         HttpResponse::InternalServerError().json(ErrorBody {
             title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new pipeline".to_string(),
+            detail: "Error while attempting to insert new section".to_string(),
         })
     })?;
     Ok(res)
 }
 
-/// Handles requests to /pipelines/{id} for updating a pipeline
+/// Handles requests to /sections/{id} for updating a section
 ///
-/// This function is called by Actix-Web when a put request is made to the /pipelines/{id} mapping
-/// It deserializes the request body to a PipelineChangeset, connects to the db via a connection
-/// from `pool`, updates the specified pipeline, and returns the updated pipeline or an error
+/// This function is called by Actix-Web when a put request is made to the /sections/{id} mapping
+/// It deserializes the request body to a SectionChangeset, connects to the db via a connection
+/// from `pool`, updates the specified section, and returns the updated section or an error
 /// message if some error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn update(
     id: web::Path<String>,
-    web::Json(pipeline_changes): web::Json<PipelineChangeset>,
+    web::Json(section_changes): web::Json<SectionChangeset>,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Parse ID into Uuid
@@ -198,36 +201,46 @@ async fn update(
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match PipelineData::update(&conn, id, pipeline_changes) {
-            Ok(pipeline) => Ok(pipeline),
+        match SectionData::update(&conn, id, section_changes) {
+            Ok(section) => Ok(section),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
             }
         }
     })
-    .await
-    // If there is no error, return a response with the updated pipeline
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to update pipeline".to_string(),
-        })
-    })?;
+        .await
+        // If there is no error, return a response with the updated section
+        .map(|results| HttpResponse::Ok().json(results))
+        .map_err(|e| {
+            error!("{}", e);
+            match e {
+                BlockingError::Error(UpdateError::Prohibited(_)) => {
+                    HttpResponse::Forbidden().json(ErrorBody {
+                        title: "Update params not allowed".to_string(),
+                        status: 403,
+                        detail: "Updating contents is not allowed if there is a run_report tied to a run mapped to this section that is running or has succeeded".to_string(),
+                    })
+                },
+                _ => {
+                    HttpResponse::InternalServerError().json(ErrorBody {
+                        title: "Server error".to_string(),
+                        status: 500,
+                        detail: "Error while attempting to update section".to_string(),
+                    })
+                }
+            }
+        })?;
 
     Ok(res)
 }
 
-/// Handles DELETE requests to /pipelines/{id} for deleting pipeline rows by pipeline_id
+/// Handles DELETE requests to /sections/{id} for deleting section rows by section_id
 ///
-/// This function is called by Actix-Web when a delete request is made to the /pipelines/{id}
+/// This function is called by Actix-Web when a delete request is made to the /sections/{id}
 /// mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
-/// delete the specified pipeline, returns the number or rows deleted or an error message if some
+/// delete the specified section, returns the number or rows deleted or an error message if some
 /// error occurs
 ///
 /// # Panics
@@ -250,11 +263,11 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
         }
     };
 
-    //Query DB for pipeline in new thread
+    //Query DB for section in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match PipelineData::delete(&conn, id) {
+        match SectionData::delete(&conn, id) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
                 error!("{}", e);
@@ -270,29 +283,29 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
             HttpResponse::Ok().json(json!({ "message": message }))
         } else {
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipeline found".to_string(),
+                title: "No section found".to_string(),
                 status: 404,
-                detail: "No pipeline found for the specified id".to_string(),
+                detail: "No section found for the specified id".to_string(),
             })
         }
     })
     .map_err(|e| {
         error!("{}", e);
         match e {
-            // Return a 403 if there's a foreign key violation
+            // If no template is found, return a 404
             BlockingError::Error(diesel::result::Error::DatabaseError(
                 diesel::result::DatabaseErrorKind::ForeignKeyViolation,
                 _,
             )) => HttpResponse::Forbidden().json(ErrorBody {
                 title: "Cannot delete".to_string(),
                 status: 403,
-                detail: "Cannot delete a pipeline if there is a template mapped to it".to_string(),
+                detail: "Cannot delete a section if there is a report mapped to it".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to delete requested pipeline from DB".to_string(),
+                detail: "Error while attempting to delete requested section from DB".to_string(),
             }),
         }
     })
@@ -304,13 +317,13 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::resource("/pipelines/{id}")
+        web::resource("/sections/{id}")
             .route(web::get().to(find_by_id))
             .route(web::put().to(update))
             .route(web::delete().to(delete_by_id)),
     );
     cfg.service(
-        web::resource("/pipelines")
+        web::resource("/sections")
             .route(web::get().to(find))
             .route(web::post().to(create)),
     );
@@ -320,67 +333,173 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
+    use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_section::{NewReportSection, ReportSectionData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
+    use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::Value;
     use uuid::Uuid;
 
-    fn create_test_pipeline(conn: &PgConnection) -> PipelineData {
-        let new_pipeline = NewPipeline {
-            name: String::from("Kevin's Pipeline"),
-            description: Some(String::from("Kevin made this pipeline for testing")),
+    fn insert_test_section(conn: &PgConnection) -> SectionData {
+        let new_section = NewSection {
+            name: String::from("Kevin's Section"),
+            description: Some(String::from("Kevin made this section for testing")),
+            contents: json!({"cells":[{"test":"test"}]}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline")
+        SectionData::create(conn, new_section).expect("Failed inserting test section")
     }
 
-    fn create_test_template_with_pipeline_id(conn: &PgConnection, id: Uuid) -> TemplateData {
-        let new_template = NewTemplate {
-            name: String::from("Kevin's Template"),
-            pipeline_id: id,
-            description: Some(String::from("Kevin made this template for testing")),
-            test_wdl: String::from("testtesttest"),
-            eval_wdl: String::from("evalevaleval"),
+    fn insert_test_report_section_with_section_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> ReportSectionData {
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test":"test"}]}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        TemplateData::create(conn, new_template).expect("Failed inserting test template")
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_report_section = NewReportSection {
+            section_id: id,
+            report_id: report.report_id,
+            position: 0,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        ReportSectionData::create(conn, new_report_section)
+            .expect("Failed inserting test report_section")
+    }
+
+    fn insert_test_run(conn: &PgConnection) -> RunData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        RunData::create(&conn, new_run).expect("Failed to insert run")
+    }
+
+    fn insert_test_run_report_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
+        let run = insert_test_run(conn);
+
+        let new_run_report = NewRunReport {
+            run_id: run.run_id,
+            report_id: id,
+            status: ReportStatusEnum::Failed,
+            cromwell_job_id: Some(String::from("testtesttesttest")),
+            results: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+    }
+
+    fn insert_test_run_report_non_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
+        let run = insert_test_run(conn);
+
+        let new_run_report = NewRunReport {
+            run_id: run.run_id,
+            report_id: id,
+            status: ReportStatusEnum::Running,
+            cromwell_job_id: Some(String::from("testtesttesttest")),
+            results: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
+        let section = insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .uri(&format!("/sections/{}", section.section_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
+        let test_section: SectionData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(test_pipeline, pipeline);
+        assert_eq!(test_section, section);
     }
 
     #[actix_rt::test]
     async fn find_by_id_failure_not_found() {
         let pool = get_test_db_pool();
 
-        create_test_pipeline(&pool.get().unwrap());
+        insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
+            .uri(&format!("/sections/{}", Uuid::new_v4()))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -389,21 +508,21 @@ mod tests {
         let result = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(error_body.title, "No pipeline found");
+        assert_eq!(error_body.title, "No section found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(error_body.detail, "No pipeline found with the specified ID");
+        assert_eq!(error_body.detail, "No section found with the specified ID");
     }
 
     #[actix_rt::test]
     async fn find_by_id_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_pipeline(&pool.get().unwrap());
+        insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/pipelines/123456789")
+            .uri("/sections/123456789")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -421,12 +540,12 @@ mod tests {
     async fn find_success() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
+        let section = insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/pipelines?name=Kevin%27s%20Pipeline")
+            .uri("/sections?name=Kevin%27s%20Section")
             .to_request();
         println!("{:?}", req);
         let resp = test::call_service(&mut app, req).await;
@@ -434,22 +553,22 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_pipelines: Vec<PipelineData> = serde_json::from_slice(&result).unwrap();
+        let test_sections: Vec<SectionData> = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(test_pipelines.len(), 1);
-        assert_eq!(test_pipelines[0], pipeline);
+        assert_eq!(test_sections.len(), 1);
+        assert_eq!(test_sections[0], section);
     }
 
     #[actix_rt::test]
     async fn find_failure_not_found() {
         let pool = get_test_db_pool();
 
-        create_test_pipeline(&pool.get().unwrap());
+        insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/pipelines?name=Gibberish")
+            .uri("/sections?name=Gibberish")
             .param("name", "Gibberish")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -459,11 +578,11 @@ mod tests {
         let result = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(error_body.title, "No pipelines found");
+        assert_eq!(error_body.title, "No sections found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No pipelines found with the specified parameters"
+            "No sections found with the specified parameters"
         );
     }
 
@@ -472,55 +591,58 @@ mod tests {
         let pool = get_test_db_pool();
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_pipeline = NewPipeline {
+        let new_section = NewSection {
             name: String::from("Kevin's test"),
             description: Some(String::from("Kevin's test description")),
             created_by: Some(String::from("Kevin@example.com")),
+            contents: json!({"test":"test"}),
         };
 
         let req = test::TestRequest::post()
-            .uri("/pipelines")
-            .set_json(&new_pipeline)
+            .uri("/sections")
+            .set_json(&new_section)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
+        let test_section: SectionData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(test_pipeline.name, new_pipeline.name);
+        assert_eq!(test_section.name, new_section.name);
         assert_eq!(
-            test_pipeline
+            test_section
                 .description
-                .expect("Created pipeline missing description"),
-            new_pipeline.description.unwrap()
+                .expect("Created section missing description"),
+            new_section.description.unwrap()
         );
         assert_eq!(
-            test_pipeline
+            test_section
                 .created_by
-                .expect("Created pipeline missing created_by"),
-            new_pipeline.created_by.unwrap()
+                .expect("Created section missing created_by"),
+            new_section.created_by.unwrap()
         );
+        assert_eq!(test_section.contents, new_section.contents);
     }
 
     #[actix_rt::test]
     async fn create_failure() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
+        let section = insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_pipeline = NewPipeline {
-            name: pipeline.name.clone(),
+        let new_section = NewSection {
+            name: section.name.clone(),
             description: Some(String::from("Kevin's test description")),
             created_by: Some(String::from("Kevin@example.com")),
+            contents: json!({"test":"test"}),
         };
 
         let req = test::TestRequest::post()
-            .uri("/pipelines")
-            .set_json(&new_pipeline)
+            .uri("/sections")
+            .set_json(&new_section)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -534,7 +656,7 @@ mod tests {
         assert_eq!(error_body.status, 500);
         assert_eq!(
             error_body.detail,
-            "Error while attempting to insert new pipeline"
+            "Error while attempting to insert new section"
         );
     }
 
@@ -542,51 +664,60 @@ mod tests {
     async fn update_success() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
+        let section = insert_test_section(&pool.get().unwrap());
+        let test_report_section =
+            insert_test_report_section_with_section_id(&pool.get().unwrap(), section.section_id);
+        insert_test_run_report_failed_with_report_id(
+            &pool.get().unwrap(),
+            test_report_section.report_id,
+        );
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let pipeline_change = PipelineChangeset {
+        let section_change = SectionChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            contents: Some(json!({"test": "test"})),
         };
 
         let req = test::TestRequest::put()
-            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
-            .set_json(&pipeline_change)
+            .uri(&format!("/sections/{}", section.section_id))
+            .set_json(&section_change)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_pipeline: PipelineData = serde_json::from_slice(&result).unwrap();
+        let test_section: SectionData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(test_pipeline.name, pipeline_change.name.unwrap());
+        assert_eq!(test_section.name, section_change.name.unwrap());
         assert_eq!(
-            test_pipeline
+            test_section
                 .description
-                .expect("Created pipeline missing description"),
-            pipeline_change.description.unwrap()
+                .expect("Created section missing description"),
+            section_change.description.unwrap()
         );
+        assert_eq!(test_section.contents, section_change.contents.unwrap());
     }
 
     #[actix_rt::test]
     async fn update_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_pipeline(&pool.get().unwrap());
+        insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let pipeline_change = PipelineChangeset {
+        let section_change = SectionChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            contents: None,
         };
 
         let req = test::TestRequest::put()
-            .uri("/pipelines/123456789")
-            .set_json(&pipeline_change)
+            .uri("/sections/123456789")
+            .set_json(&section_change)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -602,21 +733,22 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn update_failure() {
+    async fn update_failure_doesnt_exist() {
         let pool = get_test_db_pool();
 
-        create_test_pipeline(&pool.get().unwrap());
+        insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let pipeline_change = PipelineChangeset {
+        let section_change = SectionChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            contents: None,
         };
 
         let req = test::TestRequest::put()
-            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
-            .set_json(&pipeline_change)
+            .uri(&format!("/sections/{}", Uuid::new_v4()))
+            .set_json(&section_change)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -630,7 +762,49 @@ mod tests {
         assert_eq!(error_body.status, 500);
         assert_eq!(
             error_body.detail,
-            "Error while attempting to update pipeline"
+            "Error while attempting to update section"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn update_failure_prohibited() {
+        let pool = get_test_db_pool();
+
+        let test_section = insert_test_section(&pool.get().unwrap());
+        let test_report_section = insert_test_report_section_with_section_id(
+            &pool.get().unwrap(),
+            test_section.section_id,
+        );
+        insert_test_run_report_non_failed_with_report_id(
+            &pool.get().unwrap(),
+            test_report_section.report_id,
+        );
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let section_change = SectionChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+            contents: Some(json!({"test": "test"})),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/sections/{}", test_section.section_id))
+            .set_json(&section_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Update params not allowed");
+        assert_eq!(error_body.status, 403);
+        assert_eq!(
+            error_body.detail,
+            "Updating contents is not allowed if there is a run_report tied to a run mapped to this section that is running or has succeeded"
         );
     }
 
@@ -638,12 +812,12 @@ mod tests {
     async fn delete_success() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
+        let section = insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .uri(&format!("/sections/{}", section.section_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -660,15 +834,15 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn delete_failure_no_pipeline() {
+    async fn delete_failure_no_section() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
+        let section = insert_test_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/pipelines/{}", Uuid::new_v4()))
+            .uri(&format!("/sections/{}", Uuid::new_v4()))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -677,23 +851,29 @@ mod tests {
         let result = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(error_body.title, "No pipeline found");
+        assert_eq!(error_body.title, "No section found");
         assert_eq!(error_body.status, 404);
-        assert_eq!(error_body.detail, "No pipeline found for the specified id");
+        assert_eq!(error_body.detail, "No section found for the specified id");
     }
 
     #[actix_rt::test]
     async fn delete_failure_not_allowed() {
         let pool = get_test_db_pool();
 
-        let pipeline = create_test_pipeline(&pool.get().unwrap());
-        let template =
-            create_test_template_with_pipeline_id(&pool.get().unwrap(), pipeline.pipeline_id);
+        let test_section = insert_test_section(&pool.get().unwrap());
+        let test_report_section = insert_test_report_section_with_section_id(
+            &pool.get().unwrap(),
+            test_section.section_id,
+        );
+        insert_test_run_report_non_failed_with_report_id(
+            &pool.get().unwrap(),
+            test_report_section.report_id,
+        );
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/pipelines/{}", pipeline.pipeline_id))
+            .uri(&format!("/sections/{}", test_section.section_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -706,7 +886,7 @@ mod tests {
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Cannot delete a pipeline if there is a template mapped to it"
+            "Cannot delete a section if there is a report mapped to it"
         );
     }
 
@@ -717,7 +897,7 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri("/pipelines/123456789")
+            .uri("/sections/123456789")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 

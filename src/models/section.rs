@@ -3,20 +3,20 @@
 //! A section represents a section of a template for a report file to be generated from a run.
 //! Represented in the database by the SECTION table.
 
+use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::schema::report_section;
 use crate::schema::run_report;
 use crate::schema::section;
 use crate::schema::section::dsl::*;
 use crate::util;
 use chrono::NaiveDateTime;
-use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use serde_json::Value;
 use core::fmt;
-use crate::custom_sql_types::{REPORT_FAILURE_STATUSES, ReportStatusEnum};
-use diesel::dsl::{any, all};
+use diesel::dsl::{all, any};
+use diesel::prelude::*;
 use log::error;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
 /// Mapping to a section as it exists in the SECTION table in the database.
 ///
@@ -160,42 +160,42 @@ impl SectionData {
                         } else {
                             query = query.then_order_by(section_id.desc());
                         }
-                    },
+                    }
                     "name" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(name.asc());
                         } else {
                             query = query.then_order_by(name.desc());
                         }
-                    },
+                    }
                     "description" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(description.asc());
                         } else {
                             query = query.then_order_by(description.desc());
                         }
-                    },
+                    }
                     "contents" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(contents.asc());
                         } else {
                             query = query.then_order_by(contents.desc());
                         }
-                    },
+                    }
                     "created_at" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_at.asc());
                         } else {
                             query = query.then_order_by(created_at.desc());
                         }
-                    },
+                    }
                     "created_by" => {
                         if sort_clause.ascending {
                             query = query.then_order_by(created_by.asc());
                         } else {
                             query = query.then_order_by(created_by.desc());
                         }
-                    },
+                    }
                     // Don't add to the order by clause if the sort key isn't recognized
                     &_ => {}
                 }
@@ -289,18 +289,18 @@ impl SectionData {
 mod tests {
 
     use super::*;
-    use crate::unit_test_util::*;
-    use uuid::Uuid;
-    use serde_json::json;
-    use crate::models::report_section::{ReportSectionData, NewReportSection};
-    use crate::models::report::{NewReport, ReportData};
-    use crate::models::run_report::{RunReportData, NewRunReport};
-    use chrono::Utc;
-    use crate::models::run::{RunData, NewRun};
+    use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_section::{NewReportSection, ReportSectionData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
-    use crate::custom_sql_types::RunStatusEnum;
+    use crate::unit_test_util::*;
+    use chrono::Utc;
+    use serde_json::json;
+    use uuid::Uuid;
 
     fn insert_test_section(conn: &PgConnection) -> SectionData {
         let new_section = NewSection {
@@ -323,9 +323,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        sections.push(
-            SectionData::create(conn, new_section).expect("Failed inserting test section"),
-        );
+        sections
+            .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         let new_section = NewSection {
             name: String::from("Name2"),
@@ -334,9 +333,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        sections.push(
-            SectionData::create(conn, new_section).expect("Failed inserting test section"),
-        );
+        sections
+            .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         let new_section = NewSection {
             name: String::from("Name4"),
@@ -345,15 +343,16 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        sections.push(
-            SectionData::create(conn, new_section).expect("Failed inserting test section"),
-        );
+        sections
+            .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         sections
     }
 
-    fn insert_test_report_section_with_section_id(conn: &PgConnection, id: Uuid) -> ReportSectionData {
-
+    fn insert_test_report_section_with_section_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> ReportSectionData {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
@@ -422,7 +421,10 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_test_run_report_failed_with_report_id(conn: &PgConnection, id: Uuid) -> RunReportData {
+    fn insert_test_run_report_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
         let run = insert_test_run(conn);
 
         let new_run_report = NewRunReport {
@@ -435,11 +437,13 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
-    fn insert_test_run_report_non_failed_with_report_id(conn: &PgConnection, id: Uuid) -> RunReportData {
+    fn insert_test_run_report_non_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
         let run = insert_test_run(conn);
 
         let new_run_report = NewRunReport {
@@ -452,8 +456,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report)
-            .expect("Failed inserting test run_report")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[test]
@@ -499,8 +502,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 1);
         assert_eq!(found_sections[0], test_sections[0]);
@@ -525,8 +527,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 1);
         assert_eq!(found_sections[0], test_sections[0]);
@@ -551,8 +552,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 1);
         assert_eq!(found_sections[0], test_sections[0]);
@@ -577,8 +577,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 1);
         assert_eq!(found_sections[0], test_sections[0]);
@@ -603,8 +602,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 2);
         assert_eq!(found_sections[0], test_sections[2]);
@@ -623,8 +621,7 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 1);
         assert_eq!(found_sections[0], test_sections[0]);
@@ -649,8 +646,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 0);
 
@@ -667,8 +663,7 @@ mod tests {
             offset: None,
         };
 
-        let found_sections =
-            SectionData::find(&conn, test_query).expect("Failed to find sections");
+        let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 3);
     }
@@ -725,13 +720,14 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_section = insert_test_section(&conn);
-        let test_report_section = insert_test_report_section_with_section_id(&conn, test_section.section_id);
+        let test_report_section =
+            insert_test_report_section_with_section_id(&conn, test_section.section_id);
         insert_test_run_report_failed_with_report_id(&conn, test_report_section.report_id);
 
         let changes = SectionChangeset {
             name: Some(String::from("TestTestTestTest")),
             description: Some(String::from("TESTTESTTESTTEST")),
-            contents: Some(json!({"cells":[{"test1":"test"}]}))
+            contents: Some(json!({"cells":[{"test1":"test"}]})),
         };
 
         let updated_section = SectionData::update(&conn, test_section.section_id, changes)
@@ -749,21 +745,19 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_section = insert_test_section(&conn);
-        let test_report_section = insert_test_report_section_with_section_id(&conn, test_section.section_id);
+        let test_report_section =
+            insert_test_report_section_with_section_id(&conn, test_section.section_id);
         insert_test_run_report_non_failed_with_report_id(&conn, test_report_section.report_id);
 
         let changes = SectionChangeset {
             name: Some(String::from("TestTestTestTest")),
             description: Some(String::from("TESTTESTTESTTEST")),
-            contents: Some(json!({"cells":[{"test1":"test"}]}))
+            contents: Some(json!({"cells":[{"test1":"test"}]})),
         };
 
         let updated_section = SectionData::update(&conn, test_section.section_id, changes);
 
-        assert!(matches!(
-            updated_section,
-            Err(UpdateError::Prohibited(_))
-        ));
+        assert!(matches!(updated_section, Err(UpdateError::Prohibited(_))));
     }
 
     #[test]
@@ -788,7 +782,7 @@ mod tests {
                         diesel::result::DatabaseErrorKind::UniqueViolation,
                         _,
                     ),
-                )
+                ),
             )
         ));
     }

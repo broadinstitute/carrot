@@ -261,7 +261,7 @@ fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, 
             if key.is_empty() {
                 request.test_input_key = None;
             }
-        },
+        }
         None => {}
     }
     match &request.eval_input_key {
@@ -269,7 +269,7 @@ fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, 
             if key.is_empty() {
                 request.eval_input_key = None;
             }
-        },
+        }
         None => {}
     }
 
