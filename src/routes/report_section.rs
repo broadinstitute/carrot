@@ -1,46 +1,46 @@
-//! Defines REST API mappings for operations on template_result mappings
+//! Defines REST API mappings for operations on report_section mappings
 //!
-//! Contains functions for processing requests to create, update, and search template_result
+//! Contains functions for processing requests to create, update, and search report_section
 //! mappings, along with their URI mappings
 
 use crate::db;
-use crate::models::template_result::{
-    DeleteError, NewTemplateResult, TemplateResultData, TemplateResultQuery,
+use crate::models::report_section::{
+    DeleteError, NewReportSection, ReportSectionData, ReportSectionQuery,
 };
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
-/// Represents the part of a new template_result mapping that is received as a request body
+/// Represents the part of a new report_section mapping that is received as a request body
 ///
-/// The mapping for creating template_result mappings has template_id and result_id as path params
-/// and result_key and created_by are expected as part of the request body.  A NewTemplateResult
+/// The mapping for creating report_section mappings has report_id and section_id as path params
+/// and position and created_by are expected as part of the request body.  A NewReportSection
 /// cannot be deserialized from the request body, so this is used instead, and then a
-/// NewTemplateResult can be built from the instance of this and the ids from the path
+/// NewReportSection can be built from the instance of this and the ids from the path
 #[derive(Deserialize, Serialize)]
-struct NewTemplateResultIncomplete {
-    pub result_key: String,
+struct NewReportSectionIncomplete {
+    pub position: i32,
     pub created_by: Option<String>,
 }
 
-/// Handles requests to /templates/{id}/results/{result_id} for retrieving template_result mapping
-/// info by template_id and result_id
+/// Handles requests to /reports/{id}/sections/{section_id} for retrieving report_section mapping
+/// info by report_id and section_id
 ///
 /// This function is called by Actix-Web when a get request is made to the
-/// /templates/{id}/results/{result_id} mapping
-/// It parses the id and result_id from `req`, connects to the db via a connection from `pool`,
-/// and returns the retrieved template_result mapping, or an error message if there is no matching
-/// template_result mapping or some other error occurs
+/// /reports/{id}/sections/{section_id} mapping
+/// It parses the id and section_id from `req`, connects to the db via a connection from `pool`,
+/// and returns the retrieved report_section mapping, or an error message if there is no matching
+/// report_section mapping or some other error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database results in an error
+/// Panics if attempting to connect to the database sections in an error
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
-    let result_id = &req.match_info().get("result_id").unwrap();
+    let section_id = &req.match_info().get("section_id").unwrap();
 
     // Parse ID into Uuid
     let id = match Uuid::parse_str(id) {
@@ -49,33 +49,33 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
+                title: "Report ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
+                detail: "Report ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
 
-    // Parse result ID into Uuid
-    let result_id = match Uuid::parse_str(result_id) {
-        Ok(result_id) => result_id,
+    // Parse section ID into Uuid
+    let section_id = match Uuid::parse_str(section_id) {
+        Ok(section_id) => section_id,
         Err(e) => {
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Result ID formatted incorrectly".to_string(),
+                title: "Section ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "Result ID must be formatted as a Uuid".to_string(),
+                detail: "Section ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
 
-    // Query DB for result in new thread
+    // Query DB for section in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateResultData::find_by_template_and_result(&conn, id, result_id) {
-            Ok(template_result) => Ok(template_result),
+        match ReportSectionData::find_by_report_and_section(&conn, id, section_id) {
+            Ok(report_section) => Ok(report_section),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -83,44 +83,44 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    .map(|results| {
+    .map(|sections| {
         // If there is no error, return a response with the retrieved data
-        HttpResponse::Ok().json(results)
+        HttpResponse::Ok().json(sections)
     })
     .map_err(|e| {
         error!("{}", e);
         match e {
             // If no mapping is found, return a 404
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No template_result mapping found".to_string(),
+                title: "No report_section mapping found".to_string(),
                 status: 404,
-                detail: "No template_result mapping found with the specified ID".to_string(),
+                detail: "No report_section mapping found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to retrieve requested template_result from DB"
+                detail: "Error while attempting to retrieve requested report_section from DB"
                     .to_string(),
             }),
         }
     })
 }
 
-/// Handles requests to /templates/{id}/results for retrieving mapping info by query parameters
-/// and template id
+/// Handles requests to /reports/{id}/sections for retrieving mapping info by query parameters
+/// and report id
 ///
-/// This function is called by Actix-Web when a get request is made to the /templates/{id}/results
+/// This function is called by Actix-Web when a get request is made to the /reports/{id}/sections
 /// mapping
-/// It deserializes the query params to a TemplateResultQuery, connects to the db via a connection
+/// It deserializes the query params to a ReportSectionQuery, connects to the db via a connection
 /// from `pool`, and returns the retrieved mappings, or an error message if there is no matching
 /// mapping or some other error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database results in an error
+/// Panics if attempting to connect to the database sections in an error
 async fn find(
     id: web::Path<String>,
-    web::Query(mut query): web::Query<TemplateResultQuery>,
+    web::Query(mut query): web::Query<ReportSectionQuery>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     // Parse ID into Uuid
@@ -137,14 +137,14 @@ async fn find(
         }
     };
 
-    // Set template_id as part of query object
-    query.template_id = Some(id);
+    // Set report_id as part of query object
+    query.report_id = Some(id);
 
-    // Query DB for results in new thread
+    // Query DB for sections in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateResultData::find(&conn, query) {
+        match ReportSectionData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -153,18 +153,17 @@ async fn find(
         }
     })
     .await
-    .map(|results| {
-        if results.len() < 1 {
+    .map(|sections| {
+        if sections.len() < 1 {
             // If no mapping is found, return a 404
             HttpResponse::NotFound().json(ErrorBody {
-                title: "No template_result mapping found".to_string(),
+                title: "No report_section mapping found".to_string(),
                 status: 404,
-                detail: "No template_result mapping found with the specified parameters"
-                    .to_string(),
+                detail: "No report_section mapping found with the specified parameters".to_string(),
             })
         } else {
             // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+            HttpResponse::Ok().json(sections)
         }
     })
     .map_err(|e| {
@@ -178,26 +177,26 @@ async fn find(
     })
 }
 
-/// Handles requests to /templates/{id}/results/{result_id} mapping for creating template_result
+/// Handles requests to /reports/{id}/sections/{section_id} mapping for creating report_section
 /// mappings
 ///
 /// This function is called by Actix-Web when a post request is made to the
-/// /templates/{id}/results{result_id} mapping
-/// It deserializes the request body to a NewTemplateResultIncomplete, uses that with the id and
-/// result_id to assemble a NewTemplateResult, connects to the db via a connection from `pool`,
-/// creates a template_result mapping with the specified parameters, and returns the created
+/// /reports/{id}/sections{section_id} mapping
+/// It deserializes the request body to a NewReportSectionIncomplete, uses that with the id and
+/// section_id to assemble a NewReportSection, connects to the db via a connection from `pool`,
+/// creates a report_section mapping with the specified parameters, and returns the created
 /// mapping, or an error message if creating the mapping fails for some reason
 ///
 /// # Panics
-/// Panics if attempting to connect to the database results in an error
+/// Panics if attempting to connect to the database sections in an error
 async fn create(
     req: HttpRequest,
-    web::Json(new_template_result): web::Json<NewTemplateResultIncomplete>,
+    web::Json(new_report_section): web::Json<NewReportSectionIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
-    let result_id = &req.match_info().get("result_id").unwrap();
+    let section_id = &req.match_info().get("section_id").unwrap();
 
     // Parse ID into Uuid
     let id = match Uuid::parse_str(id) {
@@ -213,33 +212,33 @@ async fn create(
         }
     };
 
-    // Parse result ID into Uuid
-    let result_id = match Uuid::parse_str(result_id) {
-        Ok(result_id) => result_id,
+    // Parse section ID into Uuid
+    let section_id = match Uuid::parse_str(section_id) {
+        Ok(section_id) => section_id,
         Err(e) => {
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Result ID formatted incorrectly".to_string(),
+                title: "Section ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "Result ID must be formatted as a Uuid".to_string(),
+                detail: "Section ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
 
-    // Create a NewTemplateResult to pass to the create function
-    let new_template_result = NewTemplateResult {
-        template_id: id,
-        result_id: result_id,
-        result_key: new_template_result.result_key,
-        created_by: new_template_result.created_by,
+    // Create a NewReportSection to pass to the create function
+    let new_report_section = NewReportSection {
+        report_id: id,
+        section_id: section_id,
+        position: new_report_section.position,
+        created_by: new_report_section.created_by,
     };
 
     // Insert in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateResultData::create(&conn, new_template_result) {
+        match ReportSectionData::create(&conn, new_report_section) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -249,33 +248,33 @@ async fn create(
     })
     .await
     // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
+    .map(|sections| HttpResponse::Ok().json(sections))
     .map_err(|e| {
         error!("{}", e);
         // For any errors, return a 500
         HttpResponse::InternalServerError().json(ErrorBody {
             title: "Server error".to_string(),
             status: 500,
-            detail: "Error while attempting to insert new template result mapping".to_string(),
+            detail: "Error while attempting to insert new report section mapping".to_string(),
         })
     })
 }
 
-/// Handles DELETE requests to /templates/{id}/results/{result_id} for deleting template_result
+/// Handles DELETE requests to /reports/{id}/sections/{section_id} for deleting report_section
 /// mappings
 ///
 /// This function is called by Actix-Web when a delete request is made to the
-/// /templates/{id}/results/{result_id} mapping
+/// /reports/{id}/sections/{section_id} mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
-/// delete the specified template_result mapping, returning the number or rows deleted or an error
+/// delete the specified report_section mapping, returning the number or rows deleted or an error
 /// message if some error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the database results in an error
+/// Panics if attempting to connect to the database sections in an error
 async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
-    let result_id = &req.match_info().get("result_id").unwrap();
+    let section_id = &req.match_info().get("section_id").unwrap();
 
     // Parse ID into Uuid
     let id = match Uuid::parse_str(id) {
@@ -284,23 +283,23 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
+                title: "Report ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
+                detail: "Report ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
 
-    // Parse result ID into Uuid
-    let result_id = match Uuid::parse_str(result_id) {
-        Ok(result_id) => result_id,
+    // Parse section ID into Uuid
+    let section_id = match Uuid::parse_str(section_id) {
+        Ok(section_id) => section_id,
         Err(e) => {
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Result ID formatted incorrectly".to_string(),
+                title: "Section ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "Result ID must be formatted as a Uuid".to_string(),
+                detail: "Section ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -309,7 +308,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateResultData::delete(&conn, id, result_id) {
+        match ReportSectionData::delete(&conn, id, section_id) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
                 error!("{}", e);
@@ -319,34 +318,34 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
     })
         .await
         // If there is no error, verify that a row was deleted
-        .map(|results| {
-            if results > 0 {
-                let message = format!("Successfully deleted {} row", results);
+        .map(|sections| {
+            if sections > 0 {
+                let message = format!("Successfully deleted {} row", sections);
                 HttpResponse::Ok().json(json!({ "message": message }))
             } else {
                 HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template_result mapping found".to_string(),
+                    title: "No report_section mapping found".to_string(),
                     status: 404,
-                    detail: "No template_result mapping found for the specified id".to_string(),
+                    detail: "No report_section mapping found for the specified id".to_string(),
                 })
             }
         })
         .map_err(|e| {
             error!("{}", e);
             match e {
-                // If no template is found, return a 404
+                // If no report is found, return a 404
                 BlockingError::Error(
                     DeleteError::Prohibited(_)
                 ) => HttpResponse::Forbidden().json(ErrorBody {
                     title: "Cannot delete".to_string(),
                     status: 403,
-                    detail: "Cannot delete a template_result mapping if the associated template has non-failed runs".to_string(),
+                    detail: "Cannot delete a report_section mapping if the associated report has non-failed run_report".to_string(),
                 }),
                 // For other errors, return a 500
                 _ => HttpResponse::InternalServerError().json(ErrorBody {
                     title: "Server error".to_string(),
                     status: 500,
-                    detail: "Error while attempting to delete requested template_result mapping from DB".to_string(),
+                    detail: "Error while attempting to delete requested report_section mapping from DB".to_string(),
                 }),
             }
         })
@@ -358,30 +357,33 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::resource("/templates/{id}/results/{result_id}")
+        web::resource("/reports/{id}/sections/{section_id}")
             .route(web::get().to(find_by_id))
             .route(web::post().to(create))
             .route(web::delete().to(delete_by_id)),
     );
-    cfg.service(web::resource("/templates/{id}/results").route(web::get().to(find)));
+    cfg.service(web::resource("/reports/{id}/sections").route(web::get().to(find)));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::result::{NewResult, ResultData};
+    use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
+    use crate::models::section::{NewSection, SectionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
+    use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::Value;
     use uuid::Uuid;
 
-    fn create_test_template_and_result(conn: &PgConnection) -> (TemplateData, ResultData) {
+    fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
             name: String::from("Kevin's Pipeline 2"),
             description: Some(String::from("Kevin made this pipeline for testing 2")),
@@ -403,96 +405,140 @@ mod tests {
         let template =
             TemplateData::create(conn, new_template).expect("Failed inserting test template");
 
-        let new_result = NewResult {
-            name: String::from("Kevin's Result2"),
-            result_type: ResultTypeEnum::Numeric,
-            description: Some(String::from("Kevin made this result for testing")),
-            created_by: Some(String::from("Kevin2@example.com")),
-        };
-
-        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
-
-        (template, result)
-    }
-
-    fn create_test_template_result(conn: &PgConnection) -> TemplateResultData {
-        let (template, result) = create_test_template_and_result(conn);
-
-        let new_template_result = NewTemplateResult {
-            template_id: template.template_id,
-            result_id: result.result_id,
-            result_key: String::from("TestKey"),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        TemplateResultData::create(conn, new_template_result)
-            .expect("Failed inserting test template_result")
-    }
-
-    fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
-            template_id: id,
+            template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        TestData::create(conn, new_test).expect("Failed inserting test test")
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_non_failed_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
-        let new_run = NewRun {
-            test_id: id,
-            name: String::from("name1"),
-            status: RunStatusEnum::EvalRunning,
-            test_input: serde_json::from_str("{}").unwrap(),
-            eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
-            test_cromwell_job_id: Some(String::from("1234567890")),
-            eval_cromwell_job_id: Some(String::from("12345678901")),
+    fn insert_test_report_section(conn: &PgConnection) -> ReportSectionData {
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_section = NewSection {
+            name: String::from("Name"),
+            description: Some(String::from("Description")),
+            contents: json!({"cells":[{"test":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 0,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        ReportSectionData::create(conn, new_report_section)
+            .expect("Failed inserting test report_section")
+    }
+
+    fn insert_test_report_and_section(conn: &PgConnection) -> (ReportData, SectionData) {
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_section = NewSection {
+            name: String::from("Name"),
+            description: Some(String::from("Description")),
+            contents: json!({"cells":[{"test":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        (report, section)
+    }
+
+    fn insert_test_run_report_non_failed_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunReportData {
+        let run = insert_test_run(conn);
+
+        let new_run_report = NewRunReport {
+            run_id: run.run_id,
+            report_id: id,
+            status: ReportStatusEnum::Running,
+            cromwell_job_id: Some(String::from("testtesttesttest")),
+            results: None,
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: None,
         };
 
-        RunData::create(conn, new_run).expect("Failed inserting test run")
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
 
-        let new_template_result = create_test_template_result(&pool.get().unwrap());
+        let new_report_section = insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/results/{}",
-                new_template_result.template_id, new_template_result.result_id
+                "/reports/{}/sections/{}",
+                new_report_section.report_id, new_report_section.section_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
-        let result = test::read_body(resp).await;
-        let test_template_result: TemplateResultData = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let test_report_section: ReportSectionData = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(test_template_result, new_template_result);
+        assert_eq!(test_report_section, new_report_section);
     }
 
     #[actix_rt::test]
     async fn find_by_id_failure_not_found() {
         let pool = get_test_db_pool();
 
-        create_test_template_result(&pool.get().unwrap());
+        insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/results/{}",
+                "/reports/{}/sections/{}",
                 Uuid::new_v4(),
                 Uuid::new_v4()
             ))
@@ -501,14 +547,14 @@ mod tests {
 
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(error_body.title, "No template_result mapping found");
+        assert_eq!(error_body.title, "No report_section mapping found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No template_result mapping found with the specified ID"
+            "No report_section mapping found with the specified ID"
         );
     }
 
@@ -516,76 +562,73 @@ mod tests {
     async fn find_by_id_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_template_result(&pool.get().unwrap());
+        insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/templates/123456789/results/12345678910")
+            .uri("/reports/123456789/sections/12345678910")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.title, "Report ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+        assert_eq!(error_body.detail, "Report ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
     async fn find_success() {
         let pool = get_test_db_pool();
 
-        let new_template_result = create_test_template_result(&pool.get().unwrap());
+        let new_report_section = insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/results?result_key=TestKey",
-                new_template_result.template_id
+                "/reports/{}/sections?section_id={}",
+                new_report_section.report_id, new_report_section.section_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
-        let result = test::read_body(resp).await;
-        let test_template_results: Vec<TemplateResultData> =
-            serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let test_report_sections: Vec<ReportSectionData> =
+            serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(test_template_results[0], new_template_result);
+        assert_eq!(test_report_sections[0], new_report_section);
     }
 
     #[actix_rt::test]
     async fn find_failure_not_found() {
         let pool = get_test_db_pool();
 
-        create_test_template_result(&pool.get().unwrap());
+        insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!(
-                "/templates/{}/results?result_key=test",
-                Uuid::new_v4()
-            ))
+            .uri(&format!("/reports/{}/sections?position=0", Uuid::new_v4()))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(error_body.title, "No template_result mapping found");
+        assert_eq!(error_body.title, "No report_section mapping found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No template_result mapping found with the specified parameters"
+            "No report_section mapping found with the specified parameters"
         );
     }
 
@@ -593,19 +636,19 @@ mod tests {
     async fn find_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_template_result(&pool.get().unwrap());
+        insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/templates/123456789/results")
+            .uri("/reports/123456789/sections")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
         assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
@@ -616,38 +659,35 @@ mod tests {
     async fn create_success() {
         let pool = get_test_db_pool();
 
-        let (template, result) = create_test_template_and_result(&pool.get().unwrap());
+        let (report, section) = insert_test_report_and_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_template_result = NewTemplateResultIncomplete {
-            result_key: String::from("test"),
+        let new_report_section = NewReportSectionIncomplete {
+            position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
         let req = test::TestRequest::post()
             .uri(&format!(
-                "/templates/{}/results/{}",
-                template.template_id, result.result_id
+                "/reports/{}/sections/{}",
+                report.report_id, section.section_id
             ))
-            .set_json(&new_template_result)
+            .set_json(&new_report_section)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
-        let result = test::read_body(resp).await;
-        let test_template_result: TemplateResultData = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let test_report_section: ReportSectionData = serde_json::from_slice(&section).unwrap();
 
+        assert_eq!(test_report_section.position, new_report_section.position);
         assert_eq!(
-            test_template_result.result_key,
-            new_template_result.result_key
-        );
-        assert_eq!(
-            test_template_result
+            test_report_section
                 .created_by
-                .expect("Created template_result missing created_by"),
-            new_template_result.created_by.unwrap()
+                .expect("Created report_section missing created_by"),
+            new_report_section.created_by.unwrap()
         );
     }
 
@@ -655,45 +695,45 @@ mod tests {
     async fn create_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        create_test_template_result(&pool.get().unwrap());
+        insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/templates/123456789/results/12345678910")
+            .uri("/reports/123456789/sections/12345678910")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.title, "Report ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+        assert_eq!(error_body.detail, "Report ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
     async fn delete_success() {
         let pool = get_test_db_pool();
 
-        let template_result = create_test_template_result(&pool.get().unwrap());
+        let report_section = insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/templates/{}/results/{}",
-                template_result.template_id, template_result.result_id
+                "/reports/{}/sections/{}",
+                report_section.report_id, report_section.section_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
-        let result = test::read_body(resp).await;
-        let message: Value = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let message: Value = serde_json::from_slice(&section).unwrap();
 
         let expected_message = json!({
             "message": "Successfully deleted 1 row"
@@ -703,32 +743,32 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn delete_failure_no_template_result() {
+    async fn delete_failure_no_report_section() {
         let pool = get_test_db_pool();
 
-        let template_result = create_test_template_result(&pool.get().unwrap());
+        let report_section = insert_test_report_section(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/templates/{}/results/{}",
+                "/reports/{}/sections/{}",
                 Uuid::new_v4(),
-                template_result.result_id
+                report_section.section_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(error_body.title, "No template_result mapping found");
+        assert_eq!(error_body.title, "No report_section mapping found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No template_result mapping found for the specified id"
+            "No report_section mapping found for the specified id"
         );
     }
 
@@ -736,31 +776,32 @@ mod tests {
     async fn delete_failure_not_allowed() {
         let pool = get_test_db_pool();
 
-        let template_result = create_test_template_result(&pool.get().unwrap());
-        let test_test =
-            insert_test_test_with_template_id(&pool.get().unwrap(), template_result.template_id);
-        insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
+        let report_section = insert_test_report_section(&pool.get().unwrap());
+        insert_test_run_report_non_failed_with_report_id(
+            &pool.get().unwrap(),
+            report_section.report_id,
+        );
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/templates/{}/results/{}",
-                template_result.template_id, template_result.result_id
+                "/reports/{}/sections/{}",
+                report_section.report_id, report_section.section_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
         assert_eq!(error_body.title, "Cannot delete");
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Cannot delete a template_result mapping if the associated template has non-failed runs"
+            "Cannot delete a report_section mapping if the associated report has non-failed run_report"
         );
     }
 
@@ -771,17 +812,17 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/templates/123456789/results/123456789"))
+            .uri(&format!("/reports/123456789/sections/123456789"))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
 
-        let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
 
-        assert_eq!(error_body.title, "ID formatted incorrectly");
+        assert_eq!(error_body.title, "Report ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
+        assert_eq!(error_body.detail, "Report ID must be formatted as a Uuid");
     }
 }

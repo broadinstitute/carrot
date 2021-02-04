@@ -267,7 +267,15 @@ impl RunReportData {
     ) -> Result<usize, DeleteError> {
         // If this run_report has not failed, return an error
         let found_run_report =
-            RunReportData::find_by_run_and_report(conn, query_run_id, query_report_id)?;
+            match RunReportData::find_by_run_and_report(conn, query_run_id, query_report_id) {
+                Ok(data) => data,
+                Err(diesel::result::Error::NotFound) => {
+                    return Ok(0);
+                }
+                Err(e) => {
+                    return Err(DeleteError::DB(e));
+                }
+            };
         if !REPORT_FAILURE_STATUSES.contains(&found_run_report.status) {
             let err = DeleteError::Prohibited(String::from("Attempted to delete a run_report with a non-failure status.  Doing so is prohibited"));
             error!("Failed to delete due to error: {}", err);
