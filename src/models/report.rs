@@ -8,7 +8,9 @@
 use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::schema::report;
 use crate::schema::report::dsl::*;
+use crate::schema::report_section;
 use crate::schema::run_report;
+use crate::schema::section;
 use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;
@@ -213,6 +215,20 @@ impl ReportData {
         query.load::<Self>(conn)
     }
 
+    /// Retrieves the `contents` of each section mapped to the report specified by `id`, sorted by
+    /// the `position` of the report_section that defines the mapping
+    pub fn find_section_contents_ordered_by_positions_by_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<Vec<Value>, diesel::result::Error> {
+        report_section::table
+            .inner_join(section::table)
+            .filter(report_section::report_id.eq(id))
+            .select(section::contents)
+            .order(report_section::position)
+            .load::<Value>(conn)
+    }
+
     /// Inserts a new report into the DB
     ///
     /// Creates a new report row in the DB using `conn` with the values specified in `params`
@@ -313,6 +329,8 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::report_section::{ReportSectionData, NewReportSection};
+    use crate::models::section::{SectionData, NewSection};
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
@@ -456,6 +474,82 @@ mod tests {
         };
 
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+    }
+
+    fn insert_test_report_sections_with_report_id(conn: &PgConnection, id: Uuid) -> (Vec<ReportSectionData>, Vec<SectionData>) {
+        let mut report_sections = Vec::new();
+        let mut sections = Vec::new();
+
+        let new_section = NewSection {
+            name: String::from("Name1"),
+            description: Some(String::from("Description4")),
+            contents: json!({"cells":[{"test1":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        sections.push(
+            SectionData::create(conn, new_section).expect("Failed inserting test section")
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: sections[0].section_id,
+            report_id: id,
+            position: 1,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        let new_section = NewSection {
+            name: String::from("Name2"),
+            description: Some(String::from("Description5")),
+            contents: json!({"cells":[{"test2":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        sections.push(
+            SectionData::create(conn, new_section).expect("Failed inserting test section")
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: sections[1].section_id,
+            report_id: id,
+            position: 2,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        let new_section = NewSection {
+            name: String::from("Name5"),
+            description: Some(String::from("Description12")),
+            contents: json!({"cells":[{"test5":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        sections.push(
+            SectionData::create(conn, new_section).expect("Failed inserting test section")
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: sections[2].section_id,
+            report_id: id,
+            position: 3,
+            created_by: Some(String::from("Kelvin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        (report_sections, sections)
     }
 
     #[test]
@@ -668,6 +762,21 @@ mod tests {
     }
 
     #[test]
+    fn find_section_contents_ordered_by_positions_by_report_id_success() {
+        let conn = get_test_db_connection();
+
+        let test_report = insert_test_report(&conn);
+        let (_test_report_sections, test_sections) = insert_test_report_sections_with_report_id(&conn, test_report.report_id);
+
+        let test_results = ReportData::find_section_contents_ordered_by_positions_by_report_id(&conn, test_report.report_id).unwrap();
+
+        assert_eq!(test_results.len(), 3);
+        assert_eq!(test_results[0], test_sections[0].contents);
+        assert_eq!(test_results[1], test_sections[1].contents);
+        assert_eq!(test_results[2], test_sections[2].contents);
+    }
+
+    #[test]
     fn create_success() {
         let conn = get_test_db_connection();
 
@@ -780,15 +889,14 @@ mod tests {
             Err(diesel::result::Error::NotFound)
         ));
     }
-    /* TODO: Get this working once we have section and report_section created
+
     #[test]
     fn delete_failure_foreign_key() {
         let conn = get_test_db_connection();
 
-        let test_report = insert_test_report(&conn);
-        insert_test_template_with_report_id(&conn, test_report.report_id);
+        let test_run_report = insert_test_run_report_non_failed(&conn);
 
-        let delete_result = ReportData::delete(&conn, test_report.report_id);
+        let delete_result = ReportData::delete(&conn, test_run_report.report_id);
 
         assert!(matches!(
             delete_result,
@@ -799,7 +907,7 @@ mod tests {
                 ),
             )
         ));
-    }*/
+    }
 
     #[test]
     fn has_non_failed_run_reports_true() {

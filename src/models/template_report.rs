@@ -202,6 +202,29 @@ impl TemplateReportData {
         query.load::<Self>(conn)
     }
 
+    /// Queries the DB for a template_report relationship for the specified ids
+    ///
+    /// Queries the DB using `conn` to retrieve the first row with a template_id matching the
+    /// template id for the test specified by `query_test_id` and a report_id matching
+    /// `query_report_id`
+    /// Returns a result containing either the retrieved template_report mapping as a
+    /// TemplateReportData instance or an error if the query fails for some reason or if no
+    /// mapping is found matching the criteria
+    pub fn find_by_test_and_report(
+        conn: &PgConnection,
+        query_test_id: Uuid,
+        query_report_id: Uuid
+    ) -> Result<Self, diesel::result::Error> {
+        // Get template_id by test_id
+        let test_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(query_test_id))
+            .select(test::dsl::template_id);
+        template_report
+            .filter(report_id.eq(query_report_id))
+            .filter(template_id.eq(any(test_subquery)))
+            .first::<Self>(conn)
+    }
+
     /// Inserts a new template_report mapping into the DB
     ///
     /// Creates a new template_report row in the DB using `conn` with the values specified in
@@ -507,6 +530,20 @@ mod tests {
         template_reports
     }
 
+    fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test2"),
+            template_id: id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        TestData::create(conn, new_test).expect("Failed inserting test test")
+    }
+
     fn insert_test_run_report_failed_with_report_id_and_template_id(
         conn: &PgConnection,
         test_report_id: Uuid,
@@ -618,6 +655,41 @@ mod tests {
 
         assert!(matches!(
             nonexistent_template_report,
+            Err(diesel::result::Error::NotFound)
+        ));
+    }
+
+    #[test]
+    fn find_by_test_and_report_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template_report = insert_test_template_report(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template_report.template_id);
+
+        let found_template_report = TemplateReportData::find_by_test_and_report(
+            &conn,
+            test_test.test_id,
+            test_template_report.report_id,
+        )
+            .expect("Failed to retrieve test template_report by id.");
+
+        assert_eq!(found_template_report, test_template_report);
+    }
+
+    #[test]
+    fn find_by_test_and_report_does_not_exist() {
+        let conn = get_test_db_connection();
+
+        let test_template_report = insert_test_template_report(&conn);
+
+        let found_template_report = TemplateReportData::find_by_test_and_report(
+            &conn,
+            Uuid::new_v4(),
+            test_template_report.report_id,
+        );
+
+        assert!(matches!(
+            found_template_report,
             Err(diesel::result::Error::NotFound)
         ));
     }
