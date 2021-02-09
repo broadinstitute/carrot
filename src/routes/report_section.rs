@@ -4,9 +4,7 @@
 //! mappings, along with their URI mappings
 
 use crate::db;
-use crate::models::report_section::{
-    DeleteError, NewReportSection, ReportSectionData, ReportSectionQuery,
-};
+use crate::models::report_section::{DeleteError, NewReportSection, ReportSectionData, ReportSectionQuery, CreateError};
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
@@ -251,12 +249,22 @@ async fn create(
     .map(|sections| HttpResponse::Ok().json(sections))
     .map_err(|e| {
         error!("{}", e);
-        // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new report section mapping".to_string(),
-        })
+        match e {
+            // If no report is found, return a 404
+            BlockingError::Error(
+                CreateError::Prohibited(_)
+            ) => HttpResponse::Forbidden().json(ErrorBody {
+                title: "Cannot create".to_string(),
+                status: 403,
+                detail: "Cannot create a report_section mapping if the associated report has non-failed run_report".to_string(),
+            }),
+            // For other errors, return a 500
+            _ => HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Server error".to_string(),
+                status: 500,
+                detail: "Error while attempting to delete requested report_section mapping from DB".to_string(),
+            }),
+        }
     })
 }
 
@@ -712,6 +720,42 @@ mod tests {
         assert_eq!(error_body.title, "Report ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
         assert_eq!(error_body.detail, "Report ID must be formatted as a Uuid");
+    }
+
+    #[actix_rt::test]
+    async fn create_failure_prohibited() {
+        let pool = get_test_db_pool();
+
+        let (report, section) = insert_test_report_and_section(&pool.get().unwrap());
+        insert_test_run_report_non_failed_with_report_id(
+            &pool.get().unwrap(),
+            report.report_id,
+        );
+
+        let new_report_section = NewReportSectionIncomplete {
+            position: 0,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/reports/{}/sections/{}", report.report_id, section.section_id))
+            .set_json(&new_report_section)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+
+        let section = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
+
+        assert_eq!(error_body.title, "Cannot create");
+        assert_eq!(error_body.status, 403);
+        assert_eq!(
+            error_body.detail,
+            "Cannot create a report_section mapping if the associated report has non-failed run_report"
+        );
     }
 
     #[actix_rt::test]

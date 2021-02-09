@@ -182,6 +182,11 @@ lazy_static! {
     /// The location of the womtool jar to use to validate WDLs
     pub static ref WOMTOOL_LOCATION: String =
         env::var("WOMTOOL_LOCATION").expect("WOMTOOL_LOCATION environment variable not set");
+        
+    // Reporting
+    /// GCS directory where we'll put generated report files (in the form bucket-name/my/report/directory)
+    pub static ref REPORT_LOCATION: String =
+        env::var("REPORT_LOCATION").expect("REPORT_LOCATION environment variable not set");
 }
 
 /// Initializes all the necessary configuration variables
@@ -232,4 +237,7 @@ pub fn initialize() {
 
     // Validation
     lazy_static::initialize(&WOMTOOL_LOCATION);
+
+    // Reporting
+    lazy_static::initialize(&REPORT_LOCATION);
 }

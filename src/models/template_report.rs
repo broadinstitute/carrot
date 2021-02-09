@@ -304,6 +304,7 @@ impl TemplateReportData {
         )
         .execute(conn)?)
     }
+
 }
 
 #[cfg(test)]
@@ -449,7 +450,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"test":"test"}),
+            input_map: json!({"section4":{"input1":"value1"}}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -474,7 +475,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"test":"test"}),
+            input_map: json!({"section3":{"input1":"value1"}}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -495,7 +496,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"test3":"test"}),
+            input_map: json!({"section2":{"input1":"value1"}}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -518,7 +519,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"test4":"test"}),
+            input_map: json!({"section1":{"input1":"value1"}}),
             created_by: Some(String::from("Kelvin@example.com")),
         };
 
@@ -791,7 +792,7 @@ mod tests {
             TemplateReportData::find(&conn, test_query).expect("Failed to find template_reports");
 
         assert_eq!(found_template_reports.len(), 1);
-        assert_eq!(found_template_reports[0], test_template_reports[1]);
+        assert_eq!(found_template_reports[0], test_template_reports[0]);
 
         let test_query = TemplateReportQuery {
             template_id: None,
@@ -809,7 +810,7 @@ mod tests {
             TemplateReportData::find(&conn, test_query).expect("Failed to find template_reports");
 
         assert_eq!(found_template_reports.len(), 1);
-        assert_eq!(found_template_reports[0], test_template_reports[0]);
+        assert_eq!(found_template_reports[0], test_template_reports[1]);
     }
 
     #[test]
@@ -859,7 +860,7 @@ mod tests {
 
         let test_template_report = insert_test_template_report(&conn);
 
-        assert_eq!(test_template_report.input_map, json!({"test":"test"}));
+        assert_eq!(test_template_report.input_map, json!({"section4":{"input1":"value1"}}));
         assert_eq!(
             test_template_report.created_by,
             Some(String::from("Kevin@example.com"))

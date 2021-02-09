@@ -219,7 +219,7 @@ async fn update(
                     HttpResponse::Forbidden().json(ErrorBody {
                         title: "Update params not allowed".to_string(),
                         status: 403,
-                        detail: "Updating contents is not allowed if there is a run_report tied to a run mapped to this section that is running or has succeeded".to_string(),
+                        detail: "Updating name or contents is not allowed if there is a run_report tied to a run mapped to this section that is running or has succeeded".to_string(),
                     })
                 },
                 _ => {
@@ -804,7 +804,7 @@ mod tests {
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Updating contents is not allowed if there is a run_report tied to a run mapped to this section that is running or has succeeded"
+            "Updating name or contents is not allowed if there is a run_report tied to a run mapped to this section that is running or has succeeded"
         );
     }
 

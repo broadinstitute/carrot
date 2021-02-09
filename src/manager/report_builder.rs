@@ -8,11 +8,13 @@ use crate::models::run_report::{RunReportData, NewRunReport};
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
-use serde_json::{Value, json};
+use serde_json::{Value, json, Map};
 use uuid::Uuid;
 use log::error;
 use crate::custom_sql_types::ReportStatusEnum;
 use crate::models::template_report::TemplateReportData;
+use crate::models::section::SectionData;
+use crate::manager::util;
 
 /// Error type for possible errors returned by generating a run report
 #[derive(Debug)]
@@ -76,6 +78,7 @@ lazy_static! {
         })
     ];
 }
+
 /*
 pub fn create_run_report(
     conn: &PgConnection,
@@ -100,21 +103,39 @@ pub fn create_run_report(
     let report = ReportData::find_by_id(conn, report_id)?;
     // Get template_report so we can use the inputs map
     let template_report = TemplateReportData::find_by_test_and_report(conn, run.test_id, report_id)?;
+    let input_map = match &template_report.input_map {
+        Value::Object(map) => map,
+        _ => {
+            error!("Failed to parse input map as map");
+            return Err(Error::Parse(String::from("Failed to parse input map from template_report mapping as map")));
+        }
+    };
     // Assemble the report and its sections into a complete Jupyter Notebook json
-    let report_json = get_assembled_report(conn, &report)?;
+    let report_json = get_assembled_report(conn, &report, input_map)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
+
+    // Generate WDL from default WDL template
+
+    // Build inputs json from run and inputs map
+
+    // Submit report generation job to cromwell
+
+    // Update run_report in DB
 
 }*/
 
 /// Gets section contents for the specified report, and combines it with the report's metadata to
 /// produce the Jupyter Notebook (in json form) that will be used as a template for the report
-fn get_assembled_report(conn: &PgConnection, report: &ReportData) -> Result<Value, Error> {
+fn get_assembled_report(conn: &PgConnection, report: &ReportData, input_map: &Map<String, Value>) -> Result<Value, Error> {
     // Retrieve section contents with positions
-    let sections_contents = ReportData::find_section_contents_ordered_by_positions_by_report_id(conn, report.report_id)?;
+    let sections = SectionData::find_by_report_id_ordered_by_positions(conn, report.report_id)?;
     // Build a cells array for the notebook from sections_contents, starting with the default header
     // cells
     let mut cells: Vec<Value> = DEFAULT_HEADER_CELLS.clone();
-    for contents in &sections_contents {
+    for section in &sections {
+        let contents = &section.contents;
+        // Add a header cell
+        cells.push(create_section_header_cell(&section.name));
         // Extract that cells array from contents (return an error if any step of this fails)
         // First get it as an object
         let contents_object = match contents {
@@ -140,6 +161,28 @@ fn get_assembled_report(conn: &PgConnection, report: &ReportData) -> Result<Valu
             }
 
         };
+        // Next, extract the inputs for this section from the input map so we can make an input cell
+        // for this section
+        match input_map.get(&section.name) {
+            Some(obj) => {
+                // Get this section's input map as a map (or return an error if we can't)
+                match obj {
+                    Value::Object(map) => {
+                        // Get list of input names for the section
+                        let section_inputs: Vec<&str> = map.keys().map(|key| &**key).collect();
+                        // Build the input cell and add it to the cells list
+                        let input_cell = create_section_input_cell(&section.name, section_inputs);
+                        cells.push(input_cell);
+                    },
+                    _ => {
+                        error!("Section input map: {} not formatted correctly", obj);
+                        return Err(Error::Parse(format!("Section input map: {} not formatted correctly", obj)));
+                    }
+                }
+            }
+            // If there's no input map for this section, then we won't add an input cell
+            None => {}
+        }
         // Then add them to the cells list
         cells.append(&mut cells_array);
     }
@@ -157,9 +200,45 @@ fn get_assembled_report(conn: &PgConnection, report: &ReportData) -> Result<Valu
     // Return the final notebook json
     Ok(Value::Object(notebook))
 }
+
+/// Assembles and returns an ipynb json cell for reading inputs for a section from the inputs
+/// provided in the input file
+fn create_section_input_cell(section_name: &str, inputs: Vec<&str>) -> Value {
+    // We'll put each line of code in the section into this vector so we can fill in the source
+    // field in the cell json at the end (ipynb files expect code to be in a json array of lines in
+    // the source field within a cell)
+    let mut source: Vec<String> = Vec::new();
+    // Loop through the inputs and add a line for each to the source vector
+    for input in inputs {
+        source.push(format!("{} = carrot_inputs.inputs[\"{}\"].{}", input, section_name, input));
+    }
+    // Fill in the source section of the cell and return it as a json value
+    json!({
+        "cell_type": "code",
+        "execution_count": null,
+        "metadata": {},
+        "outputs": [],
+        "source": source
+    })
+}
+
+/// Assembles and returns an ipynb json cell for displaying the title of the section
+fn create_section_header_cell(section_name: &str) -> Value {
+    json!({
+        "source": [
+            format!("## {}", section_name)
+        ],
+        "cell_type": "markdown",
+        "metadata": {}
+    })
+}
+
 /*
-/// Writes `report_json` to an ipynb file and uploads it to GCS
+/// Writes `report_json` to an ipynb file, uploads it to GCS, and returns the gs uri of the file
 fn upload_report(report_json: Value) -> Result<String, Error> {
+    // Write the json to a temporary file
+    let report_file = util::get_temp_file(&report_json.to_string())?;
+    // Upload that file to GCS
 
 }*/
 
@@ -255,7 +334,7 @@ mod tests {
                     "metadata": {},
                     "outputs": [],
                     "source": [
-                        "print('Goodbye')",
+                        "print(message)",
                    ]
                 }
             ]}),
@@ -338,9 +417,12 @@ mod tests {
     fn get_assembled_report_success() {
         let conn = get_test_db_connection();
 
-        let (test_report, _test_report_sections, _test_section) = insert_test_report_mapped_to_sections(&conn);
+        let (test_report, _test_report_sections, test_sections) = insert_test_report_mapped_to_sections(&conn);
 
-        let result_report = get_assembled_report(&conn, &test_report).unwrap();
+        let input_obj = json!({"Name2":{"message":"Hi"}});
+        let input_map = input_obj.as_object().unwrap();
+
+        let result_report = get_assembled_report(&conn, &test_report, input_map).unwrap();
 
         let expected_report = json!({
             "metadata": {
@@ -396,6 +478,13 @@ mod tests {
                     ]
                 },
                 {
+                    "source": [
+                        "## Name1"
+                    ],
+                    "cell_type": "markdown",
+                    "metadata": {}
+                },
+                {
                     "cell_type": "code",
                     "execution_count": null,
                     "metadata": {},
@@ -405,13 +494,36 @@ mod tests {
                    ]
                 },
                 {
+                    "source": [
+                        "## Name2"
+                    ],
+                    "cell_type": "markdown",
+                    "metadata": {}
+                },
+                {
                     "cell_type": "code",
                     "execution_count": null,
                     "metadata": {},
                     "outputs": [],
                     "source": [
-                        "print('Goodbye')",
+                        "message = carrot_inputs.inputs[\"Name2\"].message",
                    ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print(message)",
+                   ]
+                },
+                {
+                    "source": [
+                        "## Name5"
+                    ],
+                    "cell_type": "markdown",
+                    "metadata": {}
                 },
                 {
                     "cell_type": "code",
@@ -435,7 +547,10 @@ mod tests {
         let (test_report, _test_report_sections, _test_section) = insert_test_report_mapped_to_sections(&conn);
         let (_bad_report_section, _bad_section) = insert_bad_section_for_report(&conn, test_report.report_id);
 
-        let result_report = get_assembled_report(&conn, &test_report);
+        let input_obj = json!({"Name2":{"message":"Hi"}});
+        let input_map = input_obj.as_object().unwrap();
+
+        let result_report = get_assembled_report(&conn, &test_report, input_map);
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
 

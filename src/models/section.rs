@@ -66,8 +66,8 @@ pub struct NewSection {
 
 /// Represents fields to change when updating a section
 ///
-/// Only name and description can be modified if there is a report with a non-failed run report
-/// associated with the specified section.  If there is not, contents can also be modified
+/// Only description can be modified if there is a report with a non-failed run report associated
+/// with the specified section.  If there is not, contents can also be modified
 #[derive(Deserialize, Serialize, AsChangeset, Debug)]
 #[table_name = "section"]
 pub struct SectionChangeset {
@@ -112,6 +112,27 @@ impl SectionData {
     /// criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         section.filter(section_id.eq(id)).first::<Self>(conn)
+    }
+
+    /// Retrieves all sections mapped to the report specified by `id`, sorted by the `position` of
+    /// the report_section that defines the mapping
+    pub fn find_by_report_id_ordered_by_positions(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<Vec<SectionData>, diesel::result::Error> {
+        report_section::table
+            .inner_join(section::table)
+            .filter(report_section::report_id.eq(id))
+            .select((
+                section_id,
+                name,
+                description,
+                contents,
+                created_at,
+                created_by
+            ))
+            .order(report_section::position)
+            .load::<SectionData>(conn)
     }
 
     /// Queries the DB for sections matching the specified query criteria
@@ -238,7 +259,7 @@ impl SectionData {
     ) -> Result<Self, UpdateError> {
         // If trying to update contents, verify that no non-failed run_reports exist for a report
         // related to this section
-        if matches!(params.contents, Some(_)) {
+        if matches!(params.contents, Some(_)) || matches!(params.name, Some(_)) {
             // Subquery for getting all report_ids for reports mapped to the specified section
             let report_section_subquery = report_section::dsl::report_section
                 .filter(report_section::dsl::section_id.eq(id))
@@ -347,6 +368,17 @@ mod tests {
             .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         sections
+    }
+
+    fn insert_test_report(conn: &PgConnection) -> ReportData {
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test1":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        ReportData::create(conn, new_report).expect("Failed inserting test report")
     }
 
     fn insert_test_report_section_with_section_id(
@@ -458,6 +490,83 @@ mod tests {
 
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
+
+    fn insert_test_report_sections_with_report_id(conn: &PgConnection, id: Uuid) -> (Vec<ReportSectionData>, Vec<SectionData>) {
+        let mut report_sections = Vec::new();
+        let mut sections = Vec::new();
+
+        let new_section = NewSection {
+            name: String::from("Name1"),
+            description: Some(String::from("Description4")),
+            contents: json!({"cells":[{"test1":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        sections.push(
+            SectionData::create(conn, new_section).expect("Failed inserting test section")
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: sections[0].section_id,
+            report_id: id,
+            position: 1,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        let new_section = NewSection {
+            name: String::from("Name2"),
+            description: Some(String::from("Description5")),
+            contents: json!({"cells":[{"test2":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        sections.push(
+            SectionData::create(conn, new_section).expect("Failed inserting test section")
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: sections[1].section_id,
+            report_id: id,
+            position: 2,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        let new_section = NewSection {
+            name: String::from("Name5"),
+            description: Some(String::from("Description12")),
+            contents: json!({"cells":[{"test5":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        sections.push(
+            SectionData::create(conn, new_section).expect("Failed inserting test section")
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: sections[2].section_id,
+            report_id: id,
+            position: 3,
+            created_by: Some(String::from("Kelvin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        (report_sections, sections)
+    }
+
 
     #[test]
     fn find_by_id_exists() {
@@ -666,6 +775,21 @@ mod tests {
         let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 3);
+    }
+
+    #[test]
+    fn find_by_report_id_order_by_positions_success() {
+        let conn = get_test_db_connection();
+
+        let test_report = insert_test_report(&conn);
+        let (_test_report_sections, test_sections) = insert_test_report_sections_with_report_id(&conn, test_report.report_id);
+
+        let test_results = SectionData::find_by_report_id_ordered_by_positions(&conn, test_report.report_id).unwrap();
+
+        assert_eq!(test_results.len(), 3);
+        assert_eq!(test_results[0], test_sections[0]);
+        assert_eq!(test_results[1], test_sections[1]);
+        assert_eq!(test_results[2], test_sections[2]);
     }
 
     #[test]
