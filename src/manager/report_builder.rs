@@ -3,8 +3,8 @@
 //!
 
 use crate::models::report::ReportData;
-use crate::models::run::RunData;
-use crate::models::run_report::{RunReportData, NewRunReport};
+use crate::models::run::{RunData, RunWithResultData};
+use crate::models::run_report::{RunReportData, NewRunReport, RunReportChangeset};
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
@@ -15,13 +15,18 @@ use crate::custom_sql_types::ReportStatusEnum;
 use crate::models::template_report::TemplateReportData;
 use crate::models::section::SectionData;
 use crate::manager::util;
+use crate::storage::gcloud_storage;
+use crate::config;
+use crate::models::template::TemplateData;
 
 /// Error type for possible errors returned by generating a run report
 #[derive(Debug)]
 pub enum Error {
     DB(diesel::result::Error),
     Parse(String),
-    Json(serde_json::Error)
+    Json(serde_json::Error),
+    GCS(gcloud_storage::Error),
+    IO(std::io::Error),
 }
 
 impl std::error::Error for Error {}
@@ -31,7 +36,9 @@ impl fmt::Display for Error {
         match self {
             Error::DB(e) => write!(f, "Error DB {}", e),
             Error::Parse(e) => write!(f, "Error Parse {}", e),
-            Error::Json(e) => write!(f, "Error Json {}", e)
+            Error::Json(e) => write!(f, "Error Json {}", e),
+            Error::GCS(e) => write!(f, "Error GCS {}", e),
+            Error::IO(e) => write!(f, "Error IO {}", e)
         }
     }
 }
@@ -45,6 +52,18 @@ impl From<diesel::result::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Error {
         Error::Json(e)
+    }
+}
+
+impl From<gcloud_storage::Error> for Error {
+    fn from(e: gcloud_storage::Error) -> Error {
+        Error::GCS(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Error {
+        Error::IO(e)
     }
 }
 
@@ -80,7 +99,7 @@ lazy_static! {
 }
 
 /*
-pub fn create_run_report(
+pub async fn create_run_report(
     conn: &PgConnection,
     client: &Client,
     run_id: Uuid,
@@ -99,7 +118,7 @@ pub fn create_run_report(
     };
     let run_report = RunReportData::create(conn, new_run_report)?;
     // Retrieve run and report
-    let run = RunData::find_by_id(conn, run_id)?;
+    let run = RunWithResultData::find_by_id(conn, run_id)?;
     let report = ReportData::find_by_id(conn, report_id)?;
     // Get template_report so we can use the inputs map
     let template_report = TemplateReportData::find_by_test_and_report(conn, run.test_id, report_id)?;
@@ -110,23 +129,34 @@ pub fn create_run_report(
             return Err(Error::Parse(String::from("Failed to parse input map from template_report mapping as map")));
         }
     };
+    // Get template so we can check the wdls for input and output types
+    let template = TemplateData::find_by_id(conn, template_report.template_id)?;
     // Assemble the report and its sections into a complete Jupyter Notebook json
     let report_json = get_assembled_report(conn, &report, input_map)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
+    let report_template_location = upload_report_template(report_json, &report.name, &run.name)?;
+    // Assemble list of inputs with types and values
 
     // Generate WDL from default WDL template
 
     // Build inputs json from run and inputs map
 
     // Submit report generation job to cromwell
-
+    let start_job_response =
+        util::start_job_from_file(client, wdl_file_path, &json_file.path()).await?;
     // Update run_report in DB
-
+    let run_report_update = RunReportChangeset{
+        status: Some(ReportStatusEnum::Submitted),
+        cromwell_job_id: Some(start_job_response.id),
+        results: None,
+        finished_at: None,
+    };
+    Ok(RunReportData::update(conn, run_report.run_id, run_report.report_id, run_report_update)?)
 }*/
 
 /// Gets section contents for the specified report, and combines it with the report's metadata to
 /// produce the Jupyter Notebook (in json form) that will be used as a template for the report
-fn get_assembled_report(conn: &PgConnection, report: &ReportData, input_map: &Map<String, Value>) -> Result<Value, Error> {
+fn create_report_template(conn: &PgConnection, report: &ReportData, input_map: &Map<String, Value>) -> Result<Value, Error> {
     // Retrieve section contents with positions
     let sections = SectionData::find_by_report_id_ordered_by_positions(conn, report.report_id)?;
     // Build a cells array for the notebook from sections_contents, starting with the default header
@@ -233,13 +263,53 @@ fn create_section_header_cell(section_name: &str) -> Value {
     })
 }
 
-/*
-/// Writes `report_json` to an ipynb file, uploads it to GCS, and returns the gs uri of the file
-fn upload_report(report_json: Value) -> Result<String, Error> {
-    // Write the json to a temporary file
-    let report_file = util::get_temp_file(&report_json.to_string())?;
-    // Upload that file to GCS
 
+/// Writes `report_json` to an ipynb file, uploads it to GCS, and returns the gs uri of the file
+fn upload_report_template(report_json: Value, report_name: &str, run_name: &str) -> Result<String, Error> {
+    // Write the json to a temporary file
+    let report_file = match util::get_temp_file(&report_json.to_string()) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Failed to create temp file for uploading report template");
+            return Err(Error::IO(e));
+        }
+    };
+    let report_file = report_file.into_file();
+    // Build a name for the file
+    let report_name = format!("{}/{}/report_template.ipynb", run_name, report_name);
+    // Upload that file to GCS
+    Ok(gcloud_storage::upload_file_to_gs_uri(report_file, &*config::REPORT_LOCATION, &report_name)?)
+}
+/*
+fn build_input_list(input_map: &Map<String, Value>, template: TemplateData, run: RunWithResultData) {
+
+}
+
+/// Generates a filled wdl that will run the jupyter notebook to generate reports.  The WDL fills in
+/// the placeholder values in the jupyter_report_generator_template.wdl file
+fn create_generator_wdl() -> Result<String, Error> {
+    // Load the wdl template as part of the build so it will be included as a static string in the
+    // carrot application binary
+    let wdl_template = include_str!("../../scripts/wdl/jupyter_report_generator_template.wdl");
+    // There are five placeholders that need to be filled in within the wdl template:
+    // 1. [~task_inputs~] - the inputs to the jupyter notebook, formatted for the input block for
+    //    the wdl task that runs the notebook
+    // 2. [~input_sizes~] - a series of calls to the wdl `size` function to get the size of each
+    //    File input so we can size the disk properly within the wdl task runtime section
+    // 3. [~inputs_json~] - the input json (within a string) that will be passed to the jupyter
+    //    notebook, containing the inputs to the notebook filled using the variable names we use
+    //    within the wdl (this is necessary so we can get the localized filenames of any File inputs
+    // 4. [~workflow_inputs~] - the same as [~task_inputs~], but in the workflow input block
+    // 5. [~call_inputs~] - the inputs to the notebook, formatted for the input section of the call
+    //    block
+
+    // [~task_inputs~] and [~workflow_inputs]
+
+    // [~input_sizes~]
+
+    // [~inputs_json~]
+
+    // [~call_inputs~]
 }*/
 
 #[cfg(test)]
@@ -249,7 +319,7 @@ mod tests {
     use crate::models::report::{NewReport, ReportData};
     use crate::models::section::{NewSection, SectionData};
     use crate::unit_test_util::get_test_db_connection;
-    use crate::manager::report_builder::{get_assembled_report, Error};
+    use crate::manager::report_builder::{create_report_template, Error};
     use serde_json::json;
     use uuid::Uuid;
 
@@ -414,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn get_assembled_report_success() {
+    fn create_report_template_success() {
         let conn = get_test_db_connection();
 
         let (test_report, _test_report_sections, test_sections) = insert_test_report_mapped_to_sections(&conn);
@@ -422,7 +492,7 @@ mod tests {
         let input_obj = json!({"Name2":{"message":"Hi"}});
         let input_map = input_obj.as_object().unwrap();
 
-        let result_report = get_assembled_report(&conn, &test_report, input_map).unwrap();
+        let result_report = create_report_template(&conn, &test_report, input_map).unwrap();
 
         let expected_report = json!({
             "metadata": {
@@ -541,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn get_assembled_report_failure() {
+    fn create_report_template_failure() {
         let conn = get_test_db_connection();
 
         let (test_report, _test_report_sections, _test_section) = insert_test_report_mapped_to_sections(&conn);
@@ -550,7 +620,7 @@ mod tests {
         let input_obj = json!({"Name2":{"message":"Hi"}});
         let input_map = input_obj.as_object().unwrap();
 
-        let result_report = get_assembled_report(&conn, &test_report, input_map);
+        let result_report = create_report_template(&conn, &test_report, input_map);
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
 

@@ -5,6 +5,7 @@ use std::fmt;
 use std::io::Read;
 use std::sync::Mutex;
 use std::fs::File;
+use percent_encoding::{AsciiSet, CONTROLS};
 
 /// Shorthand type for google_storage1::Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>
 pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
@@ -41,8 +42,16 @@ impl From<std::io::Error> for Error {
 }
 
 lazy_static! {
+    /// A mutex-controlled hub for interacting with GCS
     static ref STORAGE_HUB: Mutex<StorageHub> = Mutex::new(initialize_storage_hub());
 }
+
+/// A set of all the characters that need to be percent-encoded for the GCS JSON API
+const GCLOUD_ENCODING_SET: &AsciiSet = &CONTROLS
+    .add(b'!').add(b'#').add(b'$').add(b'&').add(b'\'').add(b'(')
+    .add(b')').add(b'*').add(b'+').add(b',').add(b'/').add(b':')
+    .add(b';').add(b'=').add(b'?').add(b'@').add(b'[').add(b']')
+    .add(b' ');
 
 /// Initialize the gcloud storage hub that will be used to process gcloud storage requests
 pub fn initialize() {
@@ -84,7 +93,7 @@ pub fn retrieve_object_with_gs_uri(address: &str) -> Result<String, Error> {
     // Percent encode the object name because the Google Cloud Storage JSON API, which the
     // google_storage1 crate uses, requires that (for some reason)
     let object_name =
-        percent_encoding::utf8_percent_encode(&object_name, percent_encoding::NON_ALPHANUMERIC)
+        percent_encoding::utf8_percent_encode(&object_name, GCLOUD_ENCODING_SET)
             .to_string();
     // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
     let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
@@ -110,25 +119,19 @@ pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<St
     let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
     // Append name to the end of object name to get the full name we'll use
     let full_name = object_name + "/" + name;
-    println!("Full name: {}", full_name);
-    // Percent encode the object name because the Google Cloud Storage JSON API, which the
-    // google_storage1 crate uses, requires that (for some reason)
-    /*let full_name =
-        percent_encoding::utf8_percent_encode(&full_name, percent_encoding::NON_ALPHANUMERIC)
-            .to_string();*/
-    println!("Encoded full name: {}", full_name);
     // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
     let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
-    let mut object = Object::default();
-    object.bucket = Some(bucket_name.clone());
-    object.name = Some(full_name.clone());
+    // Make a default storage object because that's required by the gcloud storage library for some
+    // reason
+    let object = Object::default();
     // Upload the data to the gcloud location
     let result = borrowed_storage_hub
         .objects()
         .insert(object, &bucket_name)
         .name(&full_name)
-        .param("uploadType", "media")
+        .param("uploadType", "multipart")
         .upload(file, "application/octet-stream".parse().unwrap())?;
+    println!("Result: {:?}", result);
     // Return the gs address of the object
     Ok(result.1.media_link.unwrap())
 }
@@ -173,174 +176,6 @@ mod tests {
         let test_result_uri = "gs://filename.txt";
         let failure = parse_bucket_and_object_name(test_result_uri);
         assert!(matches!(failure, Err(Error::Parse(_))));
-    }
-
-    //TODO: Delete this test and related imports
-    #[test]
-    fn test_file_upload() {
-        unit_test_util::load_env_config();
-        initialize_storage_hub();
-
-        let test_location = "gs://dsde-methods-carrot-data/reports";
-        let test_name = "test-report/1.ipynb";
-
-        let mut test_file = NamedTempFile::new().unwrap();
-
-        let test_json = json!({
-             "metadata": {
-              "language_info": {
-               "codemirror_mode": {
-                "name": "ipython",
-                "version": 3
-               },
-               "file_extension": ".py",
-               "mimetype": "text/x-python",
-               "name": "python",
-               "nbconvert_exporter": "python",
-               "pygments_lexer": "ipython3",
-               "version": "3.8.5-final"
-              },
-              "orig_nbformat": 2,
-              "kernelspec": {
-               "name": "python3",
-               "display_name": "Python 3.8.5 64-bit",
-               "metadata": {
-                "interpreter": {
-                 "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                }
-               }
-              }
-             },
-             "nbformat": 4,
-             "nbformat_minor": 2,
-             "cells": [
-              {
-               "cell_type": "code",
-               "execution_count": null,
-               "metadata": {},
-               "outputs": [],
-               "source": [
-                "import json\n",
-                "\n",
-                "# Load inputs from input file\n",
-                "input_file = open('inputs.config')\n",
-                "carrot_inputs = json.load(input_file)\n",
-                "input_file.close()"
-               ]
-              },
-              {
-               "cell_type": "code",
-               "execution_count": null,
-               "metadata": {},
-               "outputs": [],
-               "source": [
-                "# Print run name\n",
-                "from IPython.display import Markdown\n",
-                "Markdown(f\"# {carrot_inputs['metadata']['report_name']}\")"
-               ]
-              },
-              {
-               "source": [
-                "## Test Line Section"
-               ],
-               "cell_type": "markdown",
-               "metadata": {}
-              },
-              {
-               "cell_type": "code",
-               "execution_count": null,
-               "metadata": {},
-               "outputs": [],
-               "source": [
-                "# Get section inputs\n",
-                "input_filename = carrot_inputs['sections'][0]['input_filename']"
-               ]
-              },
-              {
-               "cell_type": "code",
-               "execution_count": null,
-               "metadata": {},
-               "outputs": [],
-               "source": [
-                "import matplotlib.pyplot as plt\n",
-                "import numpy\n",
-                "import csv\n",
-                "\n",
-                "# Load data from file\n",
-                "input_file = open(input_filename)\n",
-                "input_file_reader = csv.reader(input_file)\n",
-                "# x values in first column, and y in second column\n",
-                "x_vals = []\n",
-                "y_vals = []\n",
-                "for row in input_file_reader:\n",
-                "    x_vals.append(row[0])\n",
-                "    y_vals.append(row[1])\n",
-                "input_file.close()\n",
-                "# Plot the data\n",
-                "plt.plot(x_vals, y_vals)\n",
-                "plt.xlabel(\"x\")\n",
-                "plt.ylabel(\"y\")\n",
-                "plt.title(\"Test Plot\")\n",
-                "plt.grid(True)\n",
-                "plt.show()"
-               ]
-              },
-              {
-               "source": [
-                "## Test Bar Section"
-               ],
-               "cell_type": "markdown",
-               "metadata": {}
-              },
-              {
-               "cell_type": "code",
-               "execution_count": null,
-               "metadata": {},
-               "outputs": [],
-               "source": [
-                "# Get section inputs\n",
-                "input_filename = carrot_inputs['sections'][1]['input_filename']"
-               ]
-              },
-              {
-               "cell_type": "code",
-               "execution_count": null,
-               "metadata": {},
-               "outputs": [],
-               "source": [
-                "import matplotlib.pyplot as plt\n",
-                "import numpy\n",
-                "import csv\n",
-                "\n",
-                "# Load data from file\n",
-                "input_file = open(input_filename)\n",
-                "input_file_reader = csv.reader(input_file)\n",
-                "# x values in first column, and y in second column\n",
-                "x_vals = []\n",
-                "y_vals = []\n",
-                "for row in input_file_reader:\n",
-                "    x_vals.append(int(row[0]))\n",
-                "    y_vals.append(int(row[1]))\n",
-                "input_file.close()\n",
-                "# Plot the data\n",
-                "plt.bar(x_vals, y_vals)\n",
-                "plt.xlabel(\"x\")\n",
-                "plt.ylabel(\"y\")\n",
-                "plt.ylim(0,10)\n",
-                "plt.title(\"Test Plot\")\n",
-                "plt.grid(True)\n",
-                "plt.show()"
-               ]
-              }
-             ]
-            });
-        write!(test_file, "{}", test_json.to_string());
-
-        let mut test_file= test_file.into_file();
-
-        let result = upload_file_to_gs_uri(test_file, test_location, test_name);
-
-        println!("{:?}", result);
     }
 
 }
