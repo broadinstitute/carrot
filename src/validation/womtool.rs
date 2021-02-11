@@ -1,4 +1,5 @@
-//! Contains functionality for validating WDLs
+//! Contains various functions for interfacing with WOMTool, a cromwell utility for parsing and
+//! validating WDLs
 
 use crate::config;
 use crate::requests::test_resource_requests;
@@ -57,8 +58,8 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
 
 /// Runs the womtool validate utility on the WDL at the specified path
 ///
-/// Returns true if the WDL is valid, false if it is not, or an error if there is some error running
-/// womtool
+/// Returns ()) if the WDL is valid, an Invalid error if the WDL is invalid, or a different error if
+/// there is some other issue running WOMTool
 fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
     // Run womtool validate on the wdl
     let output = Command::new("sh")
@@ -70,9 +71,36 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
         ))
         .output()?;
 
-    // Return true or false depending on womtool's exit status
+    // Return Ok or an error depending on womtool's exit status
     if output.status.success() {
         Ok(())
+    } else {
+        let error_msg = match String::from_utf8(output.stderr) {
+            Ok(msg) => msg,
+            Err(e) => format!("Failed to get error message from womtool with error {}", e),
+        };
+        Err(Error::Invalid(error_msg))
+    }
+}
+
+/// Runs the womtool inputs utility on the WDL at the specified path
+///
+/// Returns the WOMtool output if parsing the WDL inputs is successful, or an error if there is some
+/// issue running WOMtool or
+fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
+    // Run womtool validate on the wdl
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "java -jar {} inputes {}",
+            *config::WOMTOOL_LOCATION,
+            wdl_path.display()
+        ))
+        .output()?;
+
+    // Return the output or an error depending on WOMtool's status
+    if output.status.success() {
+        Ok(output.stdout)
     } else {
         let error_msg = match String::from_utf8(output.stderr) {
             Ok(msg) => msg,
@@ -85,7 +113,7 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use crate::unit_test_util::load_env_config;
-    use crate::validation::wdl_validator::{wdl_is_valid, Error};
+    use crate::validation::womtool::{wdl_is_valid, Error};
     use actix_web::client::Client;
     use std::fs::read_to_string;
 

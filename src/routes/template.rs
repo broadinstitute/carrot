@@ -8,7 +8,7 @@ use crate::models::template::{
     NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
 };
 use crate::routes::error_body::ErrorBody;
-use crate::validation::wdl_validator;
+use crate::validation::womtool;
 use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::{debug, error};
@@ -334,11 +334,11 @@ async fn validate_wdl(
     wdl_type: &str,
     identifier: &str,
 ) -> Result<(), HttpResponse> {
-    match wdl_validator::wdl_is_valid(client, wdl).await {
+    match womtool::wdl_is_valid(client, wdl).await {
         // If it's a valid WDL, that's fine, so return OK
         Ok(_) => Ok(()),
         // If it's not a valid WDL, return an error to inform the user
-        Err(wdl_validator::Error::Invalid(msg)) => {
+        Err(womtool::Error::Invalid(msg)) => {
             debug!(
                 "Invalid {} WDL submitted for template {} with womtool msg {}",
                 wdl_type, identifier, msg

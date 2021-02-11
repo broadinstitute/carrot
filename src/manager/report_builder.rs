@@ -191,6 +191,7 @@ fn create_report_template(conn: &PgConnection, report: &ReportData, input_map: &
             }
 
         };
+        // TODO: Modify this part to instead use a preparsed input map from the input_list module
         // Next, extract the inputs for this section from the input map so we can make an input cell
         // for this section
         match input_map.get(&section.name) {
@@ -280,11 +281,8 @@ fn upload_report_template(report_json: Value, report_name: &str, run_name: &str)
     // Upload that file to GCS
     Ok(gcloud_storage::upload_file_to_gs_uri(report_file, &*config::REPORT_LOCATION, &report_name)?)
 }
+
 /*
-fn build_input_list(input_map: &Map<String, Value>, template: TemplateData, run: RunWithResultData) {
-
-}
-
 /// Generates a filled wdl that will run the jupyter notebook to generate reports.  The WDL fills in
 /// the placeholder values in the jupyter_report_generator_template.wdl file
 fn create_generator_wdl() -> Result<String, Error> {
@@ -311,6 +309,121 @@ fn create_generator_wdl() -> Result<String, Error> {
 
     // [~call_inputs~]
 }*/
+
+mod input_list {
+    //! Defines structs and functionality for assembling a list of inputs with relevant data for a
+    //! report
+    use serde_json::{Map, Value};
+    use crate::models::template::TemplateData;
+    use crate::models::run::RunWithResultData;
+    use core::fmt;
+    use crate::models::result::ResultData;
+    use diesel::PgConnection;
+    use std::collections::HashMap;
+    use crate::custom_sql_types::ResultTypeEnum;
+
+    /// Defines an input to a report, including its name, value, and type (the type it would have in a
+    /// wdl), to be used for filling in report templates
+    #[derive(Debug)]
+    pub(super) struct ReportInput {
+        pub name: String,
+        pub value: String,
+        pub input_type: String,
+    }
+
+    /// Defines the inputs for a section, and the section's name
+    #[derive(Debug)]
+    pub(super) struct SectionInputs {
+        pub name: String,
+        pub inputs: Vec<ReportInput>
+    }
+
+    /// Error type for possible errors returned by building an input list
+    #[derive(Debug)]
+    pub enum Error {
+        DB(diesel::result::Error),
+        Json(serde_json::Error),
+    }
+
+    impl std::error::Error for Error {}
+
+    impl fmt::Display for Error {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                Error::DB(e) => write!(f, "Error DB {}", e),
+                Error::Json(e) => write!(f, "Error Json {}", e),
+            }
+        }
+    }
+
+    impl From<diesel::result::Error> for Error {
+        fn from(e: diesel::result::Error) -> Error {
+            Error::DB(e)
+        }
+    }
+
+    impl From<serde_json::Error> for Error {
+        fn from(e: serde_json::Error) -> Error {
+            Error::Json(e)
+        }
+    }
+
+    /// Uses `input_map`, the WDLs and result definitions for `template`, and the results in `run`
+    /// to build a return a list of inputs, divided up by section, with their names, values, and
+    /// types
+    ///
+    /// Returns a list of sections with their inputs, in the form of a Vec of SectionInputs
+    /// instances, or an error if something goes wrong
+    pub(super) fn build_input_list(conn: &PgConnection, input_map: &Map<String, Value>, template: TemplateData, run: RunWithResultData) -> Result<Vec<SectionInputs>, Error> {
+        // Empty list that will eventually contain all our inputs
+        let mut input_list: Vec<SectionInputs> = Vec::new();
+        // Placeholders for the WDL input types, so we only go through the process of retrieving
+        // them if we actually need to
+        let test_wdl_input_types: Option<Value> = None;
+        let eval_wdl_input_types: Option<Value> = None;
+        // Retrieve results for the template so we can get the types of results (in a hashmap for
+        // quicker reference later
+        let results_with_types = {
+            let mut results: HashMap<String, &str> = HashMap::new();
+            for result in ResultData::find_for_template(conn, template.template_id)? {
+                // Make sure to convert the type for this result to its equivalent WDL type, since
+                // that's what we'll actually be using
+                results.insert(result.name, convert_result_type_to_wdl_type(&result.result_type))
+            }
+            results
+        };
+        // Loop through the sections in input_map and build input lists for each
+        for section_name in input_map.keys() {
+            // Create a SectionInputs instance for this section
+            let mut section_inputs = SectionInputs{
+                name: section_name.clone(),
+                inputs: Vec::new()
+            };
+            // Each value in the input_map should be a map of inputs for that section
+            let section_input_map = match input_map.get(section_name) {
+                Value::Object(map) => map,
+                // If it's not a map, we have an issue, so return an error
+                _ => {
+                    error!("Section input map: {} not formatted correctly", obj);
+                    return Err(Error::Parse(format!("Section input map: {} not formatted correctly", obj)));
+                }
+            };
+            // Now we check what the input is and decide how we handle it
+            // If the input is a test_input, we get the value from
+        }
+
+        Ok(input_list)
+    }
+
+    /// Converts the provided `result_type` to its equivalent WDL type
+    fn convert_result_type_to_wdl_type(result_type: &ResultTypeEnum) -> &'static str {
+        match result_type{
+            ResultTypeEnum::Numeric => "Float",
+            ResultTypeEnum:: File => "File",
+            ResultTypeEnum::Text => "String"
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
