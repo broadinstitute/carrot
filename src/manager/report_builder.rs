@@ -18,15 +18,20 @@ use crate::manager::util;
 use crate::storage::gcloud_storage;
 use crate::config;
 use crate::models::template::TemplateData;
+use crate::validation::womtool;
 
 /// Error type for possible errors returned by generating a run report
 #[derive(Debug)]
 pub enum Error {
     DB(diesel::result::Error),
+    /// An error parsing some section of the report
     Parse(String),
     Json(serde_json::Error),
     GCS(gcloud_storage::Error),
     IO(std::io::Error),
+    /// An error related to the input map
+    Inputs(String),
+    Womtool(womtool::Error),
 }
 
 impl std::error::Error for Error {}
@@ -34,11 +39,13 @@ impl std::error::Error for Error {}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::DB(e) => write!(f, "Error DB {}", e),
-            Error::Parse(e) => write!(f, "Error Parse {}", e),
-            Error::Json(e) => write!(f, "Error Json {}", e),
-            Error::GCS(e) => write!(f, "Error GCS {}", e),
-            Error::IO(e) => write!(f, "Error IO {}", e)
+            Error::DB(e) => write!(f, "report_builder Error DB {}", e),
+            Error::Parse(e) => write!(f, "report_builder Error Parse {}", e),
+            Error::Json(e) => write!(f, "report_builder Error Json {}", e),
+            Error::GCS(e) => write!(f, "report_builder Error GCS {}", e),
+            Error::IO(e) => write!(f, "report_builder Error IO {}", e),
+            Error::Inputs(e) => write!(f, "report_builder Error Inputs {}", e),
+            Error::Womtool(e) => write!(f, "report_builder Error Womtool {}", e)
         }
     }
 }
@@ -64,6 +71,12 @@ impl From<gcloud_storage::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
         Error::IO(e)
+    }
+}
+
+impl From<womtool::Error> for Error {
+    fn from(e: womtool::Error) -> Error {
+        Error::Womtool(e)
     }
 }
 
@@ -207,7 +220,7 @@ fn create_report_template(conn: &PgConnection, report: &ReportData, input_map: &
                     },
                     _ => {
                         error!("Section input map: {} not formatted correctly", obj);
-                        return Err(Error::Parse(format!("Section input map: {} not formatted correctly", obj)));
+                        return Err(Error::Inputs(format!("Section input map: {} not formatted correctly", obj)));
                     }
                 }
             }
@@ -321,6 +334,11 @@ mod input_list {
     use diesel::PgConnection;
     use std::collections::HashMap;
     use crate::custom_sql_types::ResultTypeEnum;
+    use log::error;
+    use uuid::Uuid;
+    use super::Error;
+    use actix_web::client::Client;
+    use crate::validation::womtool;
 
     /// Defines an input to a report, including its name, value, and type (the type it would have in a
     /// wdl), to be used for filling in report templates
@@ -338,35 +356,6 @@ mod input_list {
         pub inputs: Vec<ReportInput>
     }
 
-    /// Error type for possible errors returned by building an input list
-    #[derive(Debug)]
-    pub enum Error {
-        DB(diesel::result::Error),
-        Json(serde_json::Error),
-    }
-
-    impl std::error::Error for Error {}
-
-    impl fmt::Display for Error {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match self {
-                Error::DB(e) => write!(f, "Error DB {}", e),
-                Error::Json(e) => write!(f, "Error Json {}", e),
-            }
-        }
-    }
-
-    impl From<diesel::result::Error> for Error {
-        fn from(e: diesel::result::Error) -> Error {
-            Error::DB(e)
-        }
-    }
-
-    impl From<serde_json::Error> for Error {
-        fn from(e: serde_json::Error) -> Error {
-            Error::Json(e)
-        }
-    }
 
     /// Uses `input_map`, the WDLs and result definitions for `template`, and the results in `run`
     /// to build a return a list of inputs, divided up by section, with their names, values, and
@@ -374,24 +363,17 @@ mod input_list {
     ///
     /// Returns a list of sections with their inputs, in the form of a Vec of SectionInputs
     /// instances, or an error if something goes wrong
-    pub(super) fn build_input_list(conn: &PgConnection, input_map: &Map<String, Value>, template: TemplateData, run: RunWithResultData) -> Result<Vec<SectionInputs>, Error> {
+    pub(super) fn build_input_list(conn: &PgConnection, client: &Client, input_map: &Map<String, Value>, template: TemplateData, run: RunWithResultData) -> Result<Vec<SectionInputs>, Error> {
         // Empty list that will eventually contain all our inputs
         let mut input_list: Vec<SectionInputs> = Vec::new();
-        // Placeholders for the WDL input types, so we only go through the process of retrieving
-        // them if we actually need to
-        let test_wdl_input_types: Option<Value> = None;
-        let eval_wdl_input_types: Option<Value> = None;
+        // Parse input types from WDLs
+        let test_wdl_input_types: HashMap<String, String> = womtool::get_wdl_inputs(client, &template.test_wdl)?;
+        let eval_wdl_input_types: HashMap<String, String> = womtool::get_wdl_inputs(client, &template.eval_wdl)?;
+        // Get the test and eval inputs from `run` as maps so we can work with them more easily
+        let (run_test_input, run_eval_input, run_result_map) = get_run_input_maps(&run)?;
         // Retrieve results for the template so we can get the types of results (in a hashmap for
         // quicker reference later
-        let results_with_types = {
-            let mut results: HashMap<String, &str> = HashMap::new();
-            for result in ResultData::find_for_template(conn, template.template_id)? {
-                // Make sure to convert the type for this result to its equivalent WDL type, since
-                // that's what we'll actually be using
-                results.insert(result.name, convert_result_type_to_wdl_type(&result.result_type))
-            }
-            results
-        };
+        let results_with_types = get_result_types_map_for_template(conn, template.template_id)?;
         // Loop through the sections in input_map and build input lists for each
         for section_name in input_map.keys() {
             // Create a SectionInputs instance for this section
@@ -400,19 +382,190 @@ mod input_list {
                 inputs: Vec::new()
             };
             // Each value in the input_map should be a map of inputs for that section
-            let section_input_map = match input_map.get(section_name) {
-                Value::Object(map) => map,
-                // If it's not a map, we have an issue, so return an error
-                _ => {
-                    error!("Section input map: {} not formatted correctly", obj);
-                    return Err(Error::Parse(format!("Section input map: {} not formatted correctly", obj)));
+            let section_input_map = get_section_input_map(input_map, section_name)?;
+            // Loop through the inputs for the section and get the value and type for each
+            for (input_name, input_value) in section_input_map {
+                // Get input value as a str
+                let input_value = match input_value.as_str() {
+                    Some(val) => val,
+                    None => {
+                        let err_msg = format!("Section input value {} not formatted correctly.  Should be a string", input_value);
+                        error!("{}", err_msg);
+                        return Err(Error::Parse(err_msg));
+                    }
+                };
+                // If it's a test_input, we'll get the value from the run's test_inputs and the
+                // type from the test wdl
+                if input_value.starts_with("test_input:") {
+                    // Parse the value to get the actual name of the input we want
+                    let input_value_parsed = input_value.trim_start_matches("test_input:");
+                    // Get the actual value from the run's test_input
+                    let actual_input_value = get_value_from_map_as_string(&run_test_input, input_value_parsed, "test_input")?;
+                    // Get the type from the test wdl
+                    let input_type = match test_wdl_input_types.get(input_value_parsed) {
+                        Some(input_type) => input_type.clone(),
+                        None => {
+                            let err_msg = format!("Test WDL {} does not contain an input called {}", template.test_wdl, input_value_parsed);
+                            error!("{}", err_msg);
+                            return Err(Error::Inputs(err_msg));
+                        }
+                    };
+                    // Add it to the list of inputs for this section
+                    section_inputs.inputs.push(ReportInput{
+                        name: input_name.clone(),
+                        value: actual_input_value,
+                        input_type
+                    });
                 }
-            };
-            // Now we check what the input is and decide how we handle it
-            // If the input is a test_input, we get the value from
+                // If it's an eval_input, we'll get the value from the run's eval_inputs and the
+                // type from the eval wdl
+                else if input_value.starts_with("eval_input:") {
+                    // Parse the value to get the actual name of the input we want
+                    let input_value_parsed = input_value.trim_start_matches("eval_input:");
+                    // Get the actual value from the run's test_input
+                    let actual_input_value = get_value_from_map_as_string(&run_eval_input, input_value_parsed, "eval_input")?;
+                    // Get the type from the eval wdl
+                    let input_type = match eval_wdl_input_types.get(input_value_parsed) {
+                        Some(input_type) => input_type.clone(),
+                        None => {
+                            let err_msg = format!("Eval WDL {} does not contain an input called {}", template.eval_wdl, input_value_parsed);
+                            error!("{}", err_msg);
+                            return Err(Error::Inputs(err_msg));
+                        }
+                    };
+                    // Add it to the list of inputs for this section
+                    section_inputs.inputs.push(ReportInput{
+                        name: input_name.clone(),
+                        value: actual_input_value,
+                        input_type
+                    });
+                }
+                // If it's a result, we'll get the value from run's results and the type from the
+                // result type map
+                else if input_value.starts_with("result:") {
+                    // Parse the value to get the name of the result
+                    let input_value_parsed = input_value.trim_start_matches("result:");
+                    // Get result value from results map
+                    let actual_input_value = get_value_from_map_as_string(&run_result_map, input_value_parsed, "results")?;
+                    // Get the type from the result type map
+                    let input_type = match results_with_types.get(input_value_parsed) {
+                        Some(input_type) => String::from(input_type),
+                        None => {
+                            let err_msg = format!("Results {:?} do not contain an input called {}", run.results, input_value_parsed);
+                            error!("{}", err_msg);
+                            return Err(Error::Inputs(err_msg));
+                        }
+                    };
+                    // Add it to the list of inputs for this section
+                    section_inputs.inputs.push(ReportInput{
+                        name: input_name.clone(),
+                        value: actual_input_value,
+                        input_type
+                    });
+                }
+                // If it's none of the above, we just take the value as is as a string
+                else {
+                    section_inputs.inputs.push(ReportInput {
+                        name: input_name.clone(),
+                        value: String::from(input_value),
+                        input_type: String::from("String")
+                    })
+                }
+            }
+            // Add the inputs for this section to input_list
+            input_list.push(section_inputs);
         }
 
         Ok(input_list)
+    }
+
+    /// Extracts test and eval inputs from `run` as maps. This function only really exists to
+    /// declutter `build_input_list` a bit
+    fn get_run_input_and_result_maps(run: &RunWithResultData) -> Result<(&Map<String, Value>, &Map<String, Value>, Map<String, Value>), Error> {
+        let run_test_input: &Map<String, Value> = match run.test_input.as_object() {
+            Some(map) => map,
+            None => {
+                let err_msg = format!("Test input {} is not formatted as a map. This should not happen.", run.test_input);
+                error!("{}", err_msg);
+                return Err(Error::Inputs(err_msg));
+            }
+        };
+        let run_eval_input: &Map<String, Value> = match run.eval_input.as_object() {
+            Some(map) => map,
+            None => {
+                let err_msg = format!("Eval input {} is not formatted as a map. This should not happen.", run.eval_input);
+                error!("{}", err_msg);
+                return Err(Error::Inputs(err_msg));
+            }
+        };
+        let run_results = match &run.results{
+            Some(run_results) => match run_results.as_object() {
+                Some(map) => map.clone(),
+                None => {
+                    let err_msg = format!("Run results {} are not formatted as a map. This should not happen.", run_results);
+                    error!("{}", err_msg);
+                    return Err(Error::Inputs(err_msg));
+                }
+            },
+            None => Map::new()
+        };
+
+        Ok((run_test_input, run_eval_input, run_results))
+    }
+
+    /// Gets a map of result names to their WDL types for the template specified by `template_id`
+    fn get_result_types_map_for_template(conn: &PgConnection, template_id: Uuid) -> Result<HashMap<String, &str>, diesel::result::Error> {
+        let mut results: HashMap<String, &str> = HashMap::new();
+        for result in ResultData::find_for_template(conn, template_id)? {
+            // Make sure to convert the type for this result to its equivalent WDL type, since
+            // that's what we'll actually be using
+            results.insert(result.name, convert_result_type_to_wdl_type(&result.result_type));
+        }
+        Ok(results)
+    }
+
+    /// Gets the value for `key` from `input_map` as a String, or returns an error with `context`
+    /// to explain the source of the map (e.g. test_input)
+    fn get_value_from_map_as_string(input_map: &Map<String, Value>, key: &str, context: &str) -> Result<String, Error> {
+        match input_map.get(key) {
+            Some(value) => match value {
+                Value::String(string_val) => Ok(string_val.clone()),
+                _ => {
+                    let err_msg = format!("{} value for {} is not formatted as a string, which is necessary. This should not happen. {}: {:?}", context, key, context, input_map);
+                    error!("{}", err_msg);
+                    return Err(Error::Inputs(err_msg));
+                }
+            },
+            None => {
+                let err_msg = format!("{} {:?} does not contain value for {}", context, input_map, key);
+                error!("{}", err_msg);
+                return Err(Error::Inputs(err_msg));
+            }
+        }
+    }
+
+    /// Extracts the value for `section_name` from `input_map` as a &Map<String,Value> and returns
+    /// it. This function only really exists to declutter `build_input_list` a bit
+    fn get_section_input_map(input_map: &Map<String, Value>, section_name: &str) -> Result<&Map<String, Value>, Error> {
+        match input_map.get(section_name) {
+            Some(obj) => match obj {
+                Value::Object(map) => Ok(map),
+                // If it's not a map, we have an issue, so return an error
+                _ => {
+                    let err_msg = format!("Section input map: {} not formatted correctly.  Should be an object", obj);
+                    error!("{}", err_msg);
+                    Err(Error::Inputs(err_msg))
+                }
+            },
+            None => {
+                // Including this instead of using unwrap so, if this happens:
+                // 1. We don't panic!, and
+                // 2. I know I did something dumb and forgot to update the error message
+                let err_msg = format!("Input map doesn't contain a section called {} even though we got it from input_map.keys(). This should not happen.", section_name);
+                error!("{}", err_msg);
+                Err(Error::Inputs(err_msg))
+            }
+        }
     }
 
     /// Converts the provided `result_type` to its equivalent WDL type

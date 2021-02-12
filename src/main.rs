@@ -6,7 +6,6 @@ mod db;
 mod manager;
 mod models;
 mod notifications;
-mod reporting;
 mod requests;
 mod routes;
 mod schema;
