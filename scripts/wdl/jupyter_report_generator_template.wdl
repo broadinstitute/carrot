@@ -1,7 +1,7 @@
 version 1.0
 
-task GenerateReportFile {
-    
+task generate_report_file {
+
     meta {
         description : "Create a Jupyter Notebook report that presents results of a CARROT test run in a way specified by the user.  Adapted from a task by Jonn Smith (jonn@broadinstitute.org)"
         author : "Kevin Lydon"
@@ -13,7 +13,7 @@ task GenerateReportFile {
 
         String report_name
 
-        [~task_inputs~]
+[~task_inputs~]
     }
 
     parameter_meta {
@@ -25,7 +25,7 @@ task GenerateReportFile {
     # Determine the disk size based on the files we're using
     Int disk_size = 20 + 8*ceil((
             size(notebook_template, "GB") +
-            [~input_sizes~]
+[~input_sizes~]
         ))
 
     String nb_name = report_name + ".ipynb"
@@ -40,7 +40,9 @@ task GenerateReportFile {
 
         # Prepare the input file:
         rm -f inputs.config
-        echo '[~inputs_json~]' > inputs.config     
+        echo '{"metadata":{"report_name":"~{report_name}"},"sections":{' >> inputs.config
+[~inputs_json~]
+        echo '}}' >> inputs.config
 
         # Do the conversion:
 
@@ -52,7 +54,7 @@ task GenerateReportFile {
 
         # One more for good measure - make a PDF so we don't need to wait for the browser all the time.
         jupyter nbconvert ~{nb_name} --to pdf --no-prompt --no-input --debug --ExecutePreprocessor.timeout=7200
-    >>> 
+    >>>
 
     output {
         File populated_notebook = nb_name
@@ -71,7 +73,7 @@ task GenerateReportFile {
     }
 }
 
-workflow GenerateReportFileWorkflow {
+workflow generate_report_file_workflow {
 
     meta {
         description : "This workflow generates a Jupyter Notebook from a template to display CARROT run result data.  Adapted from a task by Jonn Smith (jonn@broadinstitute.org)"
@@ -84,7 +86,7 @@ workflow GenerateReportFileWorkflow {
 
         String report_name
 
-        [~workflow_inputs~]
+[~workflow_inputs~]
     }
     parameter_meta {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
@@ -92,16 +94,16 @@ workflow GenerateReportFileWorkflow {
         report_name : "The base name to use for the report files, and to include in the metadat section of the report"
     }
 
-    call GenerateReportFile {
+    call generate_report_file {
         input:
             notebook_template = notebook_template,
             report_name = report_name,
-            [~call_inputs~]
+[~call_inputs~]
     }
 
     output {
-        File populated_notebook = GenerateReportFile.populated_notebook
-        File html_report = GenerateReportFile.html_report
-        File pdf_report = GenerateReportFile.pdf_report
+        File populated_notebook = generate_report_file.populated_notebook
+        File html_report = generate_report_file.html_report
+        File pdf_report = generate_report_file.pdf_report
     }
 }

@@ -12,6 +12,7 @@ use std::process::Command;
 use tempfile::NamedTempFile;
 use serde_json::Value;
 use std::collections::HashMap;
+use log::error;
 
 /// Enum of possible errors from submitting a request to github
 #[derive(Debug)]
@@ -95,20 +96,22 @@ pub async fn get_wdl_inputs_with_simple_types(client: &Client, wdl_location: &st
     };
     // Convert it into a HashMap<String, String>
     let mut inputs_map: HashMap<String, String> = HashMap::new();
-    for (key, value) in inputs_json_map {
+    for (key, value) in &inputs_json_map {
         let value_string = match value {
             Value::String(value_str) => {
-                // Get only the part of the value that comes before the first space, which is the
-                // WDL type of the input
-                String::from(value_str.splitn(2, " ").next().unwrap()) // Unwrapping should be fine here because splitn will always return at least one element
+                // Get only the part of the value that comes before the first space (or ? if there
+                // is one before a space), which is the WDL type of the input
+                // Note: we're using [..] to convert the array into a slice, which is what split
+                // expects if you want to split on any of a list of characters
+                String::from(value_str.splitn(2, &[' ', '?'][..]).next().unwrap()) // Unwrapping should be fine here because splitn will always return at least one element
             },
             _ => {
-                let err_msg = format!("Womtool inputs type for {} is not formatted as a string. This should not happen. inputs: {:?}", key, inputs_json_map);
+                let err_msg = format!("Womtool inputs type for {} is not formatted as a string. This should not happen. inputs: {:?}", key, &inputs_json_map);
                 error!("{}", err_msg);
-                return Err(Error::Inputs(err_msg));
+                return Err(Error::Invalid(err_msg));
             }
         };
-        inputs_map.insert(key, value_string);
+        inputs_map.insert(key.clone(), value_string.clone());
     }
 
     Ok(inputs_map)
@@ -171,10 +174,11 @@ fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use crate::unit_test_util::load_env_config;
-    use crate::validation::womtool::{wdl_is_valid, Error, get_wdl_inputs};
+    use crate::validation::womtool::{wdl_is_valid, Error, get_wdl_inputs_with_simple_types};
     use actix_web::client::Client;
     use std::fs::read_to_string;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[actix_rt::test]
     async fn test_wdl_is_valid_true() {
@@ -248,7 +252,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_get_wdl_inputs_success() {
+    async fn test_get_wdl_inputs_with_simple_types_success() {
         load_env_config();
 
         // Get client
@@ -264,16 +268,19 @@ mod tests {
             .with_body(test_wdl)
             .create();
 
-        let response = get_wdl_inputs(&client, &format!("{}/test/resource", mockito::server_url()))
+        let response = get_wdl_inputs_with_simple_types(&client, &format!("{}/test/resource", mockito::server_url()))
             .await
             .unwrap();
 
         mock.assert();
-        assert_eq!(response, json!({"myWorkflow.person": "String"}));
+        let mut expected_response: HashMap<String, String> = HashMap::new();
+        expected_response.insert(String::from("myWorkflow.person"), String::from("String"));
+        expected_response.insert(String::from("myWorkflow.times"), String::from("Int"));
+        assert_eq!(response, expected_response);
     }
 
     #[actix_rt::test]
-    async fn test_get_wdl_inputs_invalid() {
+    async fn test_get_wdl_inputs_with_simple_types_invalid() {
         load_env_config();
 
         // Get client
@@ -287,7 +294,7 @@ mod tests {
             .create();
 
         let response =
-            get_wdl_inputs(&client, &format!("{}/test/resource", mockito::server_url())).await;
+            get_wdl_inputs_with_simple_types(&client, &format!("{}/test/resource", mockito::server_url())).await;
 
         mock.assert();
 
@@ -300,7 +307,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_get_wdl_inputs_request_error() {
+    async fn test_get_wdl_inputs_with_simple_types_request_error() {
         load_env_config();
 
         // Get client
@@ -312,7 +319,7 @@ mod tests {
             .create();
 
         let response =
-            get_wdl_inputs(&client, &format!("{}/test/resource", mockito::server_url())).await;
+            get_wdl_inputs_with_simple_types(&client, &format!("{}/test/resource", mockito::server_url())).await;
 
         mock.assert();
 

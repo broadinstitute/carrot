@@ -2,12 +2,14 @@ version 1.0
 
 workflow myWorkflow {
     input {
-        String person
+        String? person
+        Int times = 3
     }
 
     call myTask {
         input:
-            person = person
+            person = person,
+            times = times
     }
 
     output {
@@ -17,10 +19,11 @@ workflow myWorkflow {
 
 task myTask {
     input {
-        String person
+        String person = "Kevin"
+        Int times
     }
     command <<<
-        echo "hello ~{person}"
+        echo "hello ~{person} ~{times} times"
     >>>
     output {
         String out = read_string(stdout())

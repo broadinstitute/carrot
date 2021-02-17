@@ -816,7 +816,7 @@ mod tests {
             created_by: None,
         };
 
-        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's test test"),
