@@ -13,7 +13,9 @@ task generate_report_file {
 
         String report_name
 
-[~task_inputs~]
+        File section0_test_file
+        String section0_test_string
+        Float section1_number
     }
 
     parameter_meta {
@@ -25,7 +27,7 @@ task generate_report_file {
     # Determine the disk size based on the files we're using
     Int disk_size = 20 + 8*ceil((
             size(notebook_template, "GB") +
-[~input_sizes~]
+            size(section0_test_file, "GB")
         ))
 
     String nb_name = report_name + ".ipynb"
@@ -41,7 +43,14 @@ task generate_report_file {
         # Prepare the input file:
         rm -f inputs.config
         echo '{"metadata":{"report_name":"~{report_name}"},"sections":{' >> inputs.config
-[~inputs_json~]
+        echo '"Section 2":{' >> inputs.config
+        echo '"test_file":"~{section0_test_file}",' >> inputs.config
+        echo '"test_string":"~{section0_test_string}"' >> inputs.config
+        echo '}' >> inputs.config
+        echo ',' >> inputs.config
+        echo '"Section 1":{' >> inputs.config
+        echo '"number":"~{section1_number}"' >> inputs.config
+        echo '}' >> inputs.config
         echo '}}' >> inputs.config
 
         # Do the conversion:
@@ -86,7 +95,9 @@ workflow generate_report_file_workflow {
 
         String report_name
 
-[~workflow_inputs~]
+        File section0_test_file
+        String section0_test_string
+        Float section1_number
     }
     parameter_meta {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
@@ -98,7 +109,9 @@ workflow generate_report_file_workflow {
         input:
             notebook_template = notebook_template,
             report_name = report_name,
-[~call_inputs~]
+            section0_test_file = section0_test_file,
+            section0_test_string = section0_test_string,
+            section1_number = section1_number
     }
 
     output {

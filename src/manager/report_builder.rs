@@ -21,6 +21,9 @@ use crate::models::template::TemplateData;
 use crate::validation::womtool;
 use input_map::ReportInput;
 use std::collections::HashMap;
+use crate::requests::cromwell_requests::CromwellRequestError;
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 /// Error type for possible errors returned by generating a run report
 #[derive(Debug)]
@@ -34,6 +37,7 @@ pub enum Error {
     /// An error related to the input map
     Inputs(String),
     Womtool(womtool::Error),
+    Cromwell(CromwellRequestError)
 }
 
 impl std::error::Error for Error {}
@@ -47,7 +51,8 @@ impl fmt::Display for Error {
             Error::GCS(e) => write!(f, "report_builder Error GCS {}", e),
             Error::IO(e) => write!(f, "report_builder Error IO {}", e),
             Error::Inputs(e) => write!(f, "report_builder Error Inputs {}", e),
-            Error::Womtool(e) => write!(f, "report_builder Error Womtool {}", e)
+            Error::Womtool(e) => write!(f, "report_builder Error Womtool {}", e),
+            Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e)
         }
     }
 }
@@ -82,6 +87,12 @@ impl From<womtool::Error> for Error {
     }
 }
 
+impl From<CromwellRequestError> for Error {
+    fn from(e: CromwellRequestError) -> Error {
+        Error::Cromwell(e)
+    }
+}
+
 lazy_static! {
     /// The cells that will go at the top of the cells array for every generated report
     static ref DEFAULT_HEADER_CELLS: Vec<Value> = vec![
@@ -113,7 +124,8 @@ lazy_static! {
     ];
 }
 
-/*
+const GENERATOR_WORKFLOW_NAME: &'static str = "generate_report_file_workflow";
+
 pub async fn create_run_report(
     conn: &PgConnection,
     client: &Client,
@@ -151,16 +163,18 @@ pub async fn create_run_report(
     // Assemble list of inputs with types and values
     let section_inputs_map = input_map::build_section_inputs_map(conn, client, input_map, template, run).await?;
     // Assemble the report and its sections into a complete Jupyter Notebook json
-    let report_json = create_report_template(conn, &report, &sections, &section_inputs_map)?;
+    let report_json = create_report_template(&report, &sections, &section_inputs_map)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
     let report_template_location = upload_report_template(report_json, &report.name, &run.name)?;
-    // Generate WDL from default WDL template
-
-    // Build inputs json from run and section inputs map
+    // Create WDL from default WDL template
+    let generator_wdl = create_generator_wdl(&sections, &section_inputs_map);
+    // Write it to a file
+    let wdl_file = util::get_temp_file(&generator_wdl)?;
+    // Build inputs json from run, sections, and section inputs map
 
     // Submit report generation job to cromwell
     let start_job_response =
-        util::start_job_from_file(client, wdl_file_path, &json_file.path()).await?;
+        util::start_job_from_file(client, &wdl_file.path(), &json_file.path()).await?;
     // Update run_report in DB
     let run_report_update = RunReportChangeset{
         status: Some(ReportStatusEnum::Submitted),
@@ -169,11 +183,11 @@ pub async fn create_run_report(
         finished_at: None,
     };
     Ok(RunReportData::update(conn, run_report.run_id, run_report.report_id, run_report_update)?)
-}*/
+}
 
 /// Gets section contents for the specified report, and combines it with the report's metadata to
 /// produce the Jupyter Notebook (in json form) that will be used as a template for the report
-fn create_report_template(conn: &PgConnection, report: &ReportData, sections: &Vec<SectionData>, section_inputs: &HashMap<String, HashMap<String, ReportInput>>) -> Result<Value, Error> {
+fn create_report_template(report: &ReportData, sections: &Vec<SectionData>, section_inputs: &HashMap<String, HashMap<String, ReportInput>>) -> Result<Value, Error> {
     // Build a cells array for the notebook from sections_contents, starting with the default header
     // cells
     let mut cells: Vec<Value> = DEFAULT_HEADER_CELLS.clone();
@@ -290,7 +304,7 @@ fn upload_report_template(report_json: Value, report_name: &str, run_name: &str)
 
 /// Generates a filled wdl that will run the jupyter notebook to generate reports.  The WDL fills in
 /// the placeholder values in the jupyter_report_generator_template.wdl file
-fn create_generator_wdl(sections: &Vec<SectionData>, section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>) -> Result<String, Error> {
+fn create_generator_wdl(sections: &Vec<SectionData>, section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>) -> String {
     // Load the wdl template as part of the build so it will be included as a static string in the
     // carrot application binary
     let wdl_template = include_str!("../../scripts/wdl/jupyter_report_generator_template.wdl");
@@ -322,6 +336,17 @@ fn create_generator_wdl(sections: &Vec<SectionData>, section_inputs_map: &HashMa
             Some(inputs) => inputs,
             None=> continue
         };
+        // If this is a test, we convert section_inputs into a BTreeMap, because we can iterate over
+        // the inputs in a BTreeMap in sorted order, which is necessary for doing a string equality
+        // comparison between the generated wdl and our expected wdl
+        #[cfg(test)]
+        let section_inputs: BTreeMap<&String, &ReportInput> = {
+            let mut btree_map: BTreeMap<&String, &ReportInput> = BTreeMap::new();
+            for (key, value) in section_inputs {
+                btree_map.insert(key, value);
+            }
+            btree_map
+        };
         // If there are already lines in inputs_json_lines, then we need to add a comma to separate
         // sections within the json (I'm open to the idea that there's a cleaner way to do this)
         if !inputs_json_lines.is_empty() {
@@ -331,16 +356,26 @@ fn create_generator_wdl(sections: &Vec<SectionData>, section_inputs_map: &HashMa
         inputs_json_lines.push(format!("        echo '\"{}\":{{' >> inputs.config", section_name));
 
         // Loop through the inputs
+        let mut remaining_inputs = section_inputs.len();
         for (input_name, report_input) in section_inputs {
+            remaining_inputs -= 1;
             // Make a version of the input name that is prefixed with position so we can avoid the
             // problem of having multiple inputs with the same name
-            let wdl_input_name = format!("section{}_{}", position, input_name);
+            let wdl_input_name = get_section_wdl_input_name(position, input_name);
             // [~task_inputs~] and [~workflow_inputs]
             workflow_inputs_lines.push(format!("        {} {}", report_input.input_type, wdl_input_name));
             // [~input_sizes~]
-            input_sizes_lines.push(format!("            size({}, \"GB\")", wdl_input_name));
+            // We only need one if this input is a file
+            if report_input.input_type == "File" {
+                input_sizes_lines.push(format!("            size({}, \"GB\")", wdl_input_name));
+            }
             // [~inputs_json~]
-            inputs_json_lines.push(format!("        echo '\"{}\":\"~{{{}}}\"{{' >> inputs.config", input_name, wdl_input_name));
+            // Include a comma if there's still more inputs after this one
+            if remaining_inputs > 0 {
+                inputs_json_lines.push(format!("        echo '\"{}\":\"~{{{}}}\",' >> inputs.config", input_name, wdl_input_name));
+            } else {
+                inputs_json_lines.push(format!("        echo '\"{}\":\"~{{{}}}\"' >> inputs.config", input_name, wdl_input_name));
+            }
             // [~call_inputs~]
             call_inputs_lines.push(format!("            {} = {}", wdl_input_name, wdl_input_name));
         }
@@ -361,8 +396,41 @@ fn create_generator_wdl(sections: &Vec<SectionData>, section_inputs_map: &HashMa
     filled_wdl = filled_wdl.replace("[~call_inputs~]", &call_inputs);
     filled_wdl = filled_wdl.replace("[~inputs_json~]", &inputs_json);
 
-    Ok(filled_wdl)
+    filled_wdl
 }
+
+
+fn create_input_json(run_name: &str, report_name: &str, notebook_location: &str, sections: Vec<SectionData>, section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>) -> Value {
+
+    // Map that we'll add all our inputs to
+    let mut inputs_map: Map<String, Value> = Map::new();
+    // Start with metadata stuff
+    inputs_map.insert(format!("{}.notebook_template", GENERATOR_WORKFLOW_NAME), Value::String(String::from(notebook_location)));
+    inputs_map.insert(format!("{}.report_name", GENERATOR_WORKFLOW_NAME), Value::String(format!("{} : {}", run_name, report_name)));
+    // Loop through sections to add section inputs
+    for position in 0..sections.len() {
+        // Get inputs for this section (continue if there are no inputs for this section)
+        let section_inputs = match section_inputs_map.get(section_name) {
+            Some(inputs) => inputs,
+            None => continue
+        };
+        for (input_name, report_input) in section_inputs {
+            // Make a version of the input name that is prefixed with position so we can avoid the
+            // problem of having multiple inputs with the same name
+            let wdl_input_name = get_section_wdl_input_name(position, input_name);
+            // TODO: Finish adding section inputs to inputs_map
+        }
+    }
+
+    Value::Object(inputs_map)
+}
+
+/// Returns the name that will be used to refer to the input specified by `input_name` in the report
+/// generator wdl.  `position` refers to the ordered position of the section in the report
+fn get_section_wdl_input_name(position: usize, input_name: &str) -> String {
+    format!("section{}_{}", position, input_name)
+}
+
 
 mod input_map {
     //! Defines structs and functionality for assembling a list of inputs with relevant data for a
@@ -930,11 +998,13 @@ mod tests {
     use crate::models::report::{NewReport, ReportData};
     use crate::models::section::{NewSection, SectionData};
     use crate::unit_test_util::get_test_db_connection;
-    use crate::manager::report_builder::{create_report_template, Error};
+    use crate::manager::report_builder::{create_report_template, Error, create_generator_wdl};
     use serde_json::json;
     use uuid::Uuid;
     use crate::manager::report_builder::input_map::ReportInput;
     use std::collections::HashMap;
+    use chrono::Utc;
+    use std::fs::read_to_string;
 
     fn insert_test_report_mapped_to_sections(conn: &PgConnection) -> (ReportData, Vec<ReportSectionData>, Vec<SectionData>) {
         let mut report_sections = Vec::new();
@@ -1115,7 +1185,7 @@ mod tests {
             report_input_map
         });
 
-        let result_report = create_report_template(&conn, &test_report, &test_sections, &input_map).unwrap();
+        let result_report = create_report_template(&test_report, &test_sections, &input_map).unwrap();
 
         let expected_report = json!({
             "metadata": {
@@ -1256,9 +1326,62 @@ mod tests {
             report_input_map
         });
 
-        let result_report = create_report_template(&conn, &test_report, &sections, &input_map);
+        let result_report = create_report_template(&test_report, &sections, &input_map);
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
 
+    }
+
+    #[test]
+    fn create_generator_wdl_success() {
+
+        // Empty sections since create_generator_wdl only really needs the order of the names
+        let sections = vec![
+            SectionData {
+                section_id: Uuid::new_v4(),
+                name: "Section 2".to_string(),
+                description: None,
+                contents: json!({}),
+                created_at: Utc::now().naive_utc(),
+                created_by: None
+            },
+            SectionData {
+                section_id: Uuid::new_v4(),
+                name: "Section 1".to_string(),
+                description: None,
+                contents: json!({}),
+                created_at: Utc::now().naive_utc(),
+                created_by: None
+            },
+        ];
+
+        let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
+        section_inputs_map.insert(String::from("Section 2"), {
+            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
+            inputs.insert(String::from("test_file"), ReportInput{
+                value: "example.com/path/to/file.txt".to_string(),
+                input_type: "File".to_string()
+            });
+            inputs.insert(String::from("test_string"), ReportInput{
+                value: "hello".to_string(),
+                input_type: "String".to_string()
+            });
+            inputs
+        });
+        section_inputs_map.insert(String::from("Section 1"), {
+            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
+            inputs.insert(String::from("number"), ReportInput{
+                value: "3".to_string(),
+                input_type: "Float".to_string()
+            });
+            inputs
+        });
+
+        let result_wdl = create_generator_wdl(&sections, &section_inputs_map);
+
+        // Get expected value from file
+        let expected_wdl = read_to_string("testdata/manager/report_builder/expected_report_generator.wdl").unwrap();
+
+        assert_eq!(result_wdl, expected_wdl);
     }
 }
