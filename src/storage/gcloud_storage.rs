@@ -1,11 +1,11 @@
 //! Defines functionality for interacting with the google cloud storage API
 use crate::config;
-use google_storage1::{Storage, Object};
+use google_storage1::{Object, Storage};
+use percent_encoding::{AsciiSet, CONTROLS};
 use std::fmt;
+use std::fs::File;
 use std::io::Read;
 use std::sync::Mutex;
-use std::fs::File;
-use percent_encoding::{AsciiSet, CONTROLS};
 
 /// Shorthand type for google_storage1::Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>
 pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
@@ -48,9 +48,24 @@ lazy_static! {
 
 /// A set of all the characters that need to be percent-encoded for the GCS JSON API
 const GCLOUD_ENCODING_SET: &AsciiSet = &CONTROLS
-    .add(b'!').add(b'#').add(b'$').add(b'&').add(b'\'').add(b'(')
-    .add(b')').add(b'*').add(b'+').add(b',').add(b'/').add(b':')
-    .add(b';').add(b'=').add(b'?').add(b'@').add(b'[').add(b']')
+    .add(b'!')
+    .add(b'#')
+    .add(b'$')
+    .add(b'&')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*')
+    .add(b'+')
+    .add(b',')
+    .add(b'/')
+    .add(b':')
+    .add(b';')
+    .add(b'=')
+    .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b']')
     .add(b' ');
 
 /// Initialize the gcloud storage hub that will be used to process gcloud storage requests
@@ -93,8 +108,7 @@ pub fn retrieve_object_with_gs_uri(address: &str) -> Result<String, Error> {
     // Percent encode the object name because the Google Cloud Storage JSON API, which the
     // google_storage1 crate uses, requires that (for some reason)
     let object_name =
-        percent_encoding::utf8_percent_encode(&object_name, GCLOUD_ENCODING_SET)
-            .to_string();
+        percent_encoding::utf8_percent_encode(&object_name, GCLOUD_ENCODING_SET).to_string();
     // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
     let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
     // Request the data from its gcloud location
@@ -157,11 +171,14 @@ fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Er
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::gcloud_storage::{parse_bucket_and_object_name, retrieve_object_with_gs_uri, Error, upload_file_to_gs_uri, initialize_storage_hub};
+    use crate::storage::gcloud_storage::{
+        initialize_storage_hub, parse_bucket_and_object_name, retrieve_object_with_gs_uri,
+        upload_file_to_gs_uri, Error,
+    };
     use crate::unit_test_util;
-    use tempfile::NamedTempFile;
     use serde_json::json;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn parse_bucket_and_object_name_success() {
@@ -177,5 +194,4 @@ mod tests {
         let failure = parse_bucket_and_object_name(test_result_uri);
         assert!(matches!(failure, Err(Error::Parse(_))));
     }
-
 }

@@ -4,7 +4,9 @@
 //! mappings, along with their URI mappings
 
 use crate::db;
-use crate::models::report_section::{DeleteError, NewReportSection, ReportSectionData, ReportSectionQuery, CreateError};
+use crate::models::report_section::{
+    CreateError, DeleteError, NewReportSection, ReportSectionData, ReportSectionQuery,
+};
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
@@ -727,10 +729,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let (report, section) = insert_test_report_and_section(&pool.get().unwrap());
-        insert_test_run_report_non_failed_with_report_id(
-            &pool.get().unwrap(),
-            report.report_id,
-        );
+        insert_test_run_report_non_failed_with_report_id(&pool.get().unwrap(), report.report_id);
 
         let new_report_section = NewReportSectionIncomplete {
             position: 0,
@@ -740,7 +739,10 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::post()
-            .uri(&format!("/reports/{}/sections/{}", report.report_id, section.section_id))
+            .uri(&format!(
+                "/reports/{}/sections/{}",
+                report.report_id, section.section_id
+            ))
             .set_json(&new_report_section)
             .to_request();
         let resp = test::call_service(&mut app, req).await;

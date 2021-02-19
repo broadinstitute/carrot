@@ -9,10 +9,10 @@ use crate::schema::result::dsl::*;
 use crate::schema::template_result;
 use crate::util;
 use chrono::NaiveDateTime;
+use diesel::dsl::any;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use diesel::dsl::any;
 
 /// Mapping to a result as it exists in the RESULT table in the database.
 ///
@@ -186,7 +186,10 @@ impl ResultData {
     /// a template_id equal to `id`
     /// Returns a result containing either a vector of the retrieved result records as ResultData
     /// instances or an error if the query fails for some reason
-    pub fn find_for_template(conn: &PgConnection, id: Uuid) -> Result<Vec<Self>, diesel::result::Error> {
+    pub fn find_for_template(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
         let template_result_subquery = template_result::dsl::template_result
             .filter(template_result::dsl::template_id.eq(id))
             .select(template_result::dsl::result_id);
@@ -535,7 +538,10 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_results = insert_test_results(&conn);
-        let test_template_result = insert_test_template_result_with_result_id(&conn, test_results.get(1).unwrap().result_id);
+        let test_template_result = insert_test_template_result_with_result_id(
+            &conn,
+            test_results.get(1).unwrap().result_id,
+        );
 
         let found_results = ResultData::find_for_template(&conn, test_template_result.template_id)
             .expect("Failed to retrieve test result by template_id.");

@@ -227,10 +227,7 @@ impl ReportSectionData {
     /// `params`
     /// Returns a section containing either the new report_section mapping that was created or an
     /// error if the insert fails for some reason
-    pub fn create(
-        conn: &PgConnection,
-        params: NewReportSection,
-    ) -> Result<Self, CreateError> {
+    pub fn create(conn: &PgConnection, params: NewReportSection) -> Result<Self, CreateError> {
         // If there are non-failed run_reports associated with the report associated with this
         // report_section, return an error
         match ReportData::has_nonfailed_run_reports(conn, params.report_id) {
@@ -773,7 +770,7 @@ mod tests {
                         diesel::result::DatabaseErrorKind::UniqueViolation,
                         _,
                     ),
-                )
+                ),
             )
         ));
     }

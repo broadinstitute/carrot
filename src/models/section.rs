@@ -129,7 +129,7 @@ impl SectionData {
                 description,
                 contents,
                 created_at,
-                created_by
+                created_by,
             ))
             .order(report_section::position)
             .load::<SectionData>(conn)
@@ -491,7 +491,10 @@ mod tests {
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
-    fn insert_test_report_sections_with_report_id(conn: &PgConnection, id: Uuid) -> (Vec<ReportSectionData>, Vec<SectionData>) {
+    fn insert_test_report_sections_with_report_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> (Vec<ReportSectionData>, Vec<SectionData>) {
         let mut report_sections = Vec::new();
         let mut sections = Vec::new();
 
@@ -502,9 +505,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        sections.push(
-            SectionData::create(conn, new_section).expect("Failed inserting test section")
-        );
+        sections
+            .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         let new_report_section = NewReportSection {
             section_id: sections[0].section_id,
@@ -525,9 +527,8 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        sections.push(
-            SectionData::create(conn, new_section).expect("Failed inserting test section")
-        );
+        sections
+            .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         let new_report_section = NewReportSection {
             section_id: sections[1].section_id,
@@ -548,9 +549,8 @@ mod tests {
             created_by: Some(String::from("Test@example.com")),
         };
 
-        sections.push(
-            SectionData::create(conn, new_section).expect("Failed inserting test section")
-        );
+        sections
+            .push(SectionData::create(conn, new_section).expect("Failed inserting test section"));
 
         let new_report_section = NewReportSection {
             section_id: sections[2].section_id,
@@ -566,7 +566,6 @@ mod tests {
 
         (report_sections, sections)
     }
-
 
     #[test]
     fn find_by_id_exists() {
@@ -782,9 +781,12 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_report = insert_test_report(&conn);
-        let (_test_report_sections, test_sections) = insert_test_report_sections_with_report_id(&conn, test_report.report_id);
+        let (_test_report_sections, test_sections) =
+            insert_test_report_sections_with_report_id(&conn, test_report.report_id);
 
-        let test_results = SectionData::find_by_report_id_ordered_by_positions(&conn, test_report.report_id).unwrap();
+        let test_results =
+            SectionData::find_by_report_id_ordered_by_positions(&conn, test_report.report_id)
+                .unwrap();
 
         assert_eq!(test_results.len(), 3);
         assert_eq!(test_results[0], test_sections[0]);

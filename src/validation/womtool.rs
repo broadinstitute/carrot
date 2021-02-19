@@ -5,14 +5,14 @@ use crate::config;
 use crate::requests::test_resource_requests;
 use actix_web::client::Client;
 use core::fmt;
+use log::error;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::error;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use tempfile::NamedTempFile;
-use serde_json::Value;
-use std::collections::HashMap;
-use log::error;
 
 /// Enum of possible errors from submitting a request to github
 #[derive(Debug)]
@@ -77,7 +77,10 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
 /// containing the input names mapped to their types (without qualifiers like optional or default
 /// values) if it's successful, or an error if there is some issue retrieving the file
 /// or running WOMtool
-pub async fn get_wdl_inputs_with_simple_types(client: &Client, wdl_location: &str) -> Result<HashMap<String, String>, Error> {
+pub async fn get_wdl_inputs_with_simple_types(
+    client: &Client,
+    wdl_location: &str,
+) -> Result<HashMap<String, String>, Error> {
     // Retrieve the wdl from where it's stored
     let wdl = test_resource_requests::get_resource_as_string(client, wdl_location).await?;
     // Write it to a temporary file for parsing
@@ -103,8 +106,9 @@ pub async fn get_wdl_inputs_with_simple_types(client: &Client, wdl_location: &st
                 // is one before a space), which is the WDL type of the input
                 // Note: we're using [..] to convert the array into a slice, which is what split
                 // expects if you want to split on any of a list of characters
-                String::from(value_str.splitn(2, &[' ', '?'][..]).next().unwrap()) // Unwrapping should be fine here because splitn will always return at least one element
-            },
+                String::from(value_str.splitn(2, &[' ', '?'][..]).next().unwrap())
+                // Unwrapping should be fine here because splitn will always return at least one element
+            }
             _ => {
                 let err_msg = format!("Womtool inputs type for {} is not formatted as a string. This should not happen. inputs: {:?}", key, &inputs_json_map);
                 error!("{}", err_msg);
@@ -174,11 +178,11 @@ fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use crate::unit_test_util::load_env_config;
-    use crate::validation::womtool::{wdl_is_valid, Error, get_wdl_inputs_with_simple_types};
+    use crate::validation::womtool::{get_wdl_inputs_with_simple_types, wdl_is_valid, Error};
     use actix_web::client::Client;
-    use std::fs::read_to_string;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::fs::read_to_string;
 
     #[actix_rt::test]
     async fn test_wdl_is_valid_true() {
@@ -268,9 +272,12 @@ mod tests {
             .with_body(test_wdl)
             .create();
 
-        let response = get_wdl_inputs_with_simple_types(&client, &format!("{}/test/resource", mockito::server_url()))
-            .await
-            .unwrap();
+        let response = get_wdl_inputs_with_simple_types(
+            &client,
+            &format!("{}/test/resource", mockito::server_url()),
+        )
+        .await
+        .unwrap();
 
         mock.assert();
         let mut expected_response: HashMap<String, String> = HashMap::new();
@@ -293,8 +300,11 @@ mod tests {
             .with_body("test")
             .create();
 
-        let response =
-            get_wdl_inputs_with_simple_types(&client, &format!("{}/test/resource", mockito::server_url())).await;
+        let response = get_wdl_inputs_with_simple_types(
+            &client,
+            &format!("{}/test/resource", mockito::server_url()),
+        )
+        .await;
 
         mock.assert();
 
@@ -318,8 +328,11 @@ mod tests {
             .with_status(404)
             .create();
 
-        let response =
-            get_wdl_inputs_with_simple_types(&client, &format!("{}/test/resource", mockito::server_url())).await;
+        let response = get_wdl_inputs_with_simple_types(
+            &client,
+            &format!("{}/test/resource", mockito::server_url()),
+        )
+        .await;
 
         mock.assert();
 

@@ -307,16 +307,16 @@ mod tests {
     use super::*;
     use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::report_section::{NewReportSection, ReportSectionData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_report::{NewRunReport, RunReportData};
+    use crate::models::section::{NewSection, SectionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use chrono::Utc;
     use serde_json::json;
     use uuid::Uuid;
-    use crate::models::report_section::{ReportSectionData, NewReportSection};
-    use crate::models::section::{SectionData, NewSection};
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {

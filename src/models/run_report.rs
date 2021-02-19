@@ -277,9 +277,13 @@ impl RunReportData {
         query_report_id: Uuid,
         params: RunReportChangeset,
     ) -> Result<Self, diesel::result::Error> {
-        diesel::update(run_report.filter(run_id.eq(query_run_id)).filter(report_id.eq(query_report_id)))
-            .set(params)
-            .get_result(conn)
+        diesel::update(
+            run_report
+                .filter(run_id.eq(query_run_id))
+                .filter(report_id.eq(query_report_id)),
+        )
+        .set(params)
+        .get_result(conn)
     }
 
     /// Deletes a specific run_report row in the DB
@@ -921,11 +925,19 @@ mod tests {
             finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
         };
 
-        let updated_run_report =
-            RunReportData::update(&conn, test_run_report.run_id, test_run_report.report_id, changes).expect("Failed to update run");
+        let updated_run_report = RunReportData::update(
+            &conn,
+            test_run_report.run_id,
+            test_run_report.report_id,
+            changes,
+        )
+        .expect("Failed to update run");
 
         assert_eq!(updated_run_report.status, ReportStatusEnum::Succeeded);
-        assert_eq!(updated_run_report.cromwell_job_id, Some(String::from("123456asdsdfes")));
+        assert_eq!(
+            updated_run_report.cromwell_job_id,
+            Some(String::from("123456asdsdfes"))
+        );
         assert_eq!(updated_run_report.results, Some(json!({"test":"test"})));
         assert_eq!(
             updated_run_report.finished_at.unwrap(),

@@ -11,6 +11,17 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
+use actix_web::client::Client;
+use crate::manager::report_builder;
+use actix_web::dev::HttpResponseBuilder;
+use actix_web::http::StatusCode;
+
+/// Represents the part of a new run_report that is received as a request body
+#[derive(Deserialize, Serialize)]
+struct NewRunReportIncomplete {
+    created_by: Option<String>
+}
+
 
 /// Handles requests to /runs/{id}/reports/{report_id} for retrieving run_report
 /// info by run_id and report_id
@@ -99,7 +110,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 /// This function is called by Actix-Web when a get request is made to the /runs/{id}/reports
 ///
 /// It deserializes the query params to a RunReportQuery, connects to the db via a connection
-/// from `pool`, and returns the retrieveds, or an error message if there is no matching
+/// from `pool`, and returns the retrieved run_reports, or an error message if there is no matching
 /// or some other error occurs
 ///
 /// # Panics
@@ -163,7 +174,117 @@ async fn find(
     })
 }
 
-// TODO: Add a create mapping once the necessary functionality for creating a report is implemented
+/// Handles requests to /runs/{id}/reports/{report_id} mapping for creating a run report
+///
+/// This function is called by Actix-Web when a post request is made to the
+/// /runs/{id}/reports/{report_id} mapping
+/// It deserializes the request body to a NewRunReportIncomplete, assembles a report template and a
+/// wdl for filling it for the report specified by `report_id`, submits it to cromwell with
+/// data filled in from the run specified by `run_id`, and creates a RunReportData instance for it
+/// in the DB
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create(
+    req: HttpRequest,
+    web::Json(run_report_inputs): web::Json<NewRunReportIncomplete>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
+) -> HttpResponse {
+    // Pull id params from path
+    let id = &req.match_info().get("id").unwrap();
+    let report_id = &req.match_info().get("report_id").unwrap();
+    // Parse ID into Uuid
+    let id = match Uuid::parse_str(id) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return HttpResponse::BadRequest().json(ErrorBody {
+                title: "Run ID formatted incorrectly".to_string(),
+                status: 400,
+                detail: "Run ID must be formatted as a Uuid".to_string(),
+            });
+        }
+    };
+
+    // Parse report ID into Uuid
+    let report_id = match Uuid::parse_str(report_id) {
+        Ok(report_id) => report_id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return HttpResponse::BadRequest().json(ErrorBody {
+                title: "Report ID formatted incorrectly".to_string(),
+                status: 400,
+                detail: "Report ID must be formatted as a Uuid".to_string(),
+            });
+        }
+    };
+    // Get DB connection
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+    // Create run report
+    match report_builder::create_run_report(
+        &conn,
+        &client,
+        id,
+        report_id,
+        run_report_inputs.created_by,
+    )
+        .await
+    {
+        Ok(run_report) => HttpResponse::Ok().json(run_report),
+        Err(err) => {
+            let error_body = match err {
+                report_builder::Error::Cromwell(e) => ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: format!("Submitting job to Cromwell to generate report failed with error: {}", e),
+                },
+                report_builder::Error::Inputs(e) => ErrorBody {
+                    title: "Inputs error".to_string(),
+                    status: 500,
+                    detail: format!("Encountered error while attempting to process report inputs: {}", e),
+                },
+                report_builder::Error::Womtool(e) => ErrorBody {
+                    title: "Womtool error".to_string(),
+                    status: 500,
+                    detail: format!("Encountered error while attempting to process WDLs with womtool: {}", e),
+                },
+                report_builder::Error::DB(e) => ErrorBody {
+                    title: "Database error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to query the database: {}", e),
+                },
+                report_builder::Error::Json(e) => ErrorBody {
+                    title: "Json error".to_string(),
+                    status: 500,
+                    detail: format!("Encountered error while attempting to parse json: {}", e),
+                },
+                report_builder::Error::Parse(e) => ErrorBody {
+                    title: "Report config parse error".to_string(),
+                    status: 500,
+                    detail: format!("Encountered an error while attempting to parse the report config: {}", e),
+                },
+                report_builder::Error::IO(e) => ErrorBody {
+                    title: "IO error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to create temporary file: {}", e),
+                },
+                report_builder::Error::GCS(e) => ErrorBody {
+                    title: "GCS error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to upload filled report template to GCS: {}", e),
+                }
+            };
+            HttpResponseBuilder::new(
+                StatusCode::from_u16(error_body.status)
+                    .expect("Failed to parse status code. This shouldn't happen"),
+            )
+                .json(error_body)
+        }
+    }
+}
 
 /// Handles DELETE requests to /runs/{id}/reports/{report_id} for deleting run_report
 ///s

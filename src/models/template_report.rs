@@ -213,7 +213,7 @@ impl TemplateReportData {
     pub fn find_by_test_and_report(
         conn: &PgConnection,
         query_test_id: Uuid,
-        query_report_id: Uuid
+        query_report_id: Uuid,
     ) -> Result<Self, diesel::result::Error> {
         // Get template_id by test_id
         let test_subquery = test::dsl::test
@@ -304,7 +304,6 @@ impl TemplateReportData {
         )
         .execute(conn)?)
     }
-
 }
 
 #[cfg(test)]
@@ -532,7 +531,6 @@ mod tests {
     }
 
     fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
-
         let new_test = NewTest {
             name: String::from("Kevin's Test2"),
             template_id: id,
@@ -672,7 +670,7 @@ mod tests {
             test_test.test_id,
             test_template_report.report_id,
         )
-            .expect("Failed to retrieve test template_report by id.");
+        .expect("Failed to retrieve test template_report by id.");
 
         assert_eq!(found_template_report, test_template_report);
     }
@@ -860,7 +858,10 @@ mod tests {
 
         let test_template_report = insert_test_template_report(&conn);
 
-        assert_eq!(test_template_report.input_map, json!({"section4":{"input1":"value1"}}));
+        assert_eq!(
+            test_template_report.input_map,
+            json!({"section4":{"input1":"value1"}})
+        );
         assert_eq!(
             test_template_report.created_by,
             Some(String::from("Kevin@example.com"))
