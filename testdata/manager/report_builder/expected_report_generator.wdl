@@ -3,9 +3,8 @@ version 1.0
 task generate_report_file {
 
     meta {
-        description : "Create a Jupyter Notebook report that presents results of a CARROT test run in a way specified by the user.  Adapted from a task by Jonn Smith (jonn@broadinstitute.org)"
+        description : "Create a Jupyter Notebook report that presents results of a CARROT test run in a way specified by the user.  Adapted from a task by Jonn Smith"
         author : "Kevin Lydon"
-        email : "klydon@broadinstitute.org"
     }
 
     input {
@@ -21,7 +20,7 @@ task generate_report_file {
     parameter_meta {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
 
-        report_name : "The base name to use for the report files, and to include in the metadat section of the report"
+        report_name : "The base name to use for the report files, and to include in the metadata section of the report"
     }
 
     # Determine the disk size based on the files we're using
@@ -30,15 +29,15 @@ task generate_report_file {
             size(section0_test_file, "GB")
         ))
 
-    String nb_name = report_name + ".ipynb"
-    String html_out = report_name + ".html"
-    String pdf_out = report_name + ".pdf"
+    String nb_name = "report.ipynb"
+    String html_out = "report.html"
+    String pdf_out = "report.pdf"
 
     command <<<
         set -euxo pipefail
 
         # Copy the notebook template to our current folder:
-        cp ~{notebook_template} ~{nb_name}
+        cp "~{notebook_template}" ~{nb_name}
 
         # Prepare the input file:
         rm -f inputs.config
@@ -85,9 +84,8 @@ task generate_report_file {
 workflow generate_report_file_workflow {
 
     meta {
-        description : "This workflow generates a Jupyter Notebook from a template to display CARROT run result data.  Adapted from a task by Jonn Smith (jonn@broadinstitute.org)"
+        description : "This workflow generates a Jupyter Notebook from a template to display CARROT run result data.  Adapted from a task by Jonn Smith"
         author : "Kevin Lydon"
-        email : "klydon@broadinstitute.org"
     }
 
     input {
@@ -102,7 +100,7 @@ workflow generate_report_file_workflow {
     parameter_meta {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
 
-        report_name : "The base name to use for the report files, and to include in the metadat section of the report"
+        report_name : "The base name to use for the report files, and to include in the metadata section of the report"
     }
 
     call generate_report_file {

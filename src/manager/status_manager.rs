@@ -6,7 +6,7 @@
 //! for any tests runs that complete
 
 use crate::config;
-use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
+use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum, ReportStatusEnum};
 use crate::db::DbPool;
 use crate::manager::test_runner::RunBuildStatus;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
@@ -25,6 +25,8 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use crate::models::run_report::{RunReportData, RunReportChangeset};
+use actix_rt::blocking::run;
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
@@ -98,6 +100,8 @@ pub async fn manage(
         match unfinished_runs {
             // If we got them successfully, check and update their statuses
             Ok(runs) => {
+                // Reset the consecutive failures counter
+                consecutive_failures = 0;
                 debug!("Checking status of {} runs", runs.len());
                 for run in runs {
                     // Check for message from main thread to exit
@@ -117,7 +121,7 @@ pub async fn manage(
             Err(e) => {
                 consecutive_failures += 1;
                 error!(
-                    "Failed to retrieve run/build statuses from the DB {} time(s), this time due to: {}",
+                    "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
                     consecutive_failures, e
                 );
                 if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
@@ -134,6 +138,8 @@ pub async fn manage(
         match unfinished_builds {
             // If we got them successfully, check and update their statuses
             Ok(builds) => {
+                // Reset the consecutive failures counter
+                consecutive_failures = 0;
                 debug!("Checking status of {} builds", builds.len());
                 for build in builds {
                     // Check for message from main thread to exit
@@ -164,7 +170,58 @@ pub async fn manage(
             Err(e) => {
                 consecutive_failures += 1;
                 error!(
-                    "Failed to retrieve run/build statuses from the DB {} time(s), this time due to: {}",
+                    "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
+                    consecutive_failures, e
+                );
+                if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
+                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+                    return Err(StatusManagerError {
+                        msg: String::from("Exceed allowed consecutive failures"),
+                    });
+                }
+            }
+        }
+
+        // Query DB for unfinished run reports
+        let unfinished_run_reports = RunReportData::find_unfinished(&db_pool.get().unwrap());
+        match unfinished_run_reports {
+            // If we got them successfully, check and update their statuses
+            Ok(run_reports) => {
+                // Reset the consecutive failures counter
+                consecutive_failures = 0;
+                debug!("Checking status of {} run_reports", run_reports.len());
+                for run_report in run_reports {
+                    // Check for message from main thread to exit
+                    if let Some(_) = check_for_terminate_message(&channel_recv) {
+                        return Ok(());
+                    };
+                    // Check and update status
+                    debug!(
+                        "Checking status of run_report with run_id {} and report_id: {}",
+                        run_report.run_id,
+                        run_report.report_id
+                    );
+                    match check_and_update_run_report_status(&run_report, &client, &db_pool.get().unwrap())
+                        .await
+                    {
+                        Err(e) => {
+                            error!("Encountered error while trying to update status for run_report with run_id {} and report_id {} : {}", run_report.run_id, run_report.report_id, e);
+                        }
+                        Ok(_) => {
+                            debug!(
+                                "Successfully checked/updated status for run_report with run_id {} and report_id {}",
+                                run_report.run_id,
+                                run_report.report_id
+                            );
+                        }
+                    }
+                }
+            }
+            // If we failed, panic if there are too many failures
+            Err(e) => {
+                consecutive_failures += 1;
+                error!(
+                    "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
                     consecutive_failures, e
                 );
                 if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
@@ -626,6 +683,124 @@ async fn check_and_update_build_status(
     Ok(())
 }
 
+/// Gets status for a run report job from cromwell and updates the status in the DB if appropriate
+///
+///
+async fn check_and_update_run_report_status(
+    run_report: &RunReportData,
+    client: &Client,
+    conn: &PgConnection,
+) -> Result<(), UpdateStatusError> {
+    // Get metadata
+    let metadata =
+        get_status_metadata_from_cromwell(client, &run_report.cromwell_job_id.as_ref().unwrap()).await?;
+    // If the status is different from what's stored in the DB currently, update it
+    let status = match metadata.get("status") {
+        Some(status) => {
+            match get_report_status_for_cromwell_status(&status.as_str().unwrap().to_lowercase()) {
+                Some(status) => status,
+                None => {
+                    return Err(UpdateStatusError::Cromwell(format!(
+                        "Cromwell metadata request returned unrecognized status {}",
+                        status
+                    )));
+                }
+            }
+        }
+        None => {
+            return Err(UpdateStatusError::Cromwell(String::from(
+                "Cromwell metadata request did not return status",
+            )))
+        }
+    };
+    if status != run_report.status {
+        // Set the changes based on the status
+        let run_report_update: RunReportChangeset = match status {
+            ReportStatusEnum::Succeeded => {
+                get_run_report_changeset_from_succeeded_cromwell_metadata(&metadata)?
+            }
+            ReportStatusEnum::Failed | ReportStatusEnum::Aborted => RunReportChangeset {
+                status: Some(status.clone()),
+                cromwell_job_id: None,
+                finished_at: Some(get_end(&metadata)?),
+                results: None
+            },
+            _ => RunReportChangeset {
+                status: Some(status.clone()),
+                cromwell_job_id: None,
+                finished_at: None,
+                results: None
+            },
+        };
+        // Update
+        match RunReportData::update(conn, run_report.run_id, run_report.report_id, run_report_update) {
+            Err(e) => {
+                return Err(UpdateStatusError::DB(format!(
+                    "Updating run_report with run_id {} and report_id {} in DB failed with error {}",
+                    run_report.run_id,
+                    run_report.report_id,
+                    e
+                )))
+            }
+            _ => {}
+        };
+    }
+
+    // TODO: Send emails to appropriate users to notify them of the report completion
+
+    Ok(())
+}
+
+/// Extracts the expected run report outputs from the cromwell metadata object `metadata` and
+/// returns a RunReportChangeset for updating a run_report to Succeeded with the expected outputs
+/// as its results
+fn get_run_report_changeset_from_succeeded_cromwell_metadata(metadata: &Map<String, Value>) -> Result<RunReportChangeset, UpdateStatusError> {
+    // Get the outputs so we can get the report file locations
+    let outputs = match metadata.get("outputs") {
+        Some(outputs) => outputs.as_object().unwrap().to_owned(),
+        None => {
+            return Err(UpdateStatusError::Cromwell(String::from(
+                "Cromwell metadata request did not return outputs",
+            )))
+        }
+    };
+    // We'll build a json map to contain the outputs we want and store it in the DB in run_report's
+    // result field
+    let mut run_report_outputs_map: Map<String, Value> = Map::new();
+    // Loop through the three outputs we want, get them from `outputs`, and put them in our outputs
+    // map
+    for output_key in vec!["populated_notebook", "html_report", "pdf_report"] {
+        // Get the output from the cromwell outputs
+        let output_val = match outputs.get(&format!("generate_report_file_workflow.{}", output_key)) {
+            Some(val) => match val.as_str() {
+                Some(image_url) => image_url.to_owned(),
+                None => {
+                    return Err(UpdateStatusError::Cromwell(format!(
+                        "Run Report Cromwell job metadata outputs {} isn't a string?",
+                        output_key
+                    )))
+                }
+            },
+            None => {
+                return Err(UpdateStatusError::Cromwell(format!(
+                    "Run Report Cromwell job metadata outputs missing {}",
+                    output_key
+                )))
+            }
+        };
+        // Add it to our output map
+        run_report_outputs_map.insert(String::from(output_key), Value::String(output_val));
+    }
+
+
+    Ok(RunReportChangeset {
+        status: Some(ReportStatusEnum::Succeeded),
+        cromwell_job_id: None,
+        results: Some(Value::Object(run_report_outputs_map)),
+        finished_at: Some(get_end(metadata)?),
+    })
+}
+
 /// Gets the metadata from cromwell that we actually care about for `cromwell_job_id`
 ///
 /// Gets the status, end, and outputs for the cromwell job specified by `cromwell_job_id` from the
@@ -696,6 +871,20 @@ fn get_build_status_for_cromwell_status(cromwell_status: &str) -> Option<BuildSt
         "succeeded" => Some(BuildStatusEnum::Succeeded),
         "failed" => Some(BuildStatusEnum::Failed),
         "aborted" => Some(BuildStatusEnum::Aborted),
+        _ => None,
+    }
+}
+
+/// Returns equivalent ReportStatusEnum for `cromwell_status`
+fn get_report_status_for_cromwell_status(cromwell_status: &str) -> Option<ReportStatusEnum> {
+    match cromwell_status {
+        "running" => Some(ReportStatusEnum::Running),
+        "starting" => Some(ReportStatusEnum::Starting),
+        "queuedincromwell" => Some(ReportStatusEnum::QueuedInCromwell),
+        "waitingforqueuespace" => Some(ReportStatusEnum::WaitingForQueueSpace),
+        "succeeded" => Some(ReportStatusEnum::Succeeded),
+        "failed" => Some(ReportStatusEnum::Failed),
+        "aborted" => Some(ReportStatusEnum::Aborted),
         _ => None,
     }
 }
@@ -786,10 +975,8 @@ fn fill_results(
 #[cfg(test)]
 mod tests {
 
-    use crate::custom_sql_types::{BuildStatusEnum, ResultTypeEnum, RunStatusEnum};
-    use crate::manager::status_manager::{
-        check_and_update_build_status, check_and_update_run_status, fill_results,
-    };
+    use crate::custom_sql_types::{BuildStatusEnum, ResultTypeEnum, RunStatusEnum, ReportStatusEnum};
+    use crate::manager::status_manager::{check_and_update_build_status, check_and_update_run_status, fill_results, check_and_update_run_report_status};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
@@ -803,10 +990,12 @@ mod tests {
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_pool;
     use actix_web::client::Client;
-    use chrono::NaiveDateTime;
+    use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::run_report::{RunReportData, NewRunReport};
+    use crate::models::report::{NewReport, ReportData};
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
         let new_result = NewResult {
@@ -1005,6 +1194,79 @@ mod tests {
 
         SoftwareBuildData::create(conn, new_software_build)
             .expect("Failed inserting test software build")
+    }
+
+    fn insert_test_run(conn: &PgConnection) -> RunData {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test3"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        RunData::create(&conn, new_run).expect("Failed to insert run")
+    }
+
+    fn insert_test_run_report(conn: &PgConnection) -> RunReportData {
+        let run = insert_test_run(conn);
+
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test1":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_run_report = NewRunReport {
+            run_id: run.run_id,
+            report_id: report.report_id,
+            status: ReportStatusEnum::Submitted,
+            cromwell_job_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
+            results: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: None,
+        };
+
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     fn map_run_to_version(conn: &PgConnection, run_id: Uuid, software_version_id: Uuid) {
@@ -1617,5 +1879,181 @@ mod tests {
         let result_build =
             SoftwareBuildData::find_by_id(&conn, test_build.software_build_id).unwrap();
         assert_eq!(result_build.status, BuildStatusEnum::Running);
+    }
+
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_report_status_succeeded() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert run_report we'll use for testing
+        let run_report = insert_test_run_report(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+            "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+            "status": "Succeeded",
+            "outputs": {
+                "generate_report_file_workflow.populated_notebook": "gs://example/example/populated_notebook.ipynb",
+                "generate_report_file_workflow.html_report": "gs://example/example/html_report.html",
+                "generate_report_file_workflow.pdf_report": "gs://example/example/pdf_report.pdf",
+            },
+            "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(200)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_report_status(&run_report, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run_report to make sure data was filled properly
+        let result_run_report =
+            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id).unwrap();
+        assert_eq!(result_run_report.status, ReportStatusEnum::Succeeded);
+        assert_eq!(
+            result_run_report.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+        assert_eq!(
+            result_run_report.results.unwrap(),
+            json!({
+                "populated_notebook": "gs://example/example/populated_notebook.ipynb",
+                "html_report": "gs://example/example/html_report.html",
+                "pdf_report": "gs://example/example/pdf_report.pdf"
+            })
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_report_status_failed() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert run_report we'll use for testing
+        let run_report = insert_test_run_report(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Failed",
+          "outputs": {},
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_report_status(&run_report, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run_report to make sure data was filled properly
+        let result_run_report =
+            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id).unwrap();
+        assert_eq!(result_run_report.status, ReportStatusEnum::Failed);
+        assert_eq!(
+            result_run_report.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_report_status_aborted() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert run_report we'll use for testing
+        let run_report = insert_test_run_report(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Aborted",
+          "outputs": {},
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_report_status(&run_report, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run_report to make sure data was filled properly
+        let result_run_report =
+            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id).unwrap();
+        assert_eq!(result_run_report.status, ReportStatusEnum::Aborted);
+        assert_eq!(
+            result_run_report.finished_at.unwrap(),
+            NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+                .unwrap()
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_report_status_running() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert run_report we'll use for testing
+        let run_report = insert_test_run_report(&conn);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
+          "status": "Running",
+          "outputs": {},
+          "end": null
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/ca92ed46-cb1e-4486-b8ff-fc48d7771e67/metadata",
+        )
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+                mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+            ]))
+            .create();
+        // Check and update status
+        check_and_update_run_report_status(&run_report, &Client::default(), &conn)
+            .await
+            .unwrap();
+        mock.assert();
+        // Query for run_report to make sure data was filled properly
+        let result_run_report =
+            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id).unwrap();
+        assert_eq!(result_run_report.status, ReportStatusEnum::Running);
     }
 }

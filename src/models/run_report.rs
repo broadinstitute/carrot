@@ -250,6 +250,17 @@ impl RunReportData {
         query.load::<Self>(conn)
     }
 
+    /// Queries the DB for run_reports that haven't finished yet
+    ///
+    /// Returns result containing either a vector of the retrieved run_reports (which have a
+    /// null value in the `finished_at` column) or a diesel error if retrieving the rows fails for
+    /// some reason
+    pub fn find_unfinished(conn: &PgConnection) -> Result<Vec<Self>, diesel::result::Error> {
+        run_report
+            .filter(finished_at.is_null())
+            .load::<Self>(conn)
+    }
+
     /// Inserts a new run_report mapping into the DB
     ///
     /// Creates a new run_report row in the DB using `conn` with the values specified in
@@ -864,6 +875,32 @@ mod tests {
             RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
 
         assert_eq!(found_run_reports.len(), 1);
+    }
+
+    #[test]
+    fn find_unfinished_success() {
+        let conn = get_test_db_connection();
+
+        let _test_run_reports = insert_test_run_reports_not_failed(&conn);
+
+        let found_run_reports =
+            RunReportData::find_unfinished(&conn).expect("Failed to find run_reports");
+
+        assert_eq!(found_run_reports.len(), 2);
+        assert_eq!(found_run_reports[0].finished_at, None);
+        assert_eq!(found_run_reports[1].finished_at, None);
+    }
+
+    #[test]
+    fn find_unfinished_success_empty() {
+        let conn = get_test_db_connection();
+
+        let _test_run_report = insert_test_run_report_failed(&conn);
+
+        let found_run_reports =
+            RunReportData::find_unfinished(&conn).expect("Failed to find run_reports");
+
+        assert_eq!(found_run_reports.len(), 0);
     }
 
     #[test]
