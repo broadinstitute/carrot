@@ -1,8 +1,10 @@
 //! Contains functions for sending notifications to users
 
 use crate::config;
-use crate::models::run::RunWithResultData;
+use crate::models::report::ReportData;
+use crate::models::run::{RunData, RunWithResultData};
 use crate::models::run_is_from_github::RunIsFromGithubData;
+use crate::models::run_report::RunReportData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::{emailer, github_commenter};
@@ -124,6 +126,54 @@ pub fn send_notification_emails_for_test(
     Ok(())
 }
 
+/// Sends email to each user subscribed to the test, template, or pipeline for the run specified
+/// by `run_id`, and the creator, if any, of the run_report specified by `run_id` and `report_id`.
+/// The email includes the contents of the RunReportData instance for that run_report
+pub fn send_run_report_complete_emails(
+    conn: &PgConnection,
+    run_id: Uuid,
+    report_id: Uuid,
+) -> Result<(), Error> {
+    // If the email mode is None, just return
+    if matches!(*config::EMAIL_MODE, emailer::EmailMode::None) {
+        return Ok(());
+    }
+    // Get run_report
+    let run_report = RunReportData::find_by_run_and_report(conn, run_id, report_id)?;
+    // Get run data so we have created_by, test_id, and name
+    let run = RunData::find_by_id(conn, run_id)?;
+    // Get report so we have name
+    let report = ReportData::find_by_id(conn, report_id)?;
+    // Get subscriptions
+    let subs = SubscriptionData::find_all_for_test(conn, run.test_id)?;
+
+    // Assemble set of email addresses to notify
+    let mut email_addresses = HashSet::new();
+    if let Some(address) = &run_report.created_by {
+        email_addresses.insert(address.as_str());
+    }
+    if let Some(address) = &run.created_by {
+        email_addresses.insert(address.as_str());
+    }
+    for sub in &subs {
+        email_addresses.insert(&sub.email);
+    }
+
+    // Put together subject and message for emails
+    let subject = format!(
+        "Run report completed for run {} and report {} with status {}",
+        run.name, report.name, run_report.status
+    );
+    let message = serde_json::to_string_pretty(&run_report)?;
+
+    // Attempt to send email, and log an error and mark the error boolean as true if it fails
+    if !email_addresses.is_empty() {
+        emailer::send_email(email_addresses.into_iter().collect(), &subject, &message)?;
+    }
+
+    Ok(())
+}
+
 /// Checks to see if the run indicated by `run_id` was triggered from Github (i.e has a
 /// corresponding row in the RUN_IS_FROM_GITHUB table) and, if so, attempts to post a comment to
 /// GitHub to indicate the run has finished, with the run's data.  Returns an error if there is
@@ -161,19 +211,22 @@ pub async fn post_run_complete_comment_if_from_github(
 
 #[cfg(test)]
 mod tests {
-    use crate::custom_sql_types::{EntityTypeEnum, RunStatusEnum};
+    use crate::custom_sql_types::{EntityTypeEnum, ReportStatusEnum, RunStatusEnum};
     use crate::manager::notification_handler::{
         post_run_complete_comment_if_from_github, send_notification_emails_for_test,
-        send_run_complete_emails,
+        send_run_complete_emails, send_run_report_complete_emails,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_pool;
     use actix_web::client::Client;
+    use chrono::Utc;
     use diesel::PgConnection;
     use mailparse::MailHeaderMap;
     use serde::Deserialize;
@@ -195,7 +248,7 @@ mod tests {
         email_base_name: &str,
     ) -> (RunData, TestData) {
         let test = insert_test_test_with_subscriptions_with_entities(conn, email_base_name);
-        let run = insert_test_run_with_test_id(conn, test.test_id.clone());
+        let run = insert_test_run_with_test_id(conn, test.test_id.clone(), email_base_name);
 
         (run, test)
     }
@@ -273,7 +326,11 @@ mod tests {
         TestData::create(&conn, new_test).expect("Failed to insert test")
     }
 
-    fn insert_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_test_run_with_test_id(
+        conn: &PgConnection,
+        id: Uuid,
+        email_base_name: &str,
+    ) -> RunData {
         let new_run = NewRun {
             name: String::from("Kevin's Run"),
             test_id: id,
@@ -282,7 +339,7 @@ mod tests {
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: None,
-            created_by: Some(String::from("test_send_run_complete_emails@example.com")),
+            created_by: Some(format!("{}@example.com", email_base_name)),
             finished_at: None,
         };
 
@@ -301,6 +358,37 @@ mod tests {
             author: String::from("ExampleAuthor"),
         };
         RunIsFromGithubData::create(conn, new_run_is_from_github).unwrap()
+    }
+
+    fn insert_test_run_report_with_run_id(
+        conn: &PgConnection,
+        run_id: Uuid,
+        email_base_name: &str,
+    ) -> RunReportData {
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test1":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_run_report = NewRunReport {
+            run_id,
+            report_id: report.report_id,
+            status: ReportStatusEnum::Succeeded,
+            cromwell_job_id: Some(String::from("testtesttesttest")),
+            results: Some(json!({
+                "populated_notebook": "gs://example/example.ipynb",
+                "html_report": "gs://example/example.html",
+                "pdf_report": "gs://example/example.pdf"
+            })),
+            created_by: Some(format!("{}@example.com", email_base_name)),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[test]
@@ -427,6 +515,145 @@ mod tests {
     }
 
     #[test]
+    fn test_send_run_report_complete_emails_success() {
+        // Set environment variables so they don't break the test
+        std::env::set_var("EMAIL_MODE", "SENDMAIL");
+        std::env::set_var("EMAIL_FROM", "kevin@example.com");
+
+        let pool = get_test_db_pool();
+
+        let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(
+            &pool.get().unwrap(),
+            "test_send_run_report_complete_emails",
+        );
+
+        let new_run_report = insert_test_run_report_with_run_id(
+            &pool.get().unwrap(),
+            new_run.run_id,
+            "test_send_run_report_complete_emails",
+        );
+
+        let test_subject = "Run report completed for run Kevin's Run and report Kevin's Report with status succeeded";
+        let test_message = serde_json::to_string_pretty(&new_run_report).unwrap();
+
+        // Make temporary directory for the email
+        let email_path = Builder::new()
+            .prefix("test_send_run_report_complete_emails")
+            .rand_bytes(0)
+            .tempdir_in(temp_dir())
+            .unwrap();
+
+        // Send email
+        send_run_report_complete_emails(
+            &pool.get().unwrap(),
+            new_run.run_id,
+            new_run_report.report_id,
+        )
+        .unwrap();
+
+        // Verify that the email was created correctly
+        let files_in_dir = read_dir(email_path.path())
+            .unwrap()
+            .collect::<Vec<std::io::Result<DirEntry>>>();
+
+        assert_eq!(files_in_dir.len(), 1);
+
+        let test_email_string =
+            read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
+        let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
+
+        assert_eq!(
+            test_email
+                .envelope
+                .get("forward_path")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .get(0)
+                .unwrap(),
+            "test_send_run_report_complete_emails@example.com"
+        );
+        assert_eq!(
+            test_email.envelope.get("reverse_path").unwrap(),
+            "kevin@example.com"
+        );
+
+        let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
+
+        assert_eq!(
+            parsed_mail.subparts[0].get_body().unwrap().trim(),
+            test_message
+        );
+        assert_eq!(
+            parsed_mail.headers.get_first_value("Subject").unwrap(),
+            test_subject
+        );
+
+        email_path.close().unwrap();
+    }
+
+    #[test]
+    fn test_send_run_report_complete_emails_failure_no_run_report() {
+        // Set environment variables so they don't break the test
+        std::env::set_var("EMAIL_MODE", "SENDMAIL");
+        std::env::set_var("EMAIL_FROM", "kevin@example.com");
+
+        let pool = get_test_db_pool();
+
+        // Send emails
+        match send_run_report_complete_emails(&pool.get().unwrap(), Uuid::new_v4(), Uuid::new_v4())
+        {
+            Err(e) => match e {
+                super::Error::DB(_) => {}
+                _ => panic!(
+                    "Send run report complete emails failed with unexpected error: {}",
+                    e
+                ),
+            },
+            _ => {
+                panic!("Send run report complete emails succeeded unexpectedly");
+            }
+        }
+    }
+
+    #[test]
+    fn test_send_run_report_complete_emails_failure_bad_email() {
+        // Set environment variables so they don't break the test
+        std::env::set_var("EMAIL_MODE", "SENDMAIL");
+        std::env::set_var("EMAIL_FROM", "kevin@example.com");
+
+        let pool = get_test_db_pool();
+
+        let (new_run, _) = insert_test_run_with_subscriptions_with_entities(
+            &pool.get().unwrap(),
+            "test_send_run_report_complete_emails@",
+        );
+        let new_run_report = insert_test_run_report_with_run_id(
+            &pool.get().unwrap(),
+            new_run.run_id,
+            "test_send_run_report_complete_emails@",
+        );
+
+        // Send emails
+        match send_run_report_complete_emails(
+            &pool.get().unwrap(),
+            new_run.run_id,
+            new_run_report.report_id,
+        ) {
+            Err(e) => match e {
+                super::Error::Email(_) => {}
+                _ => panic!(
+                    "Send run report complete emails failed with unexpected error: {}",
+                    e
+                ),
+            },
+            _ => {
+                panic!("Send run report complete emails succeeded unexpectedly");
+            }
+        }
+    }
+
+    #[test]
     fn test_send_notification_emails_for_test_success() {
         // Set environment variables so they don't break the test
         std::env::set_var("EMAIL_MODE", "SENDMAIL");
@@ -543,7 +770,7 @@ mod tests {
         let pipeline = insert_test_pipeline(&conn);
         let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
         let test = insert_test_test_with_template_id(&conn, template.template_id);
-        let test_run = insert_test_run_with_test_id(&conn, test.test_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         let test_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
@@ -581,7 +808,7 @@ mod tests {
         let pipeline = insert_test_pipeline(&conn);
         let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
         let test = insert_test_test_with_template_id(&conn, template.template_id);
-        let test_run = insert_test_run_with_test_id(&conn, test.test_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
 
         // Define mockito mapping for response
         let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")

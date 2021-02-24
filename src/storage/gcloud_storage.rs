@@ -146,7 +146,11 @@ pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<St
         .param("uploadType", "multipart")
         .upload(file, "application/octet-stream".parse().unwrap())?;
     // Return the gs address of the object
-    Ok(format!("gs://{}/{}", result.1.bucket.unwrap(), result.1.name.unwrap()))
+    Ok(format!(
+        "gs://{}/{}",
+        result.1.bucket.unwrap(),
+        result.1.name.unwrap()
+    ))
 }
 
 /// Extracts the bucket name and the object name from the full gs uri of a file.  Expects

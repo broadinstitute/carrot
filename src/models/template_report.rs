@@ -202,6 +202,25 @@ impl TemplateReportData {
         query.load::<Self>(conn)
     }
 
+    /// Queries the DB for a template_report relationship for the specified test_id
+    ///
+    /// Queries the DB using `conn` to retrieve all rows with a template_id matching the
+    /// template id for the test specified by `query_test_id`
+    /// Returns a result containing either the retrieved template_report mappings as a vector of
+    /// TemplateReportData instances or an error if the query fails for some reason
+    pub fn find_by_test(
+        conn: &PgConnection,
+        query_test_id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        // Get template_id by test_id
+        let test_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(query_test_id))
+            .select(test::dsl::template_id);
+        template_report
+            .filter(template_id.eq(any(test_subquery)))
+            .load::<Self>(conn)
+    }
+
     /// Queries the DB for a template_report relationship for the specified ids
     ///
     /// Queries the DB using `conn` to retrieve the first row with a template_id matching the
@@ -656,6 +675,33 @@ mod tests {
             nonexistent_template_report,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_by_test_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template_reports = insert_test_template_reports(&conn);
+        let test_test =
+            insert_test_test_with_template_id(&conn, test_template_reports[2].template_id);
+
+        let found_template_reports = TemplateReportData::find_by_test(&conn, test_test.test_id)
+            .expect("Failed to retrieve test template_reports by test id.");
+
+        assert_eq!(found_template_reports.len(), 1);
+        assert_eq!(found_template_reports[0], test_template_reports[2]);
+    }
+
+    #[test]
+    fn find_by_test_does_not_exist() {
+        let conn = get_test_db_connection();
+
+        let test_template_report = insert_test_template_report(&conn);
+
+        let found_template_reports =
+            TemplateReportData::find_by_test(&conn, Uuid::new_v4()).unwrap();
+
+        assert_eq!(found_template_reports.len(), 0);
     }
 
     #[test]

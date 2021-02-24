@@ -39,7 +39,7 @@ pub enum Error {
     Womtool(womtool::Error),
     Cromwell(CromwellRequestError),
     Prohibited(String),
-    Delete(crate::models::run_report::DeleteError)
+    Delete(crate::models::run_report::DeleteError),
 }
 
 impl std::error::Error for Error {}
@@ -56,7 +56,7 @@ impl fmt::Display for Error {
             Error::Womtool(e) => write!(f, "report_builder Error Womtool {}", e),
             Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e),
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
-            Error::Delete(e) => write!(f, "report_builder Error Delete {}", e)
+            Error::Delete(e) => write!(f, "report_builder Error Delete {}", e),
         }
     }
 }
@@ -137,6 +137,32 @@ lazy_static! {
 /// The name of the workflow in the jupyter_report_generator_template.wdl file
 const GENERATOR_WORKFLOW_NAME: &'static str = "generate_report_file_workflow";
 
+pub async fn create_run_reports_for_completed_run(
+    conn: &PgConnection,
+    client: &Client,
+    run: &RunData,
+) -> Result<Vec<RunReportData>, Error> {
+    // Get template_reports for reports mapped to the template for `run` so we have the report_ids
+    let template_reports = TemplateReportData::find_by_test(conn, run.test_id)?;
+    // Keep track of the run reports we create so we can return them
+    let mut run_reports: Vec<RunReportData> = Vec::new();
+    // Loop through the mappings and create a report for each
+    for mapping in template_reports {
+        run_reports.push(
+            create_run_report(
+                conn,
+                client,
+                run.run_id,
+                mapping.report_id,
+                &run.created_by,
+                false,
+            )
+            .await?,
+        );
+    }
+    Ok(run_reports)
+}
+
 /// Assembles a report template and a wdl for filling it for `report_id`, submits it to cromwell with
 /// data filled in from `run_id`, and creates and returns a RunReportData instance for it.  Before
 /// anything, checks if a run_report row already exists for the specified run_id and report_id.  If
@@ -148,7 +174,7 @@ pub async fn create_run_report(
     client: &Client,
     run_id: Uuid,
     report_id: Uuid,
-    created_by: Option<String>,
+    created_by: &Option<String>,
     delete_failed: bool,
 ) -> Result<RunReportData, Error> {
     // Check if we already have a run report for this run and report
@@ -159,12 +185,15 @@ pub async fn create_run_report(
                 RunReportData::delete(conn, run_id, report_id)?;
             }
             // Otherwise, return an error
-            else{
-                return Err(Error::Prohibited(format!("A run_report record already exists for run_id {} and report_id {}", run_id, report_id)));
+            else {
+                return Err(Error::Prohibited(format!(
+                    "A run_report record already exists for run_id {} and report_id {}",
+                    run_id, report_id
+                )));
             }
-        },
+        }
         // If we don't find anything, then we can just keep going
-        Err(diesel::result::Error::NotFound) => {},
+        Err(diesel::result::Error::NotFound) => {}
         // For any other error, we should return it
         Err(e) => {
             return Err(Error::DB(e));
@@ -226,7 +255,7 @@ pub async fn create_run_report(
         status: ReportStatusEnum::Submitted,
         cromwell_job_id: Some(start_job_response.id),
         results: None,
-        created_by,
+        created_by: created_by.clone(),
         finished_at: None,
     };
     Ok(RunReportData::create(conn, new_run_report)?)
@@ -517,7 +546,11 @@ fn create_input_json(
         for (input_name, report_input) in section_inputs {
             // Make a version of the input name that is prefixed with position so we can avoid the
             // problem of having multiple inputs with the same name
-            let wdl_input_name = format!("{}.{}", GENERATOR_WORKFLOW_NAME, get_section_wdl_input_name(position, input_name));
+            let wdl_input_name = format!(
+                "{}.{}",
+                GENERATOR_WORKFLOW_NAME,
+                get_section_wdl_input_name(position, input_name)
+            );
             // Add input to our inputs_map
             inputs_map.insert(wdl_input_name, Value::String(report_input.value.clone()));
         }
@@ -1211,31 +1244,33 @@ mod input_map {
 
 #[cfg(test)]
 mod tests {
+    use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
     use crate::manager::report_builder::input_map::ReportInput;
-    use crate::manager::report_builder::{create_generator_wdl, create_input_json, create_report_template, Error, create_run_report};
+    use crate::manager::report_builder::{
+        create_generator_wdl, create_input_json, create_report_template, create_run_report, Error,
+    };
+    use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::report_section::{NewReportSection, ReportSectionData};
+    use crate::models::result::{NewResult, ResultData};
+    use crate::models::run::{NewRun, RunData};
+    use crate::models::run_report::{NewRunReport, RunReportData};
+    use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::section::{NewSection, SectionData};
+    use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::template_report::{NewTemplateReport, TemplateReportData};
+    use crate::models::template_result::{NewTemplateResult, TemplateResultData};
+    use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_connection;
+    use actix_web::client::Client;
     use chrono::Utc;
     use diesel::PgConnection;
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
     use serde_json::json;
     use std::collections::HashMap;
     use std::fs::read_to_string;
     use uuid::Uuid;
-    use crate::models::template::{TemplateData, NewTemplate};
-    use actix_web::client::Client;
-    use crate::models::pipeline::{PipelineData, NewPipeline};
-    use crate::models::test::{TestData, NewTest};
-    use crate::models::run::{RunData, NewRun};
-    use crate::custom_sql_types::{RunStatusEnum, ResultTypeEnum, ReportStatusEnum};
-    use crate::models::result::{ResultData, NewResult};
-    use crate::models::run_result::{NewRunResult, RunResultData};
-    use rand::{thread_rng, Rng};
-    use rand::distributions::Alphanumeric;
-    use crate::models::template_result::{NewTemplateResult, TemplateResultData};
-    use crate::models::template_report::{TemplateReportData, NewTemplateReport};
-    use crate::models::run_report::{RunReportData, NewRunReport};
 
     fn insert_test_report_mapped_to_sections(
         conn: &PgConnection,
@@ -1383,7 +1418,9 @@ mod tests {
         (report, report_sections, sections)
     }
 
-    fn insert_test_run_with_results(conn: &PgConnection) -> (PipelineData, TemplateData, TestData, RunData) {
+    fn insert_test_run_with_results(
+        conn: &PgConnection,
+    ) -> (PipelineData, TemplateData, TestData, RunData) {
         let new_pipeline = NewPipeline {
             name: String::from("Kevin's Pipeline 2"),
             description: Some(String::from("Kevin made this pipeline for testing 2")),
@@ -1450,9 +1487,10 @@ mod tests {
             template_id: template.template_id,
             result_id: new_result.result_id,
             result_key: "greeting_workflow.out_greeting".to_string(),
-            created_by: None
+            created_by: None,
         };
-        let new_template_result = TemplateResultData::create(conn, new_template_result).expect("Failed inserting test template result");
+        let new_template_result = TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template result");
 
         let new_run_result = NewRunResult {
             run_id: run.run_id,
@@ -1477,9 +1515,10 @@ mod tests {
             template_id: template.template_id,
             result_id: new_result2.result_id,
             result_key: "greeting_file_workflow.out_file".to_string(),
-            created_by: None
+            created_by: None,
         };
-        let new_template_result2 = TemplateResultData::create(conn, new_template_result2).expect("Failed inserting test template result");
+        let new_template_result2 = TemplateResultData::create(conn, new_template_result2)
+            .expect("Failed inserting test template result");
 
         let new_run_result2 = NewRunResult {
             run_id: run.run_id,
@@ -1493,8 +1532,12 @@ mod tests {
         (pipeline, template, test, run)
     }
 
-    fn insert_test_template_report(conn: &PgConnection, template_id: Uuid, report_id: Uuid) -> TemplateReportData {
-        let new_template_report = NewTemplateReport{
+    fn insert_test_template_report(
+        conn: &PgConnection,
+        template_id: Uuid,
+        report_id: Uuid,
+    ) -> TemplateReportData {
+        let new_template_report = NewTemplateReport {
             template_id,
             report_id,
             input_map: json!({
@@ -1506,14 +1549,19 @@ mod tests {
                     "message_file":"result:File Result"
                 }
             }),
-            created_by: Some(String::from("kevin@example.com"))
+            created_by: Some(String::from("kevin@example.com")),
         };
 
-        TemplateReportData::create(conn, new_template_report).expect("Failed to insert test template report")
+        TemplateReportData::create(conn, new_template_report)
+            .expect("Failed to insert test template report")
     }
 
-    fn insert_test_template_report_missing_input(conn: &PgConnection, template_id: Uuid, report_id: Uuid) -> TemplateReportData {
-        let new_template_report = NewTemplateReport{
+    fn insert_test_template_report_missing_input(
+        conn: &PgConnection,
+        template_id: Uuid,
+        report_id: Uuid,
+    ) -> TemplateReportData {
+        let new_template_report = NewTemplateReport {
             template_id,
             report_id,
             input_map: json!({
@@ -1525,14 +1573,19 @@ mod tests {
                     "message_file":"result:File Result"
                 }
             }),
-            created_by: Some(String::from("kevin@example.com"))
+            created_by: Some(String::from("kevin@example.com")),
         };
 
-        TemplateReportData::create(conn, new_template_report).expect("Failed to insert test template report")
+        TemplateReportData::create(conn, new_template_report)
+            .expect("Failed to insert test template report")
     }
 
-    fn insert_test_template_report_missing_result(conn: &PgConnection, template_id: Uuid, report_id: Uuid) -> TemplateReportData {
-        let new_template_report = NewTemplateReport{
+    fn insert_test_template_report_missing_result(
+        conn: &PgConnection,
+        template_id: Uuid,
+        report_id: Uuid,
+    ) -> TemplateReportData {
+        let new_template_report = NewTemplateReport {
             template_id,
             report_id,
             input_map: json!({
@@ -1544,14 +1597,18 @@ mod tests {
                     "message_file":"result:Nonexistent Result"
                 }
             }),
-            created_by: Some(String::from("kevin@example.com"))
+            created_by: Some(String::from("kevin@example.com")),
         };
 
-        TemplateReportData::create(conn, new_template_report).expect("Failed to insert test template report")
+        TemplateReportData::create(conn, new_template_report)
+            .expect("Failed to insert test template report")
     }
 
-    fn insert_test_run_report_failed(conn: &PgConnection, run_id: Uuid, report_id: Uuid) -> RunReportData {
-
+    fn insert_test_run_report_failed(
+        conn: &PgConnection,
+        run_id: Uuid,
+        report_id: Uuid,
+    ) -> RunReportData {
         let new_run_report = NewRunReport {
             run_id: run_id,
             report_id: report_id,
@@ -1565,8 +1622,11 @@ mod tests {
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
-    fn insert_test_run_report_nonfailed(conn: &PgConnection, run_id: Uuid, report_id: Uuid) -> RunReportData {
-
+    fn insert_test_run_report_nonfailed(
+        conn: &PgConnection,
+        run_id: Uuid,
+        report_id: Uuid,
+    ) -> RunReportData {
         let new_run_report = NewRunReport {
             run_id: run_id,
             report_id: report_id,
@@ -1583,23 +1643,33 @@ mod tests {
     fn insert_data_for_create_run_report_success(conn: &PgConnection) -> (Uuid, Uuid) {
         let (report, _report_sections, _sections) = insert_test_report_mapped_to_sections(conn);
         let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
-        let _template_report = insert_test_template_report(conn, template.template_id, report.report_id);
+        let _template_report =
+            insert_test_template_report(conn, template.template_id, report.report_id);
 
         (report.report_id, run.run_id)
     }
 
-    fn insert_data_for_create_run_report_failure_missing_input(conn: &PgConnection) -> (Uuid, Uuid) {
+    fn insert_data_for_create_run_report_failure_missing_input(
+        conn: &PgConnection,
+    ) -> (Uuid, Uuid) {
         let (report, _report_sections, _sections) = insert_test_report_mapped_to_sections(conn);
         let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
-        let _template_report = insert_test_template_report_missing_input(conn, template.template_id, report.report_id);
+        let _template_report =
+            insert_test_template_report_missing_input(conn, template.template_id, report.report_id);
 
         (report.report_id, run.run_id)
     }
 
-    fn insert_data_for_create_run_report_failure_missing_result(conn: &PgConnection) -> (Uuid, Uuid) {
+    fn insert_data_for_create_run_report_failure_missing_result(
+        conn: &PgConnection,
+    ) -> (Uuid, Uuid) {
         let (report, _report_sections, _sections) = insert_test_report_mapped_to_sections(conn);
         let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
-        let _template_report = insert_test_template_report_missing_result(conn, template.template_id, report.report_id);
+        let _template_report = insert_test_template_report_missing_result(
+            conn,
+            template.template_id,
+            report.report_id,
+        );
 
         (report.report_id, run.run_id)
     }
@@ -1639,13 +1709,15 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1666,9 +1738,11 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .unwrap();
 
         test_wdl_mock.assert();
         eval_wdl_mock.assert();
@@ -1676,8 +1750,14 @@ mod tests {
 
         assert_eq!(result_run_report.run_id, run_id);
         assert_eq!(result_run_report.report_id, report_id);
-        assert_eq!(result_run_report.created_by, Some(String::from("kevin@example.com")));
-        assert_eq!(result_run_report.cromwell_job_id, Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")));
+        assert_eq!(
+            result_run_report.created_by,
+            Some(String::from("kevin@example.com"))
+        );
+        assert_eq!(
+            result_run_report.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
         assert_eq!(result_run_report.status, ReportStatusEnum::Submitted);
     }
 
@@ -1690,13 +1770,15 @@ mod tests {
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         insert_test_run_report_failed(&conn, run_id, report_id);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1717,9 +1799,11 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            true
-        ).await.unwrap();
+            &Some(String::from("kevin@example.com")),
+            true,
+        )
+        .await
+        .unwrap();
 
         test_wdl_mock.assert();
         eval_wdl_mock.assert();
@@ -1727,8 +1811,14 @@ mod tests {
 
         assert_eq!(result_run_report.run_id, run_id);
         assert_eq!(result_run_report.report_id, report_id);
-        assert_eq!(result_run_report.created_by, Some(String::from("kevin@example.com")));
-        assert_eq!(result_run_report.cromwell_job_id, Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")));
+        assert_eq!(
+            result_run_report.created_by,
+            Some(String::from("kevin@example.com"))
+        );
+        assert_eq!(
+            result_run_report.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
         assert_eq!(result_run_report.status, ReportStatusEnum::Submitted);
     }
 
@@ -1741,13 +1831,15 @@ mod tests {
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         insert_bad_section_for_report(&conn, report_id);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1768,9 +1860,12 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
         assert!(matches!(result_run_report, Error::Parse(_)));
     }
@@ -1783,13 +1878,15 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_failure_missing_input(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1810,9 +1907,12 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
         assert!(matches!(result_run_report, Error::Inputs(_)));
     }
@@ -1825,13 +1925,15 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_failure_missing_result(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1852,9 +1954,12 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
         assert!(matches!(result_run_report, Error::Inputs(_)));
     }
@@ -1867,13 +1972,15 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1889,9 +1996,12 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
         assert!(matches!(result_run_report, Error::Cromwell(_)))
     }
@@ -1904,7 +2014,8 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1929,11 +2040,17 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
-        assert!(matches!(result_run_report, Error::Womtool(crate::validation::womtool::Error::Request(_))));
+        assert!(matches!(
+            result_run_report,
+            Error::Womtool(crate::validation::womtool::Error::Request(_))
+        ));
     }
 
     #[actix_rt::test]
@@ -1944,13 +2061,15 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -1971,11 +2090,17 @@ mod tests {
             &client,
             Uuid::new_v4(),
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
-        assert!(matches!(result_run_report, Error::DB(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            result_run_report,
+            Error::DB(diesel::result::Error::NotFound)
+        ));
     }
 
     #[actix_rt::test]
@@ -1986,13 +2111,15 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -2013,11 +2140,17 @@ mod tests {
             &client,
             run_id,
             Uuid::new_v4(),
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
-        assert!(matches!(result_run_report, Error::DB(diesel::result::Error::NotFound)));
+        assert!(matches!(
+            result_run_report,
+            Error::DB(diesel::result::Error::NotFound)
+        ));
     }
 
     #[actix_rt::test]
@@ -2029,13 +2162,15 @@ mod tests {
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         insert_test_run_report_nonfailed(&conn, run_id, report_id);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -2056,9 +2191,12 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            false
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            false,
+        )
+        .await
+        .err()
+        .unwrap();
 
         assert!(matches!(result_run_report, Error::Prohibited(_)));
     }
@@ -2072,13 +2210,15 @@ mod tests {
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         insert_test_run_report_nonfailed(&conn, run_id, report_id);
         // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").expect("Failed to load test wdl from testdata");
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
         let test_wdl_mock = mockito::mock("GET", "/test.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
             .with_body(test_wdl)
             .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").expect("Failed to load eval wdl from testdata");
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
         let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
             .with_header("content_type", "text/plain")
@@ -2099,9 +2239,12 @@ mod tests {
             &client,
             run_id,
             report_id,
-            Some(String::from("kevin@example.com")),
-            true
-        ).await.err().unwrap();
+            &Some(String::from("kevin@example.com")),
+            true,
+        )
+        .await
+        .err()
+        .unwrap();
 
         assert!(matches!(result_run_report, Error::Prohibited(_)));
     }

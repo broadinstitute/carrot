@@ -256,9 +256,7 @@ impl RunReportData {
     /// null value in the `finished_at` column) or a diesel error if retrieving the rows fails for
     /// some reason
     pub fn find_unfinished(conn: &PgConnection) -> Result<Vec<Self>, diesel::result::Error> {
-        run_report
-            .filter(finished_at.is_null())
-            .load::<Self>(conn)
+        run_report.filter(finished_at.is_null()).load::<Self>(conn)
     }
 
     /// Inserts a new run_report mapping into the DB
