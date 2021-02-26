@@ -18,7 +18,6 @@ use crate::models::run_result::{NewRunResult, RunResultData};
 use crate::models::software_build::{SoftwareBuildChangeset, SoftwareBuildData};
 use crate::models::template_result::TemplateResultData;
 use crate::requests::cromwell_requests;
-use actix_rt::blocking::run;
 use actix_web::client::Client;
 use chrono::{NaiveDateTime, Utc};
 use diesel::PgConnection;
@@ -507,7 +506,7 @@ async fn update_run_status_for_evaluating(
             },
         };
         // Update
-        match RunData::update(conn, run.run_id.clone(), run_update) {
+        match RunData::update(conn, run.run_id, run_update) {
             Err(e) => {
                 return Err(UpdateStatusError::DB(format!(
                     "Updating run in DB failed with error {}",
@@ -535,6 +534,7 @@ async fn update_run_status_for_evaluating(
                 return Err(e);
             }
             // Start report generation
+            debug!("Starting report generation for run with id: {}", run.run_id);
             report_builder::create_run_reports_for_completed_run(conn, client, run).await?;
         }
         // If it ended, send notifications
@@ -1026,15 +1026,18 @@ mod tests {
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_section::{NewReportSection, ReportSectionData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
+    use crate::models::section::{NewSection, SectionData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
     use crate::models::template::{NewTemplate, TemplateData};
+    use crate::models::template_report::{NewTemplateReport, TemplateReportData};
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_pool;
@@ -1042,6 +1045,7 @@ mod tests {
     use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
     use serde_json::json;
+    use std::fs::read_to_string;
     use uuid::Uuid;
 
     fn insert_test_result(conn: &PgConnection) -> ResultData {
@@ -1055,6 +1059,58 @@ mod tests {
         ResultData::create(conn, new_result).expect("Failed inserting test result")
     }
 
+    fn insert_test_results_mapped_to_template(
+        conn: &PgConnection,
+        template_id: Uuid,
+    ) -> (Vec<ResultData>, Vec<TemplateResultData>) {
+        let mut results: Vec<ResultData> = Vec::new();
+        let mut template_results: Vec<TemplateResultData> = Vec::new();
+
+        let new_result = NewResult {
+            name: String::from("Greeting Text"),
+            result_type: ResultTypeEnum::Text,
+            description: Some(String::from("Text of a greeting")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        results.push(ResultData::create(conn, new_result).expect("Failed inserting test result"));
+
+        let new_template_result = NewTemplateResult {
+            template_id,
+            result_id: results[0].result_id,
+            result_key: String::from("greeting_file_workflow.out_greeting"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
+
+        let new_result = NewResult {
+            name: String::from("Greeting File"),
+            result_type: ResultTypeEnum::File,
+            description: Some(String::from("File containing a greeting")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        results.push(ResultData::create(conn, new_result).expect("Failed inserting test result"));
+
+        let new_template_result = NewTemplateResult {
+            template_id,
+            result_id: results[1].result_id,
+            result_key: String::from("greeting_file_workflow.out_file"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
+
+        (results, template_results)
+    }
+
     fn insert_test_template_result_with_template_id_and_result_id(
         conn: &PgConnection,
         template_id: Uuid,
@@ -1063,7 +1119,7 @@ mod tests {
         let new_template_result = NewTemplateResult {
             template_id: template_id,
             result_id: result_id,
-            result_key: String::from("test_test.TestKey"),
+            result_key: String::from("greeting_workflow.TestKey"),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1085,8 +1141,8 @@ mod tests {
             name: String::from("Kevin's test template"),
             pipeline_id: pipeline.pipeline_id,
             description: None,
-            test_wdl: format!("{}/test_software_params", mockito::server_url()),
-            eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
             created_by: None,
         };
 
@@ -1098,8 +1154,10 @@ mod tests {
             name: String::from("Kevin's test test"),
             template_id: id,
             description: None,
-            test_input_defaults: Some(json!({"test_test.in_greeting": "Yo"})),
-            eval_input_defaults: Some(json!({"test_test.in_output_filename": "greeting.txt"})),
+            test_input_defaults: Some(json!({"greeting_workflow.in_greeting": "Yo"})),
+            eval_input_defaults: Some(
+                json!({"greeting_file_workflow.in_output_filename": "greeting.txt"}),
+            ),
             created_by: None,
         };
 
@@ -1114,8 +1172,8 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
-            test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
-            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
+            test_input: json!({"greeting_workflow.in_greeted": "Cool Person", "greeting_workflow.in_greeting": "Yo"}),
+            eval_input: json!({"greeting_file_workflow.in_output_filename": "test_greeting.txt", "greeting_file_workflow.in_output_file": "test_output:greeting_workflow.TestKey"}),
             test_cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -1133,8 +1191,8 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::EvalSubmitted,
-            test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
-            eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "greeting.txt"}),
+            test_input: json!({"greeting_workflow.in_greeted": "Cool Person", "greeting_workflow.in_greeting": "Yo"}),
+            eval_input: json!({"greeting_file_workflow.in_output_filename": "test_greeting.txt", "greeting_file_workflow.in_output_file": "test_output:greeting_workflow.TestKey"}),
             test_cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
             eval_cromwell_job_id: Some(String::from("12345612-d114-4194-a7f7-9e41211ca2ce")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -1325,6 +1383,176 @@ mod tests {
         RunSoftwareVersionData::create(conn, map).expect("Failed to map run to software version");
     }
 
+    fn insert_test_report_mapped_to_sections(
+        conn: &PgConnection,
+    ) -> (ReportData, Vec<ReportSectionData>, Vec<SectionData>) {
+        let mut report_sections = Vec::new();
+        let mut sections = Vec::new();
+
+        let new_report = NewReport {
+            name: String::from("Kevin's Report2"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({
+                "metadata": {
+                    "language_info": {
+                        "codemirror_mode": {
+                            "name": "ipython",
+                            "version": 3
+                        },
+                        "file_extension": ".py",
+                        "mimetype": "text/x-python",
+                        "name": "python",
+                        "nbconvert_exporter": "python",
+                        "pygments_lexer": "ipython3",
+                        "version": "3.8.5-final"
+                    },
+                    "orig_nbformat": 2,
+                    "kernelspec": {
+                        "name": "python3",
+                        "display_name": "Python 3.8.5 64-bit",
+                        "metadata": {
+                            "interpreter": {
+                                "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
+                            }
+                        }
+                    }
+                },
+                "nbformat": 4,
+                "nbformat_minor": 2
+            }),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_section = NewSection {
+            name: String::from("Top Section"),
+            description: Some(String::from("Description4")),
+            contents: json!({"cells":[
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print(message)",
+                   ]
+                }
+            ]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 1,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        sections.push(section);
+
+        let new_section = NewSection {
+            name: String::from("Middle Section"),
+            description: Some(String::from("Description5")),
+            contents: json!({"cells":[
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "file_message = open(result_file, 'r').read()",
+                        "print(message)",
+                        "print(file_message)",
+                   ]
+                }
+            ]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 2,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        sections.push(section);
+
+        let new_section = NewSection {
+            name: String::from("Bottom Section"),
+            description: Some(String::from("Description12")),
+            contents: json!({"cells":[
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print('Thanks')",
+                   ]
+                }
+            ]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 3,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        sections.push(section);
+
+        (report, report_sections, sections)
+    }
+
+    fn insert_test_template_report(
+        conn: &PgConnection,
+        template_id: Uuid,
+        report_id: Uuid,
+    ) -> TemplateReportData {
+        let new_template_report = NewTemplateReport {
+            template_id,
+            report_id,
+            input_map: json!({
+                "Top Section": {
+                    "message":"test_input:greeting_workflow.in_greeting"
+                },
+                "Middle Section": {
+                    "message":"test_input:greeting_workflow.in_greeted",
+                    "message_file":"result:Greeting File"
+                }
+            }),
+            created_by: Some(String::from("kevin@example.com")),
+        };
+
+        TemplateReportData::create(conn, new_template_report)
+            .expect("Failed to insert test template report")
+    }
+
     #[test]
     fn test_fill_results() {
         let pool = get_test_db_pool();
@@ -1345,8 +1573,8 @@ mod tests {
         );
         // Create results map
         let results_map = json!({
-            "test_test.TestKey": "TestVal",
-            "test_test.UnimportantKey": "Who Cares?"
+            "greeting_workflow.TestKey": "TestVal",
+            "greeting_workflow.UnimportantKey": "Who Cares?"
         });
         let results_map = results_map.as_object().unwrap().to_owned();
         // Fill results
@@ -1386,15 +1614,14 @@ mod tests {
             .with_status(201)
             .with_header("content_type", "application/json")
             .with_body(mock_response_body.to_string())
-            //.match_body(r#"{"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "TestVal"}"#)
             .create();
         // Define mockito mapping for cromwell metadata response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Succeeded",
           "outputs": {
-            "test_test.TestKey": "TestVal",
-            "test_test.UnimportantKey": "Who Cares?"
+            "greeting_workflow.TestKey": "TestVal",
+            "greeting_workflow.UnimportantKey": "Who Cares?"
           },
           "end": "2020-12-31T11:11:11.0000Z"
         });
@@ -1433,26 +1660,25 @@ mod tests {
         // Insert test, run, result, and template_result we'll use for testing
         let template = insert_test_template(&conn);
         let template_id = template.template_id;
-        let test_result = insert_test_result(&conn);
-        let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
-        insert_test_template_result_with_template_id_and_result_id(
-            &conn,
-            template_id,
-            test_result.result_id,
-        );
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
+        insert_test_results_mapped_to_template(&conn, template_id);
         let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
             &conn,
             test_test.test_id.clone(),
         );
         let test_run_is_from_github =
-            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
+        // Define and map a report to this template
+        let (test_report, _test_report_sections, _testion_sections) =
+            insert_test_report_mapped_to_sections(&conn);
+        insert_test_template_report(&conn, template_id, test_report.report_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
           "status": "Succeeded",
           "outputs": {
-            "test_test.TestKey": "TestVal",
-            "test_test.UnimportantKey": "Who Cares?"
+            "greeting_file_workflow.out_greeting": "Yo, Cool Person",
+            "greeting_file_workflow.out_file": "gs://example/test_greeting.txt"
           },
           "end": "2020-12-31T11:11:11.0000Z"
         });
@@ -1469,6 +1695,31 @@ mod tests {
             mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
         ]))
         .create();
+        // Make mockito mappings for the wdls
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
+        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
+            .with_status(200)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl)
+            .create();
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
+        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
+            .with_status(200)
+            .with_header("content_type", "text/plain")
+            .with_body(eval_wdl)
+            .create();
+        // Mock for cromwell for submitting report job
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
         // Check and update status
         check_and_update_run_status(&test_run, &Client::default(), &conn)
             .await
@@ -1483,8 +1734,23 @@ mod tests {
                 .unwrap()
         );
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results.get("Greeting File").unwrap(),
+            "gs://example/test_greeting.txt"
+        );
+        assert_eq!(results.get("Greeting Text").unwrap(), "Yo, Cool Person");
+        // Make sure the report job was started
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        cromwell_mock.assert();
+        let result_run_report =
+            RunReportData::find_by_run_and_report(&conn, result_run.run_id, test_report.report_id)
+                .expect("Failed to retrieve run report");
+        assert_eq!(
+            result_run_report.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
     }
 
     #[actix_rt::test]

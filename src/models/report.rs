@@ -8,9 +8,7 @@
 use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::schema::report;
 use crate::schema::report::dsl::*;
-use crate::schema::report_section;
 use crate::schema::run_report;
-use crate::schema::section;
 use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;

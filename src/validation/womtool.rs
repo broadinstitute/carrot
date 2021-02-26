@@ -77,12 +77,7 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
 /// containing the input names mapped to their types (without qualifiers like optional or default
 /// values) if it's successful, or an error if there is some issue retrieving the file
 /// or running WOMtool
-pub async fn get_wdl_inputs_with_simple_types(
-    client: &Client,
-    wdl_location: &str,
-) -> Result<HashMap<String, String>, Error> {
-    // Retrieve the wdl from where it's stored
-    let wdl = test_resource_requests::get_resource_as_string(client, wdl_location).await?;
+pub async fn get_wdl_inputs_with_simple_types(wdl: &str) -> Result<HashMap<String, String>, Error> {
     // Write it to a temporary file for parsing
     let mut wdl_file = NamedTempFile::new()?;
     write!(wdl_file, "{}", wdl)?;
@@ -92,7 +87,7 @@ pub async fn get_wdl_inputs_with_simple_types(
     let inputs_json_map = match serde_json::from_str(&inputs_string)? {
         Value::Object(map) => map,
         _ => {
-            let error_msg = format!("Running womtool inputs on WDL at {} did not encounter an error but returned a result that is not a json object: {}", wdl_location, inputs_string);
+            let error_msg = format!("Running womtool inputs on WDL {} did not encounter an error but returned a result that is not a json object: {}", wdl, inputs_string);
             error!("{}", error_msg);
             return Err(Error::Invalid(error_msg));
         }
@@ -265,21 +260,8 @@ mod tests {
         // Get test file
         let test_wdl = read_to_string("testdata/validation/womtool/valid_wdl.wdl").unwrap();
 
-        // Define mockito mapping for response
-        let mock = mockito::mock("GET", "/test/resource")
-            .with_status(201)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
+        let response = get_wdl_inputs_with_simple_types(&test_wdl).await.unwrap();
 
-        let response = get_wdl_inputs_with_simple_types(
-            &client,
-            &format!("{}/test/resource", mockito::server_url()),
-        )
-        .await
-        .unwrap();
-
-        mock.assert();
         let mut expected_response: HashMap<String, String> = HashMap::new();
         expected_response.insert(String::from("myWorkflow.person"), String::from("String"));
         expected_response.insert(String::from("myWorkflow.times"), String::from("Int"));
@@ -293,20 +275,7 @@ mod tests {
         // Get client
         let client = Client::default();
 
-        // Define mockito mapping for response
-        let mock = mockito::mock("GET", "/test/resource")
-            .with_status(201)
-            .with_header("content_type", "text/plain")
-            .with_body("test")
-            .create();
-
-        let response = get_wdl_inputs_with_simple_types(
-            &client,
-            &format!("{}/test/resource", mockito::server_url()),
-        )
-        .await;
-
-        mock.assert();
+        let response = get_wdl_inputs_with_simple_types("test").await;
 
         assert!(matches!(response, Err(Error::Invalid(_))));
 
@@ -314,28 +283,5 @@ mod tests {
             Err(Error::Invalid(msg)) => println!("Womtool error message: {}", msg),
             _ => {}
         }
-    }
-
-    #[actix_rt::test]
-    async fn test_get_wdl_inputs_with_simple_types_request_error() {
-        load_env_config();
-
-        // Get client
-        let client = Client::default();
-
-        // Define mockito mapping for response
-        let mock = mockito::mock("GET", "/test/resource")
-            .with_status(404)
-            .create();
-
-        let response = get_wdl_inputs_with_simple_types(
-            &client,
-            &format!("{}/test/resource", mockito::server_url()),
-        )
-        .await;
-
-        mock.assert();
-
-        assert!(matches!(response, Err(Error::Request(_))));
     }
 }

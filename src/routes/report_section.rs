@@ -11,7 +11,7 @@ use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 /// Represents the part of a new report_section mapping that is received as a request body

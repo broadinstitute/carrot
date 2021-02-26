@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::manager::report_builder;
-use crate::models::run_report::{DeleteError, NewRunReport, RunReportData, RunReportQuery};
+use crate::models::run_report::{DeleteError, RunReportData, RunReportQuery};
 use crate::routes::error_body::ErrorBody;
 use actix_web::client::Client;
 use actix_web::dev::HttpResponseBuilder;
@@ -14,7 +14,7 @@ use actix_web::web::Query;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 /// Represents the part of a new run_report that is received as a request body
@@ -235,7 +235,7 @@ async fn create(
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
     // Create run report
-    match report_builder::create_run_report(
+    match report_builder::create_run_report_from_run_id_and_report_id(
         &conn,
         &client,
         id,
@@ -315,6 +315,14 @@ async fn create(
                     title: "Delete error".to_string(),
                     status: 500,
                     detail: format!("Error while attempting to delete failed run report: {}", e),
+                },
+                report_builder::Error::Request(e) => ErrorBody {
+                    title: "Request error".to_string(),
+                    status: 500,
+                    detail: format!(
+                        "Error while attempting to retrieve wdl from network location: {}",
+                        e
+                    ),
                 },
             };
             HttpResponseBuilder::new(
@@ -1375,7 +1383,7 @@ mod tests {
         let result = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(error_body.title, "Womtool error");
+        assert_eq!(error_body.title, "Request error");
         assert_eq!(error_body.status, 500);
     }
 

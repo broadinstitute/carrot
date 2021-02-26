@@ -6,7 +6,6 @@
 use crate::custom_sql_types::{
     ReportStatusEnum, RunStatusEnum, REPORT_FAILURE_STATUSES, RUN_FAILURE_STATUSES,
 };
-use crate::models::report::ReportData;
 use crate::schema::run;
 use crate::schema::run_report;
 use crate::schema::template_report;
@@ -208,6 +207,7 @@ impl TemplateReportData {
     /// template id for the test specified by `query_test_id`
     /// Returns a result containing either the retrieved template_report mappings as a vector of
     /// TemplateReportData instances or an error if the query fails for some reason
+    #[allow(dead_code)]
     pub fn find_by_test(
         conn: &PgConnection,
         query_test_id: Uuid,
@@ -229,6 +229,7 @@ impl TemplateReportData {
     /// Returns a result containing either the retrieved template_report mapping as a
     /// TemplateReportData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
+    #[allow(dead_code)]
     pub fn find_by_test_and_report(
         conn: &PgConnection,
         query_test_id: Uuid,

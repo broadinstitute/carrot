@@ -7,18 +7,19 @@ use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::manager::util;
 use crate::models::report::ReportData;
 use crate::models::run::{RunData, RunWithResultData};
-use crate::models::run_report::{NewRunReport, RunReportChangeset, RunReportData};
+use crate::models::run_report::{NewRunReport, RunReportData};
 use crate::models::section::SectionData;
 use crate::models::template::TemplateData;
-use crate::models::template_report::TemplateReportData;
+use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::requests::cromwell_requests::CromwellRequestError;
+use crate::requests::test_resource_requests;
 use crate::storage::gcloud_storage;
 use crate::validation::womtool;
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
 use input_map::ReportInput;
-use log::error;
+use log::{debug, error};
 use serde_json::{json, Map, Value};
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -40,6 +41,7 @@ pub enum Error {
     Cromwell(CromwellRequestError),
     Prohibited(String),
     Delete(crate::models::run_report::DeleteError),
+    Request(test_resource_requests::Error),
 }
 
 impl std::error::Error for Error {}
@@ -57,6 +59,7 @@ impl fmt::Display for Error {
             Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e),
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
             Error::Delete(e) => write!(f, "report_builder Error Delete {}", e),
+            Error::Request(e) => write!(f, "report_builder Error Request {}", e),
         }
     }
 }
@@ -103,6 +106,12 @@ impl From<crate::models::run_report::DeleteError> for Error {
     }
 }
 
+impl From<test_resource_requests::Error> for Error {
+    fn from(e: test_resource_requests::Error) -> Error {
+        Error::Request(e)
+    }
+}
+
 lazy_static! {
     /// The cells that will go at the top of the cells array for every generated report
     static ref DEFAULT_HEADER_CELLS: Vec<Value> = vec![
@@ -137,29 +146,59 @@ lazy_static! {
 /// The name of the workflow in the jupyter_report_generator_template.wdl file
 const GENERATOR_WORKFLOW_NAME: &'static str = "generate_report_file_workflow";
 
+/// Starts creation of run reports via calls to `create_run_report` for any reports mapped to the
+/// template for `run`
 pub async fn create_run_reports_for_completed_run(
     conn: &PgConnection,
     client: &Client,
     run: &RunData,
 ) -> Result<Vec<RunReportData>, Error> {
-    // Get template_reports for reports mapped to the template for `run` so we have the report_ids
-    let template_reports = TemplateReportData::find_by_test(conn, run.test_id)?;
     // Keep track of the run reports we create so we can return them
     let mut run_reports: Vec<RunReportData> = Vec::new();
-    // Loop through the mappings and create a report for each
-    for mapping in template_reports {
-        run_reports.push(
-            create_run_report(
-                conn,
-                client,
-                run.run_id,
-                mapping.report_id,
-                &run.created_by,
-                false,
-            )
-            .await?,
-        );
+    // Get template so we can get wdls and template_reports
+    let template = TemplateData::find_by_test(conn, run.test_id)?;
+    // Get template_reports for reports mapped to the template for `run` so we have the report_ids
+    let template_reports = TemplateReportData::find(
+        conn,
+        TemplateReportQuery {
+            template_id: Some(template.template_id),
+            report_id: None,
+            input_map: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        },
+    )?;
+    // If there are reports to generate, generate them
+    if template_reports.len() > 0 {
+        // Retrieve the wdls from where they're stored
+        let test_wdl =
+            test_resource_requests::get_resource_as_string(client, &template.test_wdl).await?;
+        let eval_wdl =
+            test_resource_requests::get_resource_as_string(client, &template.eval_wdl).await?;
+
+        // Loop through the mappings and create a report for each
+        for mapping in template_reports {
+            debug!("Generating run_report for run_id {} and report_id {}", run.run_id, mapping.report_id);
+            run_reports.push(
+                create_run_report(
+                    conn,
+                    client,
+                    run.run_id,
+                    &template,
+                    &mapping,
+                    &test_wdl,
+                    &eval_wdl,
+                    &run.created_by,
+                )
+                .await?,
+            );
+        }
     }
+
     Ok(run_reports)
 }
 
@@ -169,7 +208,7 @@ pub async fn create_run_reports_for_completed_run(
 /// it does and it hasn't failed, returns an error.  If it has failed and `delete_failed` is true,
 /// it deletes the row and continues processing.  If it has failed and `delete_failed` is false,
 /// it returns an error.
-pub async fn create_run_report(
+pub async fn create_run_report_from_run_id_and_report_id(
     conn: &PgConnection,
     client: &Client,
     run_id: Uuid,
@@ -178,34 +217,49 @@ pub async fn create_run_report(
     delete_failed: bool,
 ) -> Result<RunReportData, Error> {
     // Check if we already have a run report for this run and report
-    match RunReportData::find_by_run_and_report(conn, run_id, report_id) {
-        Ok(existing_run_report) => {
-            // If one exists, and it's failed, and delete_failed is true, delete it
-            if REPORT_FAILURE_STATUSES.contains(&existing_run_report.status) && delete_failed {
-                RunReportData::delete(conn, run_id, report_id)?;
-            }
-            // Otherwise, return an error
-            else {
-                return Err(Error::Prohibited(format!(
-                    "A run_report record already exists for run_id {} and report_id {}",
-                    run_id, report_id
-                )));
-            }
-        }
-        // If we don't find anything, then we can just keep going
-        Err(diesel::result::Error::NotFound) => {}
-        // For any other error, we should return it
-        Err(e) => {
-            return Err(Error::DB(e));
-        }
-    }
+    check_for_existing_run_report(conn, run_id, report_id, delete_failed)?;
+    // Get template so we can get wdls and template_reports
+    let template = TemplateData::find_by_run(conn, run_id)?;
+    // Get template report
+    let template_report =
+        TemplateReportData::find_by_template_and_report(conn, template.template_id, report_id)?;
+    // Retrieve the wdls from where they're stored
+    let test_wdl =
+        test_resource_requests::get_resource_as_string(client, &template.test_wdl).await?;
+    let eval_wdl =
+        test_resource_requests::get_resource_as_string(client, &template.eval_wdl).await?;
+    // Create the run report
+    create_run_report(
+        conn,
+        client,
+        run_id,
+        &template,
+        &template_report,
+        &test_wdl,
+        &eval_wdl,
+        created_by,
+    )
+    .await
+}
 
+/// Assembles a report template and a wdl for filling it for `template_report`'s `report_id`,
+/// submits it to cromwell with data filled in from `run_id`, and creates and returns a
+/// RunReportData instance for it.  Uses metadata from `template` and `template_report`, along with
+/// input information from `test_wdl` and `eval_wdl`
+async fn create_run_report(
+    conn: &PgConnection,
+    client: &Client,
+    run_id: Uuid,
+    template: &TemplateData,
+    template_report: &TemplateReportData,
+    test_wdl: &str,
+    eval_wdl: &str,
+    created_by: &Option<String>,
+) -> Result<RunReportData, Error> {
     // Retrieve run and report
     let run = RunWithResultData::find_by_id(conn, run_id)?;
-    let report = ReportData::find_by_id(conn, report_id)?;
-    // Get template_report so we can use the inputs map
-    let template_report =
-        TemplateReportData::find_by_test_and_report(conn, run.test_id, report_id)?;
+    let report = ReportData::find_by_id(conn, template_report.report_id)?;
+    // Extract the input map from the template_report
     let input_map = match &template_report.input_map {
         Value::Object(map) => map,
         _ => {
@@ -215,13 +269,12 @@ pub async fn create_run_report(
             )));
         }
     };
-    // Get template so we can check the wdls for input and output types
-    let template = TemplateData::find_by_id(conn, template_report.template_id)?;
     // Get sections ordered by position
     let sections = SectionData::find_by_report_id_ordered_by_positions(conn, report.report_id)?;
     // Assemble list of inputs with types and values
     let section_inputs_map =
-        input_map::build_section_inputs_map(conn, client, input_map, &template, &run).await?;
+        input_map::build_section_inputs_map(conn, input_map, &template, test_wdl, eval_wdl, &run)
+            .await?;
     // Assemble the report and its sections into a complete Jupyter Notebook json
     let report_json = create_report_template(&report, &sections, &section_inputs_map)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
@@ -251,7 +304,7 @@ pub async fn create_run_report(
     // Insert run_report into the DB
     let new_run_report = NewRunReport {
         run_id,
-        report_id,
+        report_id: report.report_id,
         status: ReportStatusEnum::Submitted,
         cromwell_job_id: Some(start_job_response.id),
         results: None,
@@ -259,6 +312,38 @@ pub async fn create_run_report(
         finished_at: None,
     };
     Ok(RunReportData::create(conn, new_run_report)?)
+}
+
+fn check_for_existing_run_report(
+    conn: &PgConnection,
+    run_id: Uuid,
+    report_id: Uuid,
+    delete_failed: bool,
+) -> Result<(), Error> {
+    // Check if we already have a run report for this run and report
+    match RunReportData::find_by_run_and_report(conn, run_id, report_id) {
+        Ok(existing_run_report) => {
+            // If one exists, and it's failed, and delete_failed is true, delete it
+            if REPORT_FAILURE_STATUSES.contains(&existing_run_report.status) && delete_failed {
+                RunReportData::delete(conn, run_id, report_id)?;
+            }
+            // Otherwise, return an error
+            else {
+                return Err(Error::Prohibited(format!(
+                    "A run_report record already exists for run_id {} and report_id {}",
+                    run_id, report_id
+                )));
+            }
+        }
+        // If we don't find anything, then we can just keep going
+        Err(diesel::result::Error::NotFound) => {}
+        // For any other error, we should return it
+        Err(e) => {
+            return Err(Error::DB(e));
+        }
+    }
+
+    Ok(())
 }
 
 /// Gets section contents for the specified report, and combines it with the report's metadata to
@@ -574,8 +659,6 @@ mod input_map {
     use crate::models::run::RunWithResultData;
     use crate::models::template::TemplateData;
     use crate::validation::womtool;
-    use actix_web::client::Client;
-    use core::fmt;
     use diesel::PgConnection;
     use log::error;
     use serde_json::{Map, Value};
@@ -597,18 +680,19 @@ mod input_map {
     /// Returns a map of sections to maps of their inputs, or an error if something goes wrong
     pub(super) async fn build_section_inputs_map(
         conn: &PgConnection,
-        client: &Client,
         input_map: &Map<String, Value>,
         template: &TemplateData,
+        test_wdl: &str,
+        eval_wdl: &str,
         run: &RunWithResultData,
     ) -> Result<HashMap<String, HashMap<String, ReportInput>>, Error> {
         // Empty map that will eventually contain all our inputs
         let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
         // Parse input types from WDLs
         let test_wdl_input_types: HashMap<String, String> =
-            womtool::get_wdl_inputs_with_simple_types(client, &template.test_wdl).await?;
+            womtool::get_wdl_inputs_with_simple_types(test_wdl).await?;
         let eval_wdl_input_types: HashMap<String, String> =
-            womtool::get_wdl_inputs_with_simple_types(client, &template.eval_wdl).await?;
+            womtool::get_wdl_inputs_with_simple_types(eval_wdl).await?;
         // Get the test and eval inputs from `run` as maps so we can work with them more easily
         let (run_test_input, run_eval_input, run_result_map) = get_run_input_and_result_maps(&run)?;
         // Retrieve results for the template so we can get the types of results (in a hashmap for
@@ -987,22 +1071,11 @@ mod input_map {
         #[actix_rt::test]
         async fn test_build_input_list_missing_input() {
             let conn = unit_test_util::get_test_db_connection();
-            let client = Client::default();
             // Insert template and results so they can be mapped
             let (test_template, _, _) = insert_test_template_and_results(&conn);
-            // Set mockito to return test and eval wdls when requested
+            // Load test and eval wdls
             let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").unwrap();
-            let test_wdl_mock = mockito::mock("GET", "/test")
-                .with_status(200)
-                .with_header("content_type", "text/plain")
-                .with_body(test_wdl)
-                .create();
             let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").unwrap();
-            let eval_wdl_mock = mockito::mock("GET", "/eval")
-                .with_status(200)
-                .with_header("content_type", "text/plain")
-                .with_body(eval_wdl)
-                .create();
             // Make an input map with greeted mapped to a nonexistent input name
             let input_map = json!({
                 "String Section": {
@@ -1042,9 +1115,10 @@ mod input_map {
             // Build the input list
             let result_error = build_section_inputs_map(
                 &conn,
-                &client,
                 input_map.as_object().unwrap(),
                 &test_template,
+                &test_wdl,
+                &eval_wdl,
                 &run,
             )
             .await;
@@ -1058,22 +1132,11 @@ mod input_map {
         #[actix_rt::test]
         async fn test_build_input_list_missing_result() {
             let conn = unit_test_util::get_test_db_connection();
-            let client = Client::default();
             // Insert template and results so they can be mapped
             let (test_template, _, _) = insert_test_template_and_results(&conn);
-            // Set mockito to return test and eval wdls when requested
+            // Load test and eval wdls
             let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").unwrap();
-            let test_wdl_mock = mockito::mock("GET", "/test")
-                .with_status(200)
-                .with_header("content_type", "text/plain")
-                .with_body(test_wdl)
-                .create();
             let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").unwrap();
-            let eval_wdl_mock = mockito::mock("GET", "/eval")
-                .with_status(200)
-                .with_header("content_type", "text/plain")
-                .with_body(eval_wdl)
-                .create();
             // Make an input map
             let input_map = json!({
                 "String Section": {
@@ -1112,9 +1175,10 @@ mod input_map {
             // Build the input list
             let result_error = build_section_inputs_map(
                 &conn,
-                &client,
                 input_map.as_object().unwrap(),
                 &test_template,
+                &test_wdl,
+                &eval_wdl,
                 &run,
             )
             .await;
@@ -1128,22 +1192,11 @@ mod input_map {
         #[actix_rt::test]
         async fn test_build_input_list_success() {
             let conn = unit_test_util::get_test_db_connection();
-            let client = Client::default();
             // Insert template and results so they can be mapped
             let (test_template, _, _) = insert_test_template_and_results(&conn);
-            // Set mockito to return test and eval wdls when requested
+            // Load test and eval wdls
             let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").unwrap();
-            let test_wdl_mock = mockito::mock("GET", "/test")
-                .with_status(200)
-                .with_header("content_type", "text/plain")
-                .with_body(test_wdl)
-                .create();
             let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").unwrap();
-            let eval_wdl_mock = mockito::mock("GET", "/eval")
-                .with_status(200)
-                .with_header("content_type", "text/plain")
-                .with_body(eval_wdl)
-                .create();
             // Make an input map
             let input_map = json!({
                 "String Section": {
@@ -1183,9 +1236,10 @@ mod input_map {
             // Build the input list
             let result_input_map = build_section_inputs_map(
                 &conn,
-                &client,
                 input_map.as_object().unwrap(),
                 &test_template,
+                &test_wdl,
+                &eval_wdl,
                 &run,
             )
             .await
@@ -1247,7 +1301,8 @@ mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
     use crate::manager::report_builder::input_map::ReportInput;
     use crate::manager::report_builder::{
-        create_generator_wdl, create_input_json, create_report_template, create_run_report, Error,
+        create_generator_wdl, create_input_json, create_report_template, create_run_report,
+        create_run_report_from_run_id_and_report_id, create_run_reports_for_completed_run, Error,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
@@ -1384,6 +1439,152 @@ mod tests {
 
         let new_section = NewSection {
             name: String::from("Bottom Section"),
+            description: Some(String::from("Description12")),
+            contents: json!({"cells":[
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print('Thanks')",
+                   ]
+                }
+            ]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 3,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        sections.push(section);
+
+        (report, report_sections, sections)
+    }
+
+    fn insert_different_test_report_mapped_to_sections(
+        conn: &PgConnection,
+    ) -> (ReportData, Vec<ReportSectionData>, Vec<SectionData>) {
+        let mut report_sections = Vec::new();
+        let mut sections = Vec::new();
+
+        let new_report = NewReport {
+            name: String::from("Kevin's Report3"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({
+                "metadata": {
+                    "language_info": {
+                        "codemirror_mode": {
+                            "name": "ipython",
+                            "version": 3
+                        },
+                        "file_extension": ".py",
+                        "mimetype": "text/x-python",
+                        "name": "python",
+                        "nbconvert_exporter": "python",
+                        "pygments_lexer": "ipython3",
+                        "version": "3.8.5-final"
+                    },
+                    "orig_nbformat": 2,
+                    "kernelspec": {
+                        "name": "python3",
+                        "display_name": "Python 3.8.5 64-bit",
+                        "metadata": {
+                            "interpreter": {
+                                "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
+                            }
+                        }
+                    }
+                },
+                "nbformat": 4,
+                "nbformat_minor": 2
+            }),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_section = NewSection {
+            name: String::from("Top Section2"),
+            description: Some(String::from("Description4")),
+            contents: json!({"cells":[
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print(message)",
+                   ]
+                }
+            ]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 1,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        sections.push(section);
+
+        let new_section = NewSection {
+            name: String::from("Middle Section2"),
+            description: Some(String::from("Description5")),
+            contents: json!({"cells":[
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "file_message = open(result_file, 'r').read()",
+                        "print(message)",
+                        "print(file_message)",
+                   ]
+                }
+            ]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            position: 2,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        sections.push(section);
+
+        let new_section = NewSection {
+            name: String::from("Bottom Section2"),
             description: Some(String::from("Description12")),
             contents: json!({"cells":[
                 {
@@ -1640,6 +1841,21 @@ mod tests {
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
+    fn insert_data_for_create_run_reports_for_completed_run_success(
+        conn: &PgConnection,
+    ) -> (RunData, Vec<ReportData>) {
+        let (report1, _report_sections1, _sections1) = insert_test_report_mapped_to_sections(conn);
+        let (report2, _report_sections2, _sections2) =
+            insert_different_test_report_mapped_to_sections(conn);
+        let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
+        let _template_report1 =
+            insert_test_template_report(conn, template.template_id, report1.report_id);
+        let _template_report2 =
+            insert_test_template_report(conn, template.template_id, report2.report_id);
+
+        (run, vec![report1, report2])
+    }
+
     fn insert_data_for_create_run_report_success(conn: &PgConnection) -> (Uuid, Uuid) {
         let (report, _report_sections, _sections) = insert_test_report_mapped_to_sections(conn);
         let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
@@ -1702,6 +1918,82 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn create_run_reports_for_completed_run_success() {
+        let conn = get_test_db_connection();
+        let client = Client::default();
+
+        // Set up data in DB
+        let (run, reports) = insert_data_for_create_run_reports_for_completed_run_success(&conn);
+        // Make mockito mappings for the wdls and cromwell
+        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
+            .expect("Failed to load test wdl from testdata");
+        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
+            .with_status(200)
+            .with_header("content_type", "text/plain")
+            .with_body(test_wdl)
+            .create();
+        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
+            .expect("Failed to load eval wdl from testdata");
+        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
+            .with_status(200)
+            .with_header("content_type", "text/plain")
+            .with_body(eval_wdl)
+            .create();
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .expect(2)
+            .create();
+
+        let result_run_reports = create_run_reports_for_completed_run(&conn, &client, &run)
+            .await
+            .unwrap();
+
+        test_wdl_mock.assert();
+        eval_wdl_mock.assert();
+        cromwell_mock.assert();
+
+        assert_eq!(result_run_reports.len(), 2);
+
+        let (first_run_report, second_run_report) = {
+            if result_run_reports[0].report_id == reports[0].report_id {
+                (&result_run_reports[0], &result_run_reports[1])
+            } else {
+                (&result_run_reports[1], &result_run_reports[0])
+            }
+        };
+
+        assert_eq!(first_run_report.run_id, run.run_id);
+        assert_eq!(first_run_report.report_id, reports[0].report_id);
+        assert_eq!(
+            first_run_report.created_by,
+            Some(String::from("Kevin@example.com"))
+        );
+        assert_eq!(
+            first_run_report.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
+        assert_eq!(first_run_report.status, ReportStatusEnum::Submitted);
+
+        assert_eq!(second_run_report.run_id, run.run_id);
+        assert_eq!(second_run_report.report_id, reports[1].report_id);
+        assert_eq!(
+            second_run_report.created_by,
+            Some(String::from("Kevin@example.com"))
+        );
+        assert_eq!(
+            second_run_report.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
+        assert_eq!(second_run_report.status, ReportStatusEnum::Submitted);
+    }
+
+    #[actix_rt::test]
     async fn create_run_report_success() {
         let conn = get_test_db_connection();
         let client = Client::default();
@@ -1733,7 +2025,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -1794,7 +2086,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -1855,7 +2147,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -1902,7 +2194,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -1949,7 +2241,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -1991,7 +2283,7 @@ mod tests {
             .with_header("content_type", "application/json")
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -2035,7 +2327,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -2047,10 +2339,7 @@ mod tests {
         .err()
         .unwrap();
 
-        assert!(matches!(
-            result_run_report,
-            Error::Womtool(crate::validation::womtool::Error::Request(_))
-        ));
+        assert!(matches!(result_run_report, Error::Request(_)));
     }
 
     #[actix_rt::test]
@@ -2085,7 +2374,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             Uuid::new_v4(),
@@ -2135,7 +2424,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -2186,7 +2475,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,
@@ -2234,7 +2523,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let result_run_report = create_run_report(
+        let result_run_report = create_run_report_from_run_id_and_report_id(
             &conn,
             &client,
             run_id,

@@ -262,6 +262,32 @@ impl TemplateData {
         query.load::<Self>(conn)
     }
 
+    /// Retrieves the template for the test specified by `test_id`
+    pub fn find_by_test(conn: &PgConnection, test_id: Uuid) -> Result<Self, diesel::result::Error> {
+        let test_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(test_id))
+            .limit(1)
+            .select(test::dsl::template_id);
+        template
+            .filter(template_id.eq(any(test_subquery)))
+            .first::<Self>(conn)
+    }
+
+    /// Retrieves the template for the run specified by `run_id`
+    pub fn find_by_run(conn: &PgConnection, run_id: Uuid) -> Result<Self, diesel::result::Error> {
+        let run_subquery = run::dsl::run
+            .filter(run::dsl::run_id.eq(run_id))
+            .limit(1)
+            .select(run::dsl::test_id);
+        let test_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(any(run_subquery)))
+            .limit(1)
+            .select(test::dsl::template_id);
+        template
+            .filter(template_id.eq(any(test_subquery)))
+            .first::<Self>(conn)
+    }
+
     /// Inserts a new template into the DB
     ///
     /// Creates a new template row in the DB using `conn` with the values specified in `params`
@@ -594,6 +620,33 @@ mod tests {
             nonexistent_template,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_by_test_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template = insert_test_template(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+
+        let found_template = TemplateData::find_by_test(&conn, test_test.test_id)
+            .expect("Failed to retrieve test template by test_id.");
+
+        assert_eq!(found_template, test_template);
+    }
+
+    #[test]
+    fn find_by_run_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template = insert_test_template(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+
+        let found_template = TemplateData::find_by_run(&conn, test_run.run_id)
+            .expect("Failed to retrieve test template by run_id.");
+
+        assert_eq!(found_template, test_template);
     }
 
     #[test]
