@@ -113,7 +113,7 @@ impl From<diesel::result::Error> for DeleteError {
 }
 
 impl ReportSectionData {
-    /// Queries the DB for a report_section relationship for the specified ids
+    /// Queries the DB for the report_section relationship for the specified ids
     ///
     /// Queries the DB using `conn` to retrieve the first row with a report_id matching
     /// `query_report_id` and a section_id matching `query_section_id`

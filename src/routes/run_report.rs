@@ -247,6 +247,7 @@ async fn create(
     {
         Ok(run_report) => HttpResponse::Ok().json(run_report),
         Err(err) => {
+            error!("{}", err);
             let error_body = match err {
                 report_builder::Error::Cromwell(e) => ErrorBody {
                     title: "Cromwell error".to_string(),

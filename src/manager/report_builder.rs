@@ -182,7 +182,10 @@ pub async fn create_run_reports_for_completed_run(
 
         // Loop through the mappings and create a report for each
         for mapping in template_reports {
-            debug!("Generating run_report for run_id {} and report_id {}", run.run_id, mapping.report_id);
+            debug!(
+                "Generating run_report for run_id {} and report_id {}",
+                run.run_id, mapping.report_id
+            );
             run_reports.push(
                 create_run_report(
                     conn,
@@ -690,9 +693,9 @@ mod input_map {
         let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
         // Parse input types from WDLs
         let test_wdl_input_types: HashMap<String, String> =
-            womtool::get_wdl_inputs_with_simple_types(test_wdl).await?;
+            womtool::get_wdl_inputs_with_simple_types(test_wdl)?;
         let eval_wdl_input_types: HashMap<String, String> =
-            womtool::get_wdl_inputs_with_simple_types(eval_wdl).await?;
+            womtool::get_wdl_inputs_with_simple_types(eval_wdl)?;
         // Get the test and eval inputs from `run` as maps so we can work with them more easily
         let (run_test_input, run_eval_input, run_result_map) = get_run_input_and_result_maps(&run)?;
         // Retrieve results for the template so we can get the types of results (in a hashmap for

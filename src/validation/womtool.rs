@@ -9,6 +9,7 @@ use log::error;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::error;
+use std::fs::read_to_string;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -77,7 +78,7 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
 /// containing the input names mapped to their types (without qualifiers like optional or default
 /// values) if it's successful, or an error if there is some issue retrieving the file
 /// or running WOMtool
-pub async fn get_wdl_inputs_with_simple_types(wdl: &str) -> Result<HashMap<String, String>, Error> {
+pub fn get_wdl_inputs_with_simple_types(wdl: &str) -> Result<HashMap<String, String>, Error> {
     // Write it to a temporary file for parsing
     let mut wdl_file = NamedTempFile::new()?;
     write!(wdl_file, "{}", wdl)?;
@@ -166,18 +167,33 @@ fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
             Ok(msg) => msg,
             Err(e) => format!("Failed to get error message from womtool with error {}", e),
         };
-        Err(Error::Invalid(error_msg))
+        let wdl_contents = match read_to_string(wdl_path) {
+            Ok(wdl) => wdl,
+            Err(e) => format!(
+                "Failed to load WDL contents to display in error message with error: {}",
+                e
+            ),
+        };
+        Err(Error::Invalid(format!(
+            "Womtool inputs encountered error: {}\nwhile attempting to parse inputs for wdl: {}",
+            error_msg, wdl_contents
+        )))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::requests::test_resource_requests;
     use crate::unit_test_util::load_env_config;
-    use crate::validation::womtool::{get_wdl_inputs_with_simple_types, wdl_is_valid, Error};
+    use crate::validation::womtool::{
+        get_wdl_inputs_with_simple_types, wdl_is_valid, womtool_inputs, Error,
+    };
     use actix_web::client::Client;
     use serde_json::json;
     use std::collections::HashMap;
     use std::fs::read_to_string;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[actix_rt::test]
     async fn test_wdl_is_valid_true() {
@@ -223,11 +239,6 @@ mod tests {
         mock.assert();
 
         assert!(matches!(response, Err(Error::Invalid(_))));
-
-        match response {
-            Err(Error::Invalid(msg)) => println!("Womtool error message: {}", msg),
-            _ => {}
-        }
     }
 
     #[actix_rt::test]
@@ -254,13 +265,10 @@ mod tests {
     async fn test_get_wdl_inputs_with_simple_types_success() {
         load_env_config();
 
-        // Get client
-        let client = Client::default();
-
         // Get test file
         let test_wdl = read_to_string("testdata/validation/womtool/valid_wdl.wdl").unwrap();
 
-        let response = get_wdl_inputs_with_simple_types(&test_wdl).await.unwrap();
+        let response = get_wdl_inputs_with_simple_types(&test_wdl).unwrap();
 
         let mut expected_response: HashMap<String, String> = HashMap::new();
         expected_response.insert(String::from("myWorkflow.person"), String::from("String"));
@@ -272,16 +280,8 @@ mod tests {
     async fn test_get_wdl_inputs_with_simple_types_invalid() {
         load_env_config();
 
-        // Get client
-        let client = Client::default();
-
-        let response = get_wdl_inputs_with_simple_types("test").await;
+        let response = get_wdl_inputs_with_simple_types("test");
 
         assert!(matches!(response, Err(Error::Invalid(_))));
-
-        match response {
-            Err(Error::Invalid(msg)) => println!("Womtool error message: {}", msg),
-            _ => {}
-        }
     }
 }
