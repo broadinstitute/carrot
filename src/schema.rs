@@ -214,9 +214,10 @@ table! {
 table! {
     use diesel::sql_types::*;
 
-    report_section(report_id, section_id) {
+    report_section(report_id, section_id, name) {
         report_id -> Uuid,
         section_id -> Uuid,
+        name -> Text,
         position -> Integer,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,

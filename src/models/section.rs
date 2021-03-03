@@ -397,6 +397,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: id,
             report_id: report.report_id,
+            name: String::from("Section 0"),
             position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -511,6 +512,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: sections[0].section_id,
             report_id: id,
+            name: String::from("Name1 1"),
             position: 1,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -533,6 +535,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: sections[1].section_id,
             report_id: id,
+            name: String::from("Name2 2"),
             position: 2,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -555,6 +558,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: sections[2].section_id,
             report_id: id,
+            name: String::from("Name5 3"),
             position: 3,
             created_by: Some(String::from("Kelvin@example.com")),
         };

@@ -17,33 +17,35 @@ use uuid::Uuid;
 /// Represents the part of a new report_section mapping that is received as a request body
 ///
 /// The mapping for creating report_section mappings has report_id and section_id as path params
-/// and position and created_by are expected as part of the request body.  A NewReportSection
+/// and name, position, and created_by are expected as part of the request body.  A NewReportSection
 /// cannot be deserialized from the request body, so this is used instead, and then a
 /// NewReportSection can be built from the instance of this and the ids from the path
 #[derive(Deserialize, Serialize)]
 struct NewReportSectionIncomplete {
+    pub name: String,
     pub position: i32,
     pub created_by: Option<String>,
 }
 
-/// Handles requests to /reports/{id}/sections/{section_id} for retrieving report_section mapping
-/// info by report_id and section_id
+/// Handles requests to /reports/{report_id}/sections/{section_id}/{name} for retrieving
+/// report_section mapping info by report_id, section_id, and name
 ///
 /// This function is called by Actix-Web when a get request is made to the
-/// /reports/{id}/sections/{section_id} mapping
+/// /reports/{report_id}/sections/{section_id}/{name} mapping
 /// It parses the id and section_id from `req`, connects to the db via a connection from `pool`,
 /// and returns the retrieved report_section mapping, or an error message if there is no matching
 /// report_section mapping or some other error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database sections in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
-    // Pull id params from path
-    let id = &req.match_info().get("id").unwrap();
-    let section_id = &req.match_info().get("section_id").unwrap();
+async fn find_by_ids_and_name(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+    // Pull params from path
+    let report_id = req.match_info().get("report_id").unwrap();
+    let section_id = req.match_info().get("section_id").unwrap();
+    let name = req.match_info().get("name").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let report_id = match Uuid::parse_str(report_id) {
         Ok(id) => id,
         Err(e) => {
             error!("{}", e);
@@ -70,11 +72,27 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     };
 
+    // Percent decode the name param
+    let name = match percent_encoding::percent_decode_str(&name).decode_utf8() {
+        Ok(decoded_name) => String::from(decoded_name),
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't decode successfully, return an error to the user
+            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Name decode error".to_string(),
+                status: 500,
+                detail: "Failed to percent-decode name".to_string(),
+            }));
+        }
+    };
+
     // Query DB for section in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match ReportSectionData::find_by_report_and_section(&conn, id, section_id) {
+        match ReportSectionData::find_by_report_and_section_and_name(
+            &conn, report_id, section_id, &name,
+        ) {
             Ok(report_section) => Ok(report_section),
             Err(e) => {
                 error!("{}", e);
@@ -94,7 +112,8 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
             BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
                 title: "No report_section mapping found".to_string(),
                 status: 404,
-                detail: "No report_section mapping found with the specified ID".to_string(),
+                detail: "No report_section mapping found with the specified IDs and name"
+                    .to_string(),
             }),
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
@@ -153,8 +172,8 @@ async fn find(
         }
     })
     .await
-    .map(|sections| {
-        if sections.len() < 1 {
+    .map(|report_sections| {
+        if report_sections.len() < 1 {
             // If no mapping is found, return a 404
             HttpResponse::NotFound().json(ErrorBody {
                 title: "No report_section mapping found".to_string(),
@@ -163,7 +182,7 @@ async fn find(
             })
         } else {
             // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(sections)
+            HttpResponse::Ok().json(report_sections)
         }
     })
     .map_err(|e| {
@@ -177,11 +196,11 @@ async fn find(
     })
 }
 
-/// Handles requests to /reports/{id}/sections/{section_id} mapping for creating report_section
-/// mappings
+/// Handles requests to /reports/{report_id}/sections/{section_id} mapping for creating
+/// report_section mappings
 ///
 /// This function is called by Actix-Web when a post request is made to the
-/// /reports/{id}/sections{section_id} mapping
+/// /reports/{report_id}/sections{section_id} mapping
 /// It deserializes the request body to a NewReportSectionIncomplete, uses that with the id and
 /// section_id to assemble a NewReportSection, connects to the db via a connection from `pool`,
 /// creates a report_section mapping with the specified parameters, and returns the created
@@ -195,7 +214,7 @@ async fn create(
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     // Pull id params from path
-    let id = &req.match_info().get("id").unwrap();
+    let id = &req.match_info().get("report_id").unwrap();
     let section_id = &req.match_info().get("section_id").unwrap();
 
     // Parse ID into Uuid
@@ -205,9 +224,9 @@ async fn create(
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
             return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
+                title: "Report ID formatted incorrectly".to_string(),
                 status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
+                detail: "Report ID must be formatted as a Uuid".to_string(),
             }));
         }
     };
@@ -230,6 +249,7 @@ async fn create(
     let new_report_section = NewReportSection {
         report_id: id,
         section_id: section_id,
+        name: new_report_section.name,
         position: new_report_section.position,
         created_by: new_report_section.created_by,
     };
@@ -270,21 +290,22 @@ async fn create(
     })
 }
 
-/// Handles DELETE requests to /reports/{id}/sections/{section_id} for deleting report_section
-/// mappings
+/// Handles DELETE requests to /reports/{id}/sections/{section_id}/{name} for deleting
+/// report_section mappings
 ///
 /// This function is called by Actix-Web when a delete request is made to the
-/// /reports/{id}/sections/{section_id} mapping
+/// /reports/{id}/sections/{section_id}/{name} mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
 /// delete the specified report_section mapping, returning the number or rows deleted or an error
 /// message if some error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database sections in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
-    // Pull id params from path
-    let id = &req.match_info().get("id").unwrap();
+async fn delete_by_ids_and_name(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+    // Pull params from path
+    let id = &req.match_info().get("report_id").unwrap();
     let section_id = &req.match_info().get("section_id").unwrap();
+    let name = &req.match_info().get("name").unwrap();
 
     // Parse ID into Uuid
     let id = match Uuid::parse_str(id) {
@@ -313,12 +334,25 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
             }));
         }
     };
+    // Percent decode the name param
+    let name = match percent_encoding::percent_decode_str(&name).decode_utf8() {
+        Ok(decoded_name) => String::from(decoded_name),
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't decode successfully, return an error to the user
+            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Name decode error".to_string(),
+                status: 500,
+                detail: "Failed to percent-decode name".to_string(),
+            }));
+        }
+    };
 
     //Query DB for pipeline in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match ReportSectionData::delete(&conn, id, section_id) {
+        match ReportSectionData::delete(&conn, id, section_id, &name) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
                 error!("{}", e);
@@ -336,7 +370,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                 HttpResponse::NotFound().json(ErrorBody {
                     title: "No report_section mapping found".to_string(),
                     status: 404,
-                    detail: "No report_section mapping found for the specified id".to_string(),
+                    detail: "No report_section mapping found for the specified parameters".to_string(),
                 })
             }
         })
@@ -367,10 +401,12 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::resource("/reports/{id}/sections/{section_id}")
-            .route(web::get().to(find_by_id))
-            .route(web::post().to(create))
-            .route(web::delete().to(delete_by_id)),
+        web::resource("/reports/{report_id}/sections/{section_id}/{name}")
+            .route(web::get().to(find_by_ids_and_name))
+            .route(web::delete().to(delete_by_ids_and_name)),
+    );
+    cfg.service(
+        web::resource("/reports/{report_id}/sections/{section_id}").route(web::post().to(create)),
     );
     cfg.service(web::resource("/reports/{id}/sections").route(web::get().to(find)));
 }
@@ -390,6 +426,7 @@ mod tests {
     use actix_web::{http, test, App};
     use chrono::Utc;
     use diesel::PgConnection;
+    use percent_encoding::NON_ALPHANUMERIC;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -464,6 +501,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Name 0"),
             position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -515,7 +553,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn find_by_id_success() {
+    async fn find_by_ids_and_name_success() {
         let pool = get_test_db_pool();
 
         let new_report_section = insert_test_report_section(&pool.get().unwrap());
@@ -524,8 +562,10 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/reports/{}/sections/{}",
-                new_report_section.report_id, new_report_section.section_id
+                "/reports/{}/sections/{}/{}",
+                new_report_section.report_id,
+                new_report_section.section_id,
+                percent_encoding::utf8_percent_encode(&new_report_section.name, NON_ALPHANUMERIC)
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -539,7 +579,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn find_by_id_failure_not_found() {
+    async fn find_by_ids_and_name_failure_not_found() {
         let pool = get_test_db_pool();
 
         insert_test_report_section(&pool.get().unwrap());
@@ -548,9 +588,10 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/reports/{}/sections/{}",
+                "/reports/{}/sections/{}/{}",
                 Uuid::new_v4(),
-                Uuid::new_v4()
+                Uuid::new_v4(),
+                "test"
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -564,12 +605,12 @@ mod tests {
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No report_section mapping found with the specified ID"
+            "No report_section mapping found with the specified IDs and name"
         );
     }
 
     #[actix_rt::test]
-    async fn find_by_id_failure_bad_uuid() {
+    async fn find_by_ids_and_name_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
         insert_test_report_section(&pool.get().unwrap());
@@ -577,7 +618,7 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri("/reports/123456789/sections/12345678910")
+            .uri("/reports/123456789/sections/12345678910/test")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -674,6 +715,7 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let new_report_section = NewReportSectionIncomplete {
+            name: String::from("Random name"),
             position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -699,6 +741,7 @@ mod tests {
                 .expect("Created report_section missing created_by"),
             new_report_section.created_by.unwrap()
         );
+        assert_eq!(test_report_section.name, new_report_section.name);
     }
 
     #[actix_rt::test]
@@ -709,15 +752,22 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let req = test::TestRequest::get()
+        let new_report_section = NewReportSectionIncomplete {
+            name: String::from("Random name"),
+            position: 0,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
             .uri("/reports/123456789/sections/12345678910")
+            .set_json(&new_report_section)
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
 
-        let section = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&section).unwrap();
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(error_body.title, "Report ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
@@ -732,6 +782,7 @@ mod tests {
         insert_test_run_report_non_failed_with_report_id(&pool.get().unwrap(), report.report_id);
 
         let new_report_section = NewReportSectionIncomplete {
+            name: String::from("Random name"),
             position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -770,8 +821,10 @@ mod tests {
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/reports/{}/sections/{}",
-                report_section.report_id, report_section.section_id
+                "/reports/{}/sections/{}/{}",
+                report_section.report_id,
+                report_section.section_id,
+                percent_encoding::utf8_percent_encode(&report_section.name, NON_ALPHANUMERIC)
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -798,9 +851,10 @@ mod tests {
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/reports/{}/sections/{}",
+                "/reports/{}/sections/{}/{}",
                 Uuid::new_v4(),
-                report_section.section_id
+                report_section.section_id,
+                "randomname"
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -814,7 +868,7 @@ mod tests {
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No report_section mapping found for the specified id"
+            "No report_section mapping found for the specified parameters"
         );
     }
 
@@ -832,8 +886,10 @@ mod tests {
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/reports/{}/sections/{}",
-                report_section.report_id, report_section.section_id
+                "/reports/{}/sections/{}/{}",
+                report_section.report_id,
+                report_section.section_id,
+                percent_encoding::utf8_percent_encode(&report_section.name, NON_ALPHANUMERIC)
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -858,7 +914,7 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/reports/123456789/sections/123456789"))
+            .uri(&format!("/reports/123456789/sections/123456789/randomname"))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 

@@ -374,6 +374,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: id,
             report_id: report.report_id,
+            name: String::from("Random name"),
             position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };

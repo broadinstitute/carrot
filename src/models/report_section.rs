@@ -6,12 +6,14 @@
 use crate::models::report::ReportData;
 use crate::schema::report_section;
 use crate::schema::report_section::dsl::*;
+use crate::schema::section;
 use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;
 use diesel::prelude::*;
 use log::error;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 /// Mapping to a report_section mapping as it exists in the REPORT_SECTION table in the
@@ -22,9 +24,22 @@ use uuid::Uuid;
 pub struct ReportSectionData {
     pub report_id: Uuid,
     pub section_id: Uuid,
+    pub name: String,
     pub position: i32,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
+}
+
+/// Contains the definition of a report_section mapping plus the contents of the relevant section
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
+pub struct ReportSectionWithContentsData {
+    pub report_id: Uuid,
+    pub section_id: Uuid,
+    pub name: String,
+    pub position: i32,
+    pub created_at: NaiveDateTime,
+    pub created_by: Option<String>,
+    pub contents: Value,
 }
 
 /// Represents all possible parameters for a query of the REPORT_SECTION table
@@ -36,6 +51,7 @@ pub struct ReportSectionData {
 pub struct ReportSectionQuery {
     pub report_id: Option<Uuid>,
     pub section_id: Option<Uuid>,
+    pub name: Option<String>,
     pub position: Option<i32>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
@@ -47,13 +63,14 @@ pub struct ReportSectionQuery {
 
 /// A new report_section mapping to be inserted into the DB
 ///
-/// report_id, section_id, and position are all required fields, but created_by is not
+/// report_id, section_id, name, and position are all required fields, but created_by is not
 /// created_at is populated automatically by the DB
 #[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "report_section"]
 pub struct NewReportSection {
     pub report_id: Uuid,
     pub section_id: Uuid,
+    pub name: String,
     pub position: i32,
     pub created_by: Option<String>,
 }
@@ -113,21 +130,24 @@ impl From<diesel::result::Error> for DeleteError {
 }
 
 impl ReportSectionData {
-    /// Queries the DB for the report_section relationship for the specified ids
+    /// Queries the DB for the report_section relationships for the specified ids and name
     ///
-    /// Queries the DB using `conn` to retrieve the first row with a report_id matching
-    /// `query_report_id` and a section_id matching `query_section_id`
+    /// Queries the DB using `conn` to retrieve any rows with a report_id matching
+    /// `query_report_id`, a section_id matching `query_section_id`, and a name matching
+    /// `query_name`
     /// Returns a result containing either the retrieved report_section mapping as a
-    /// ReportSectionData instance or an error if the query fails for some reason or if no
-    /// mapping is found matching the criteria
-    pub fn find_by_report_and_section(
+    /// ReportSectionData instances or an error if the query fails for some reason or if there is
+    /// no row matching the parameters
+    pub fn find_by_report_and_section_and_name(
         conn: &PgConnection,
         query_report_id: Uuid,
         query_section_id: Uuid,
+        query_name: &str,
     ) -> Result<Self, diesel::result::Error> {
         report_section
             .filter(section_id.eq(query_section_id))
             .filter(report_id.eq(query_report_id))
+            .filter(name.eq(query_name))
             .first::<Self>(conn)
     }
 
@@ -150,6 +170,9 @@ impl ReportSectionData {
         }
         if let Some(param) = params.section_id {
             query = query.filter(section_id.eq(param));
+        }
+        if let Some(param) = params.name {
+            query = query.filter(name.eq(param));
         }
         if let Some(param) = params.position {
             query = query.filter(position.eq(param));
@@ -181,6 +204,13 @@ impl ReportSectionData {
                             query = query.then_order_by(section_id.asc());
                         } else {
                             query = query.then_order_by(section_id.desc());
+                        }
+                    }
+                    "name" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(name.asc());
+                        } else {
+                            query = query.then_order_by(name.desc());
                         }
                     }
                     "position" => {
@@ -262,6 +292,7 @@ impl ReportSectionData {
         conn: &PgConnection,
         query_report_id: Uuid,
         query_section_id: Uuid,
+        query_name: &str,
     ) -> Result<usize, DeleteError> {
         // If there are non-failed run_reports associated with the report associated with this
         // report_section, return an error
@@ -284,26 +315,55 @@ impl ReportSectionData {
         Ok(diesel::delete(
             report_section
                 .filter(report_id.eq(query_report_id))
-                .filter(section_id.eq(query_section_id)),
+                .filter(section_id.eq(query_section_id))
+                .filter(name.eq(query_name)),
         )
         .execute(conn)?)
+    }
+}
+
+impl ReportSectionWithContentsData {
+    /// Retrieves all report_section mappings mapped to the report specified by `query_report_id`,
+    /// sorted by `position`, and including the `contents` of the relevant section
+    pub fn find_by_report_id_ordered_by_position(
+        conn: &PgConnection,
+        query_report_id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        report_section
+            .inner_join(section::table)
+            .filter(report_id.eq(query_report_id))
+            .select((
+                report_id,
+                section_id,
+                name,
+                position,
+                created_at,
+                created_by,
+                section::contents,
+            ))
+            .order(position)
+            .load::<Self>(conn)
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_section::{
+        CreateError, DeleteError, NewReportSection, ReportSectionData, ReportSectionQuery,
+        ReportSectionWithContentsData,
+    };
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::section::{NewSection, SectionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
-    use chrono::Utc;
+    use chrono::{NaiveDateTime, Utc};
+    use diesel::PgConnection;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -378,12 +438,82 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Name 0"),
             position: 0,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
         ReportSectionData::create(conn, new_report_section)
             .expect("Failed inserting test report_section")
+    }
+
+    fn insert_test_report_mapped_to_sections(
+        conn: &PgConnection,
+    ) -> Vec<ReportSectionWithContentsData> {
+        let mut report_sections: Vec<ReportSectionWithContentsData> = Vec::new();
+
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            metadata: json!({"metadata":[{"test":"test"}]}),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_section = NewSection {
+            name: String::from("Name"),
+            description: Some(String::from("Description")),
+            contents: json!({"cells":[{"test":"test"}]}),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let section =
+            SectionData::create(conn, new_section).expect("Failed inserting test section");
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            name: String::from("Name 0"),
+            position: 0,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report_section = ReportSectionData::create(conn, new_report_section)
+            .expect("Failed inserting test report_section");
+
+        report_sections.push(ReportSectionWithContentsData {
+            report_id: report_section.report_id,
+            section_id: report_section.section_id,
+            name: report_section.name,
+            position: report_section.position,
+            created_at: report_section.created_at,
+            created_by: report_section.created_by,
+            contents: section.contents.clone(),
+        });
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            name: String::from("Name 1"),
+            position: 1,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report_section = ReportSectionData::create(conn, new_report_section)
+            .expect("Failed inserting test report_section");
+
+        report_sections.push(ReportSectionWithContentsData {
+            report_id: report_section.report_id,
+            section_id: report_section.section_id,
+            name: report_section.name,
+            position: report_section.position,
+            created_at: report_section.created_at,
+            created_by: report_section.created_by,
+            contents: section.contents.clone(),
+        });
+
+        report_sections
     }
 
     fn insert_test_report_and_section(conn: &PgConnection) -> (ReportData, SectionData) {
@@ -434,6 +564,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Name1 1"),
             position: 1,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -465,6 +596,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Name2 2"),
             position: 2,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -496,6 +628,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Name5 3"),
             position: 3,
             created_by: Some(String::from("Kelvin@example.com")),
         };
@@ -547,15 +680,16 @@ mod tests {
     }
 
     #[test]
-    fn find_by_report_and_section_exists() {
+    fn find_by_report_and_section_and_name_exists() {
         let conn = get_test_db_connection();
 
         let test_report_section = insert_test_report_section(&conn);
 
-        let found_report_section = ReportSectionData::find_by_report_and_section(
+        let found_report_section = ReportSectionData::find_by_report_and_section_and_name(
             &conn,
             test_report_section.report_id,
             test_report_section.section_id,
+            &test_report_section.name,
         )
         .expect("Failed to retrieve test report_section by id.");
 
@@ -563,11 +697,15 @@ mod tests {
     }
 
     #[test]
-    fn find_by_id_not_exists() {
+    fn find_by_report_and_section_and_name_not_exists() {
         let conn = get_test_db_connection();
 
-        let nonexistent_report_section =
-            ReportSectionData::find_by_report_and_section(&conn, Uuid::new_v4(), Uuid::new_v4());
+        let nonexistent_report_section = ReportSectionData::find_by_report_and_section_and_name(
+            &conn,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "test",
+        );
 
         assert!(matches!(
             nonexistent_report_section,
@@ -584,6 +722,7 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: Some(test_report_sections[0].report_id),
             section_id: None,
+            name: None,
             position: None,
             created_before: None,
             created_after: None,
@@ -609,6 +748,33 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: None,
             section_id: Some(test_report_sections[1].section_id),
+            name: None,
+            position: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_report_sections =
+            ReportSectionData::find(&conn, test_query).expect("Failed to find report_sections");
+
+        assert_eq!(found_report_sections.len(), 1);
+        assert_eq!(found_report_sections[0], test_report_sections[1]);
+    }
+
+    #[test]
+    fn find_with_name() {
+        let conn = get_test_db_connection();
+
+        let test_report_sections = insert_test_report_sections(&conn);
+
+        let test_query = ReportSectionQuery {
+            report_id: None,
+            section_id: None,
+            name: Some(test_report_sections[1].name.clone()),
             position: None,
             created_before: None,
             created_after: None,
@@ -634,6 +800,7 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: None,
             section_id: None,
+            name: None,
             position: Some(test_report_sections[2].position.clone()),
             created_before: None,
             created_after: None,
@@ -659,6 +826,7 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: None,
             section_id: None,
+            name: None,
             position: None,
             created_before: None,
             created_after: None,
@@ -677,6 +845,7 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: None,
             section_id: None,
+            name: None,
             position: None,
             created_before: None,
             created_after: None,
@@ -702,6 +871,7 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: None,
             section_id: None,
+            name: None,
             position: None,
             created_before: None,
             created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
@@ -719,6 +889,7 @@ mod tests {
         let test_query = ReportSectionQuery {
             report_id: None,
             section_id: None,
+            name: None,
             position: None,
             created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_after: None,
@@ -748,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    fn create_failure_same_section_and_report() {
+    fn create_failure_same_section_and_report_and_name() {
         let conn = get_test_db_connection();
 
         let test_report_section = insert_test_report_section(&conn);
@@ -756,6 +927,7 @@ mod tests {
         let copy_report_section = NewReportSection {
             report_id: test_report_section.report_id,
             section_id: test_report_section.section_id,
+            name: test_report_section.name.clone(),
             position: 2,
             created_by: Some(String::from("Kevin2@example.com")),
         };
@@ -785,6 +957,7 @@ mod tests {
         let copy_report_section = NewReportSection {
             report_id: test_report.report_id,
             section_id: test_section.section_id,
+            name: String::from("Random name"),
             position: 2,
             created_by: Some(String::from("Kevin2@example.com")),
         };
@@ -808,15 +981,17 @@ mod tests {
             &conn,
             test_report_section.report_id,
             test_report_section.section_id,
+            &test_report_section.name,
         )
         .unwrap();
 
         assert_eq!(delete_section, 1);
 
-        let deleted_report_section = ReportSectionData::find_by_report_and_section(
+        let deleted_report_section = ReportSectionData::find_by_report_and_section_and_name(
             &conn,
             test_report_section.report_id,
             test_report_section.section_id,
+            &test_report_section.name,
         );
 
         assert!(matches!(
@@ -835,15 +1010,17 @@ mod tests {
             &conn,
             test_report_section.report_id,
             test_report_section.section_id,
+            &test_report_section.name,
         )
         .unwrap();
 
         assert_eq!(delete_section, 1);
 
-        let deleted_report_section = ReportSectionData::find_by_report_and_section(
+        let deleted_report_section = ReportSectionData::find_by_report_and_section_and_name(
             &conn,
             test_report_section.report_id,
             test_report_section.section_id,
+            &test_report_section.name,
         );
 
         assert!(matches!(
@@ -863,8 +1040,26 @@ mod tests {
             &conn,
             test_report_section.report_id,
             test_report_section.section_id,
+            &test_report_section.name,
         );
 
         assert!(matches!(delete_section, Err(DeleteError::Prohibited(_))));
+    }
+
+    #[test]
+    fn find_by_report_id_ordered_by_position_exists() {
+        let conn = get_test_db_connection();
+
+        let test_report_sections = insert_test_report_mapped_to_sections(&conn);
+
+        let result_report_sections =
+            ReportSectionWithContentsData::find_by_report_id_ordered_by_position(
+                &conn,
+                test_report_sections[0].report_id,
+            )
+            .unwrap();
+
+        assert_eq!(result_report_sections[0], test_report_sections[0]);
+        assert_eq!(result_report_sections[1], test_report_sections[1]);
     }
 }

@@ -1448,6 +1448,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Top Section 1"),
             position: 1,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -1483,6 +1484,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Middle Section 2"),
             position: 2,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -1516,6 +1518,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Bottom Section 3"),
             position: 3,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -1538,10 +1541,10 @@ mod tests {
             template_id,
             report_id,
             input_map: json!({
-                "Top Section": {
+                "Top Section 1": {
                     "message":"test_input:greeting_workflow.in_greeting"
                 },
-                "Middle Section": {
+                "Middle Section 2": {
                     "message":"test_input:greeting_workflow.in_greeted",
                     "message_file":"result:Greeting File"
                 }

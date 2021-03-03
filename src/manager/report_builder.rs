@@ -6,6 +6,7 @@ use crate::config;
 use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::manager::util;
 use crate::models::report::ReportData;
+use crate::models::report_section::ReportSectionWithContentsData;
 use crate::models::run::{RunData, RunWithResultData};
 use crate::models::run_report::{NewRunReport, RunReportData};
 use crate::models::section::SectionData;
@@ -272,14 +273,17 @@ async fn create_run_report(
             )));
         }
     };
-    // Get sections ordered by position
-    let sections = SectionData::find_by_report_id_ordered_by_positions(conn, report.report_id)?;
+    // Get report_sections with section contents ordered by position
+    let section_maps = ReportSectionWithContentsData::find_by_report_id_ordered_by_position(
+        conn,
+        report.report_id,
+    )?;
     // Assemble list of inputs with types and values
     let section_inputs_map =
         input_map::build_section_inputs_map(conn, input_map, &template, test_wdl, eval_wdl, &run)
             .await?;
     // Assemble the report and its sections into a complete Jupyter Notebook json
-    let report_json = create_report_template(&report, &sections, &section_inputs_map)?;
+    let report_json = create_report_template(&report, &section_maps, &section_inputs_map)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
     #[cfg(not(test))]
     let report_template_location = upload_report_template(report_json, &report.name, &run.name)?;
@@ -288,7 +292,7 @@ async fn create_run_report(
     #[cfg(test)]
     let report_template_location = String::from("example.com/report/template/location.ipynb");
     // Create WDL from default WDL template
-    let generator_wdl = create_generator_wdl(&sections, &section_inputs_map);
+    let generator_wdl = create_generator_wdl(&section_maps, &section_inputs_map);
     // Write it to a file
     let wdl_file = util::get_temp_file(&generator_wdl)?;
     // Build inputs json sections and section inputs map, titled with a name built from run_name and
@@ -296,7 +300,7 @@ async fn create_run_report(
     let input_json = create_input_json(
         &format!("{} : {}", &run.name.replace(" ", "_"), &report.name),
         &report_template_location,
-        &sections,
+        &section_maps,
         &section_inputs_map,
     );
     // Write it to a file
@@ -353,16 +357,16 @@ fn check_for_existing_run_report(
 /// produce the Jupyter Notebook (in json form) that will be used as a template for the report
 fn create_report_template(
     report: &ReportData,
-    sections: &Vec<SectionData>,
+    section_maps: &Vec<ReportSectionWithContentsData>,
     section_inputs: &HashMap<String, HashMap<String, ReportInput>>,
 ) -> Result<Value, Error> {
     // Build a cells array for the notebook from sections_contents, starting with the default header
     // cells
     let mut cells: Vec<Value> = DEFAULT_HEADER_CELLS.clone();
-    for section in sections {
-        let contents = &section.contents;
+    for report_section in section_maps {
+        let contents = &report_section.contents;
         // Add a header cell
-        cells.push(create_section_header_cell(&section.name));
+        cells.push(create_section_header_cell(&report_section.name));
         // Extract that cells array from contents (return an error if any step of this fails)
         // First get it as an object
         let contents_object = match contents {
@@ -395,12 +399,12 @@ fn create_report_template(
         };
         // Next, extract the inputs for this section from the section inputs so we can make an input
         // cell for this section
-        match section_inputs.get(&section.name) {
+        match section_inputs.get(&report_section.name) {
             Some(section_input_map) => {
                 // Get list of input names for the section
                 let section_inputs: Vec<&str> = section_input_map.keys().map(|k| &**k).collect();
                 // Build the input cell and add it to the cells list
-                let input_cell = create_section_input_cell(&section.name, section_inputs);
+                let input_cell = create_section_input_cell(&report_section.name, section_inputs);
                 cells.push(input_cell);
             }
             // If there's no inputs for this section, then we won't add an input cell
@@ -490,7 +494,7 @@ fn upload_report_template(
 /// Generates a filled wdl that will run the jupyter notebook to generate reports.  The WDL fills in
 /// the placeholder values in the jupyter_report_generator_template.wdl file
 fn create_generator_wdl(
-    sections: &Vec<SectionData>,
+    section_maps: &Vec<ReportSectionWithContentsData>,
     section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>,
 ) -> String {
     // Load the wdl template as part of the build so it will be included as a static string in the
@@ -517,9 +521,9 @@ fn create_generator_wdl(
     let mut inputs_json_lines: Vec<String> = Vec::new();
     // Loop through each section and generate the appropriate lines of code for each input for each
     // placeholder
-    for position in 0..sections.len() {
+    for position in 0..section_maps.len() {
         // Get name and inputs for this section (continue if there are no inputs for this section)
-        let section_name = &sections[position].name;
+        let section_name = &section_maps[position].name;
         let section_inputs = match section_inputs_map.get(section_name) {
             Some(inputs) => inputs,
             None => continue,
@@ -610,7 +614,7 @@ fn create_generator_wdl(
 fn create_input_json(
     report_name: &str,
     notebook_location: &str,
-    sections: &Vec<SectionData>,
+    section_maps: &Vec<ReportSectionWithContentsData>,
     section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>,
 ) -> Value {
     // Map that we'll add all our inputs to
@@ -625,9 +629,9 @@ fn create_input_json(
         Value::String(String::from(report_name)),
     );
     // Loop through sections to add section inputs
-    for position in 0..sections.len() {
+    for position in 0..section_maps.len() {
         // Get inputs for this section (continue if there are no inputs for this section)
-        let section_inputs = match section_inputs_map.get(&sections[position].name) {
+        let section_inputs = match section_inputs_map.get(&section_maps[position].name) {
             Some(inputs) => inputs,
             None => continue,
         };
@@ -1309,7 +1313,9 @@ mod tests {
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
-    use crate::models::report_section::{NewReportSection, ReportSectionData};
+    use crate::models::report_section::{
+        NewReportSection, ReportSectionData, ReportSectionWithContentsData,
+    };
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_report::{NewRunReport, RunReportData};
@@ -1395,6 +1401,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Top Section 1"),
             position: 1,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -1430,7 +1437,20 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Middle Section 1"),
             position: 2,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            name: String::from("Middle Section 2"),
+            position: 3,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1463,7 +1483,8 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
-            position: 3,
+            name: String::from("Bottom Section 3"),
+            position: 4,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1541,6 +1562,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Top Section 1"),
             position: 1,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -1576,6 +1598,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Middle Section 2"),
             position: 2,
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -1609,7 +1632,21 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: report.report_id,
+            name: String::from("Bottom Section 1"),
             position: 3,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        report_sections.push(
+            ReportSectionData::create(conn, new_report_section)
+                .expect("Failed inserting test report_section"),
+        );
+
+        let new_report_section = NewReportSection {
+            section_id: section.section_id,
+            report_id: report.report_id,
+            name: String::from("Bottom Section 2"),
+            position: 4,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1745,10 +1782,10 @@ mod tests {
             template_id,
             report_id,
             input_map: json!({
-                "Top Section": {
+                "Top Section 1": {
                     "message":"test_input:greeting_workflow.in_greeting"
                 },
-                "Middle Section": {
+                "Middle Section 2": {
                     "message":"eval_input:greeting_file_workflow.in_greeting",
                     "message_file":"result:File Result"
                 }
@@ -1769,10 +1806,10 @@ mod tests {
             template_id,
             report_id,
             input_map: json!({
-                "Top Section": {
+                "Top Section 1": {
                     "message":"test_input:greeting_workflow.nonexistent_input"
                 },
-                "Middle Section": {
+                "Middle Section 2": {
                     "message":"eval_input:greeting_file_workflow.in_greeting",
                     "message_file":"result:File Result"
                 }
@@ -1910,6 +1947,7 @@ mod tests {
         let new_report_section = NewReportSection {
             section_id: section.section_id,
             report_id: id,
+            name: String::from("Bad Name 4"),
             position: 4,
             created_by: Some(String::from("Kelvin@example.com")),
         };
@@ -2545,11 +2583,17 @@ mod tests {
     fn create_report_template_success() {
         let conn = get_test_db_connection();
 
-        let (test_report, _test_report_sections, test_sections) =
+        let (test_report, _test_report_sections, _test_sections) =
             insert_test_report_mapped_to_sections(&conn);
+        let test_report_sections_with_contents =
+            ReportSectionWithContentsData::find_by_report_id_ordered_by_position(
+                &conn,
+                test_report.report_id,
+            )
+            .unwrap();
 
         let mut input_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
-        input_map.insert(String::from("Middle Section"), {
+        input_map.insert(String::from("Middle Section 1"), {
             let mut report_input_map: HashMap<String, ReportInput> = HashMap::new();
             report_input_map.insert(
                 String::from("message"),
@@ -2560,9 +2604,24 @@ mod tests {
             );
             report_input_map
         });
+        input_map.insert(String::from("Middle Section 2"), {
+            let mut report_input_map: HashMap<String, ReportInput> = HashMap::new();
+            report_input_map.insert(
+                String::from("message"),
+                ReportInput {
+                    input_type: String::from("String"),
+                    value: String::from("Hello"),
+                },
+            );
+            report_input_map
+        });
 
-        let result_report =
-            create_report_template(&test_report, &test_sections, &input_map).unwrap();
+        let result_report = create_report_template(
+            &test_report,
+            &test_report_sections_with_contents,
+            &input_map,
+        )
+        .unwrap();
 
         let expected_report = json!({
             "metadata": {
@@ -2619,7 +2678,7 @@ mod tests {
                 },
                 {
                     "source": [
-                        "## Top Section"
+                        "## Top Section 1"
                     ],
                     "cell_type": "markdown",
                     "metadata": {}
@@ -2635,7 +2694,7 @@ mod tests {
                 },
                 {
                     "source": [
-                        "## Middle Section"
+                        "## Middle Section 1"
                     ],
                     "cell_type": "markdown",
                     "metadata": {}
@@ -2646,7 +2705,7 @@ mod tests {
                     "metadata": {},
                     "outputs": [],
                     "source": [
-                        "message = carrot_inputs[\"sections\"][\"Middle Section\"][\"message\"]",
+                        "message = carrot_inputs[\"sections\"][\"Middle Section 1\"][\"message\"]",
                    ]
                 },
                 {
@@ -2662,7 +2721,34 @@ mod tests {
                 },
                 {
                     "source": [
-                        "## Bottom Section"
+                        "## Middle Section 2"
+                    ],
+                    "cell_type": "markdown",
+                    "metadata": {}
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "message = carrot_inputs[\"sections\"][\"Middle Section 2\"][\"message\"]",
+                   ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "file_message = open(result_file, 'r').read()",
+                        "print(message)",
+                        "print(file_message)",
+                   ]
+                },
+                {
+                    "source": [
+                        "## Bottom Section 3"
                     ],
                     "cell_type": "markdown",
                     "metadata": {}
@@ -2686,13 +2772,37 @@ mod tests {
     fn create_report_template_failure() {
         let conn = get_test_db_connection();
 
-        let (test_report, _test_report_sections, test_sections) =
+        let (test_report, test_report_sections, test_sections) =
             insert_test_report_mapped_to_sections(&conn);
-        let (_bad_report_section, bad_section) =
+        let (bad_report_section, bad_section) =
             insert_bad_section_for_report(&conn, test_report.report_id);
 
-        let mut sections = test_sections;
-        sections.push(bad_section);
+        let test_report_sections_with_contents = {
+            let mut results: Vec<ReportSectionWithContentsData> = Vec::new();
+            let section_indices = vec![0, 1, 1, 2]; // Because the second section is used twice
+            for index in 0..test_report_sections.len() {
+                let report_section = &test_report_sections[index];
+                let section_index = results.push(ReportSectionWithContentsData {
+                    report_id: report_section.report_id,
+                    section_id: report_section.section_id,
+                    name: report_section.name.clone(),
+                    position: report_section.position,
+                    created_at: report_section.created_at,
+                    created_by: report_section.created_by.clone(),
+                    contents: test_sections[section_indices[index]].contents.clone(),
+                });
+            }
+            results.push(ReportSectionWithContentsData {
+                report_id: bad_report_section.report_id,
+                section_id: bad_report_section.section_id,
+                name: bad_report_section.name.clone(),
+                position: bad_report_section.position,
+                created_at: bad_report_section.created_at,
+                created_by: bad_report_section.created_by,
+                contents: bad_section.contents.clone(),
+            });
+            results
+        };
 
         let mut input_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
         input_map.insert(String::from("Name2"), {
@@ -2707,30 +2817,36 @@ mod tests {
             report_input_map
         });
 
-        let result_report = create_report_template(&test_report, &sections, &input_map);
+        let result_report = create_report_template(
+            &test_report,
+            &test_report_sections_with_contents,
+            &input_map,
+        );
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
     }
 
     #[test]
     fn create_generator_wdl_success() {
-        // Empty sections since create_generator_wdl only really needs the order of the names
-        let sections = vec![
-            SectionData {
+        // Empty report_sections since create_generator_wdl only really needs the order of the names
+        let report_sections = vec![
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 2".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 1,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
-            SectionData {
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 1".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 2,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
         ];
 
@@ -2765,7 +2881,7 @@ mod tests {
             inputs
         });
 
-        let result_wdl = create_generator_wdl(&sections, &section_inputs_map);
+        let result_wdl = create_generator_wdl(&report_sections, &section_inputs_map);
 
         // Get expected value from file
         let expected_wdl =
@@ -2778,30 +2894,33 @@ mod tests {
     #[test]
     fn create_generator_wdl_success_empty_section() {
         // Empty sections since create_generator_wdl only really needs the order of the names
-        let sections = vec![
-            SectionData {
+        let report_sections = vec![
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 2".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 1,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
-            SectionData {
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 1".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 2,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
-            SectionData {
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Empty Section".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 3,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
         ];
 
@@ -2836,7 +2955,7 @@ mod tests {
             inputs
         });
 
-        let result_wdl = create_generator_wdl(&sections, &section_inputs_map);
+        let result_wdl = create_generator_wdl(&report_sections, &section_inputs_map);
 
         // Get expected value from file
         let expected_wdl =
@@ -2849,22 +2968,24 @@ mod tests {
     #[test]
     fn create_input_json_success() {
         // Empty sections since create_input_json only really needs the order of the names
-        let sections = vec![
-            SectionData {
+        let report_sections = vec![
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 2".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 1,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
-            SectionData {
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 1".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 2,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
         ];
 
@@ -2902,7 +3023,7 @@ mod tests {
         let result_input_json = create_input_json(
             "test",
             "example.com/test/location",
-            &sections,
+            &report_sections,
             &section_inputs_map,
         );
 
@@ -2920,30 +3041,33 @@ mod tests {
     #[test]
     fn create_input_json_success_empty_sections() {
         // Empty sections since create_input_json only really needs the order of the names
-        let sections = vec![
-            SectionData {
+        let report_sections = vec![
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 2".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 1,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
-            SectionData {
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Section 1".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 2,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
-            SectionData {
+            ReportSectionWithContentsData {
+                report_id: Uuid::new_v4(),
                 section_id: Uuid::new_v4(),
                 name: "Empty Section".to_string(),
-                description: None,
-                contents: json!({}),
+                position: 3,
                 created_at: Utc::now().naive_utc(),
                 created_by: None,
+                contents: json!({}),
             },
         ];
 
@@ -2981,7 +3105,7 @@ mod tests {
         let result_input_json = create_input_json(
             "test",
             "example.com/test/location",
-            &sections,
+            &report_sections,
             &section_inputs_map,
         );
 

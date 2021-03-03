@@ -19,10 +19,11 @@ create table section (
 create table report_section (
     report_id uuid not null references report(report_id),
     section_id uuid not null references section(section_id),
+    name text not null,
     position integer not null,
     created_at timestamptz not null default current_timestamp,
     created_by text,
-    primary key (report_id, section_id)
+    primary key (report_id, section_id, name)
 );
 
 create table template_report (
