@@ -42,7 +42,7 @@ async fn find_by_ids_and_name(req: HttpRequest, pool: web::Data<db::DbPool>) -> 
     // Pull params from path
     let report_id = req.match_info().get("report_id").unwrap();
     let section_id = req.match_info().get("section_id").unwrap();
-    let name = req.match_info().get("name").unwrap();
+    let name = String::from(req.match_info().get("name").unwrap());
 
     // Parse ID into Uuid
     let report_id = match Uuid::parse_str(report_id) {
@@ -68,20 +68,6 @@ async fn find_by_ids_and_name(req: HttpRequest, pool: web::Data<db::DbPool>) -> 
                 title: "Section ID formatted incorrectly".to_string(),
                 status: 400,
                 detail: "Section ID must be formatted as a Uuid".to_string(),
-            }));
-        }
-    };
-
-    // Percent decode the name param
-    let name = match percent_encoding::percent_decode_str(&name).decode_utf8() {
-        Ok(decoded_name) => String::from(decoded_name),
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't decode successfully, return an error to the user
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Name decode error".to_string(),
-                status: 500,
-                detail: "Failed to percent-decode name".to_string(),
             }));
         }
     };
@@ -303,9 +289,9 @@ async fn create(
 /// Panics if attempting to connect to the database sections in an error
 async fn delete_by_ids_and_name(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull params from path
-    let id = &req.match_info().get("report_id").unwrap();
-    let section_id = &req.match_info().get("section_id").unwrap();
-    let name = &req.match_info().get("name").unwrap();
+    let id = req.match_info().get("report_id").unwrap();
+    let section_id = req.match_info().get("section_id").unwrap();
+    let name = String::from(req.match_info().get("name").unwrap());
 
     // Parse ID into Uuid
     let id = match Uuid::parse_str(id) {
@@ -331,19 +317,6 @@ async fn delete_by_ids_and_name(req: HttpRequest, pool: web::Data<db::DbPool>) -
                 title: "Section ID formatted incorrectly".to_string(),
                 status: 400,
                 detail: "Section ID must be formatted as a Uuid".to_string(),
-            }));
-        }
-    };
-    // Percent decode the name param
-    let name = match percent_encoding::percent_decode_str(&name).decode_utf8() {
-        Ok(decoded_name) => String::from(decoded_name),
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't decode successfully, return an error to the user
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Name decode error".to_string(),
-                status: 500,
-                detail: "Failed to percent-decode name".to_string(),
             }));
         }
     };

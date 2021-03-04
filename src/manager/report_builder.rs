@@ -9,7 +9,6 @@ use crate::models::report::ReportData;
 use crate::models::report_section::ReportSectionWithContentsData;
 use crate::models::run::{RunData, RunWithResultData};
 use crate::models::run_report::{NewRunReport, RunReportData};
-use crate::models::section::SectionData;
 use crate::models::template::TemplateData;
 use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::requests::cromwell_requests::CromwellRequestError;

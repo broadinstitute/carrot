@@ -114,27 +114,6 @@ impl SectionData {
         section.filter(section_id.eq(id)).first::<Self>(conn)
     }
 
-    /// Retrieves all sections mapped to the report specified by `id`, sorted by the `position` of
-    /// the report_section that defines the mapping
-    pub fn find_by_report_id_ordered_by_positions(
-        conn: &PgConnection,
-        id: Uuid,
-    ) -> Result<Vec<SectionData>, diesel::result::Error> {
-        report_section::table
-            .inner_join(section::table)
-            .filter(report_section::report_id.eq(id))
-            .select((
-                section_id,
-                name,
-                description,
-                contents,
-                created_at,
-                created_by,
-            ))
-            .order(report_section::position)
-            .load::<SectionData>(conn)
-    }
-
     /// Queries the DB for sections matching the specified query criteria
     ///
     /// Queries the DB using `conn` to retrieve sections matching the criteria in `params`
@@ -778,24 +757,6 @@ mod tests {
         let found_sections = SectionData::find(&conn, test_query).expect("Failed to find sections");
 
         assert_eq!(found_sections.len(), 3);
-    }
-
-    #[test]
-    fn find_by_report_id_order_by_positions_success() {
-        let conn = get_test_db_connection();
-
-        let test_report = insert_test_report(&conn);
-        let (_test_report_sections, test_sections) =
-            insert_test_report_sections_with_report_id(&conn, test_report.report_id);
-
-        let test_results =
-            SectionData::find_by_report_id_ordered_by_positions(&conn, test_report.report_id)
-                .unwrap();
-
-        assert_eq!(test_results.len(), 3);
-        assert_eq!(test_results[0], test_sections[0]);
-        assert_eq!(test_results[1], test_sections[1]);
-        assert_eq!(test_results[2], test_sections[2]);
     }
 
     #[test]

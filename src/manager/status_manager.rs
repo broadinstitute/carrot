@@ -878,6 +878,7 @@ fn get_run_status_for_cromwell_status(
 ) -> Option<RunStatusEnum> {
     if is_test_step {
         match cromwell_status {
+            "submitted" => Some(RunStatusEnum::TestSubmitted),
             "running" => Some(RunStatusEnum::TestRunning),
             "starting" => Some(RunStatusEnum::TestStarting),
             "queuedincromwell" => Some(RunStatusEnum::TestQueuedInCromwell),
@@ -890,6 +891,7 @@ fn get_run_status_for_cromwell_status(
         }
     } else {
         match cromwell_status {
+            "submitted" => Some(RunStatusEnum::TestSubmitted),
             "running" => Some(RunStatusEnum::EvalRunning),
             "starting" => Some(RunStatusEnum::EvalStarting),
             "queuedincromwell" => Some(RunStatusEnum::EvalQueuedInCromwell),
@@ -906,6 +908,7 @@ fn get_run_status_for_cromwell_status(
 /// Returns equivalent BuildStatusEnum for `cromwell_status`
 fn get_build_status_for_cromwell_status(cromwell_status: &str) -> Option<BuildStatusEnum> {
     match cromwell_status {
+        "submitted" => Some(BuildStatusEnum::Submitted),
         "running" => Some(BuildStatusEnum::Running),
         "starting" => Some(BuildStatusEnum::Starting),
         "queuedincromwell" => Some(BuildStatusEnum::QueuedInCromwell),
@@ -920,6 +923,7 @@ fn get_build_status_for_cromwell_status(cromwell_status: &str) -> Option<BuildSt
 /// Returns equivalent ReportStatusEnum for `cromwell_status`
 fn get_report_status_for_cromwell_status(cromwell_status: &str) -> Option<ReportStatusEnum> {
     match cromwell_status {
+        "submitted" => Some(ReportStatusEnum::Submitted),
         "running" => Some(ReportStatusEnum::Running),
         "starting" => Some(ReportStatusEnum::Starting),
         "queuedincromwell" => Some(ReportStatusEnum::QueuedInCromwell),
