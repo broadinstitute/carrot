@@ -24,6 +24,17 @@ struct NewReportIncomplete {
     pub created_by: Option<String>,
 }
 
+/// A set of changes to a report to be received by the update mapping
+///
+/// Differs from the ReportChangeset in the models module in that it excludes the metadata, which,
+/// for now, will be filled with a default value that is compatible with the docker image we're
+/// using for generating reports and will not be changeable
+#[derive(Deserialize, Serialize)]
+struct ReportChangesetIncomplete {
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
 lazy_static! {
     /// The default metadata value to use when creating a report
     static ref DEFAULT_REPORT_METADATA: Value = json!({
@@ -229,7 +240,7 @@ async fn create(
 /// Panics if attempting to connect to the database results in an error
 async fn update(
     id: web::Path<String>,
-    web::Json(report_changes): web::Json<ReportChangeset>,
+    web::Json(report_changes): web::Json<ReportChangesetIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Parse ID into Uuid
@@ -244,6 +255,13 @@ async fn update(
                 detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
+    };
+
+    // Create a ReportChangeset instance with the data from new_report and a default metadata value
+    let report_changes = ReportChangeset {
+        name: report_changes.name,
+        description: report_changes.description,
+        metadata: None,
     };
 
     // Update in new thread
@@ -677,10 +695,9 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let report_change = ReportChangeset {
+        let report_change = ReportChangesetIncomplete {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
-            metadata: Some(json!({"test": "test"})),
         };
 
         let req = test::TestRequest::put()
@@ -701,7 +718,6 @@ mod tests {
                 .expect("Created report missing description"),
             report_change.description.unwrap()
         );
-        assert_eq!(test_report.metadata, report_change.metadata.unwrap());
     }
 
     #[actix_rt::test]
@@ -712,10 +728,9 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let report_change = ReportChangeset {
+        let report_change = ReportChangesetIncomplete {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
-            metadata: None,
         };
 
         let req = test::TestRequest::put()
@@ -743,10 +758,9 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let report_change = ReportChangeset {
+        let report_change = ReportChangesetIncomplete {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
-            metadata: None,
         };
 
         let req = test::TestRequest::put()
@@ -764,40 +778,6 @@ mod tests {
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
         assert_eq!(error_body.detail, "Error while attempting to update report");
-    }
-
-    #[actix_rt::test]
-    async fn update_failure_prohibited() {
-        let pool = get_test_db_pool();
-
-        let test_run_report = insert_test_run_report_non_failed(&pool.get().unwrap());
-
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
-
-        let report_change = ReportChangeset {
-            name: Some(String::from("Kevin's test change")),
-            description: Some(String::from("Kevin's test description2")),
-            metadata: Some(json!({"test": "test"})),
-        };
-
-        let req = test::TestRequest::put()
-            .uri(&format!("/reports/{}", test_run_report.report_id))
-            .set_json(&report_change)
-            .to_request();
-        let resp = test::call_service(&mut app, req).await;
-
-        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
-
-        let result = test::read_body(resp).await;
-
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
-
-        assert_eq!(error_body.title, "Update params not allowed");
-        assert_eq!(error_body.status, 403);
-        assert_eq!(
-            error_body.detail,
-            "Updating metadata is not allowed if there is a run_report tied to this report that is running or has succeeded"
-        );
     }
 
     #[actix_rt::test]
