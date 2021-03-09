@@ -186,7 +186,7 @@ async fn find(
 /// report_section mappings
 ///
 /// This function is called by Actix-Web when a post request is made to the
-/// /reports/{report_id}/sections{section_id} mapping
+/// /reports/{report_id}/sections/{section_id} mapping
 /// It deserializes the request body to a NewReportSectionIncomplete, uses that with the id and
 /// section_id to assemble a NewReportSection, connects to the db via a connection from `pool`,
 /// creates a report_section mapping with the specified parameters, and returns the created
