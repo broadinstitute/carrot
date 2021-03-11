@@ -270,7 +270,7 @@ async fn create(
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
-                detail: "Error while attempting to delete requested report_section mapping from DB".to_string(),
+                detail: "Error while attempting to create requested report_section mapping from DB".to_string(),
             }),
         }
     })
