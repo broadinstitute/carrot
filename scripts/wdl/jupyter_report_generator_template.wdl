@@ -11,6 +11,7 @@ task generate_report_file {
         File notebook_template
 
         String report_name
+        Object run_info
 
 [~task_inputs~]
     }
@@ -19,6 +20,7 @@ task generate_report_file {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
 
         report_name : "The base name to use for the report files, and to include in the metadata section of the report"
+        run_info: "A JSON containing metadata about the run that will be included in the report header"
     }
 
     # Determine the disk size based on the files we're using
@@ -30,6 +32,7 @@ task generate_report_file {
     String nb_name = "report.ipynb"
     String html_out = "report.html"
     String pdf_out = "report.pdf"
+    File run_info_file = write_json(run_info)
 
     command <<<
         set -euxo pipefail
@@ -39,7 +42,7 @@ task generate_report_file {
 
         # Prepare the input file:
         rm -f inputs.config
-        echo '{"metadata":{"report_name":"~{report_name}"},"sections":{' >> inputs.config
+        echo '{"metadata":{"report_name":"~{report_name}", "run_info":"~{run_info_file}"},"sections":{' >> inputs.config
 [~inputs_json~]
         echo '}}' >> inputs.config
 
@@ -83,6 +86,7 @@ workflow generate_report_file_workflow {
         File notebook_template
 
         String report_name
+        Object run_info
 
 [~workflow_inputs~]
     }
@@ -90,12 +94,14 @@ workflow generate_report_file_workflow {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
 
         report_name : "The base name to use for the report files, and to include in the metadata section of the report"
+        run_info: "A JSON containing metadata about the run"
     }
 
     call generate_report_file {
         input:
             notebook_template = notebook_template,
             report_name = report_name,
+            run_info = run_info,
 [~call_inputs~]
     }
 

@@ -40,7 +40,6 @@ pub enum Error {
     Womtool(womtool::Error),
     Cromwell(CromwellRequestError),
     Prohibited(String),
-    Delete(crate::models::run_report::DeleteError),
     Request(test_resource_requests::Error),
 }
 
@@ -58,7 +57,6 @@ impl fmt::Display for Error {
             Error::Womtool(e) => write!(f, "report_builder Error Womtool {}", e),
             Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e),
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
-            Error::Delete(e) => write!(f, "report_builder Error Delete {}", e),
             Error::Request(e) => write!(f, "report_builder Error Request {}", e),
         }
     }
@@ -100,12 +98,6 @@ impl From<CromwellRequestError> for Error {
     }
 }
 
-impl From<crate::models::run_report::DeleteError> for Error {
-    fn from(e: crate::models::run_report::DeleteError) -> Error {
-        Error::Delete(e)
-    }
-}
-
 impl From<test_resource_requests::Error> for Error {
     fn from(e: test_resource_requests::Error) -> Error {
         Error::Request(e)
@@ -135,9 +127,34 @@ lazy_static! {
             "metadata": {},
             "outputs": [],
             "source": [
-                "# Print run name\n",
+                "# Print metadata\n",
                 "from IPython.display import Markdown\n",
-                "Markdown(f\"# {carrot_inputs['metadata']['report_name']}\")"
+                "# Start with report name\n",
+                "md_string = f\"# {carrot_inputs['metadata']['report_name']}\\n\"\n",
+                "# Now run information\n",
+                "run_info = json.load(open(carrot_inputs['metadata']['run_info']))\n",
+                "# Starting with name and id\n",
+                "md_string += f\"## Run: {run_info['name']}\\n### ID: {run_info['run_id']}\\n\"\n",
+                "# Status\n",
+                "md_string += f\"#### Status: {run_info['status']}\\n\"\n",
+                "# Start and end time\n",
+                "md_string += f\"#### Start time: {run_info['created_at']}\\n#### End time: {run_info['finished_at']}\\n\"\n",
+                "# Cromwell ids\n",
+                "md_string += f\"#### Test Cromwell ID: {run_info['test_cromwell_job_id']}\\n\"\n",
+                "md_string += f\"#### Eval Cromwell ID: {run_info['eval_cromwell_job_id']}\\n\"\n",
+                "# Inputs\n",
+                "md_string += \"### Test Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+                "for key, value in run_info['test_input'].items():\n",
+                "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+                "md_string += \"### Eval Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+                "for key, value in run_info['eval_input'].items():\n",
+                "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+                "# Results\n",
+                "md_string += \"### Results:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+                "for key, value in run_info['results'].items():\n",
+                "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+                "# Display the metadata string\n",
+                "Markdown(md_string)"
             ]
         })
     ];
@@ -296,11 +313,13 @@ async fn create_run_report(
     let wdl_file = util::get_temp_file(&generator_wdl)?;
     // Build inputs json sections and section inputs map, titled with a name built from run_name and
     // report_name
+    let serialized_run = serde_json::to_value(&run)?;
     let input_json = create_input_json(
         &format!("{} : {}", &run.name.replace(" ", "_"), &report.name),
         &report_template_location,
         &section_maps,
         &section_inputs_map,
+        &serialized_run,
     );
     // Write it to a file
     let json_file = util::get_temp_file(&input_json.to_string())?;
@@ -606,15 +625,18 @@ fn create_generator_wdl(
 }
 
 /// Creates a returns an input json to send to cromwell along with a report generator wdl using
-/// `report_name` as the title, `notebook_location` as the jupyter notebook file, `sections` to
-/// determine the order of the sections so we can prefix them properly to match the input names
-/// used in `create_generator_wdl`, and `section_inputs_map` to get the actual input values to fill
-/// in the json
+/// `report_name` as the title, `notebook_location` as the jupyter notebook file, `run_info` as a
+/// json containing the metadata for the run (currently this means a RunWithReportData instance as
+/// a Value, but having it be a Value leaves the opportunity to more easily change that in the
+/// future) `sections` to determine the order of the sections so we can prefix them properly to
+/// match the input names used in `create_generator_wdl`, and `section_inputs_map` to get the
+/// actual input values to fill in the json
 fn create_input_json(
     report_name: &str,
     notebook_location: &str,
     section_maps: &Vec<ReportSectionWithContentsData>,
     section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>,
+    run_info: &Value,
 ) -> Value {
     // Map that we'll add all our inputs to
     let mut inputs_map: Map<String, Value> = Map::new();
@@ -626,6 +648,10 @@ fn create_input_json(
     inputs_map.insert(
         format!("{}.report_name", GENERATOR_WORKFLOW_NAME),
         Value::String(String::from(report_name)),
+    );
+    inputs_map.insert(
+        format!("{}.run_info", GENERATOR_WORKFLOW_NAME),
+        run_info.to_owned(),
     );
     // Loop through sections to add section inputs
     for position in 0..section_maps.len() {
@@ -1316,7 +1342,7 @@ mod tests {
         NewReportSection, ReportSectionData, ReportSectionWithContentsData,
     };
     use crate::models::result::{NewResult, ResultData};
-    use crate::models::run::{NewRun, RunData};
+    use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::section::{NewSection, SectionData};
@@ -2670,9 +2696,34 @@ mod tests {
                     "metadata": {},
                     "outputs": [],
                     "source": [
-                        "# Print run name\n",
+                        "# Print metadata\n",
                         "from IPython.display import Markdown\n",
-                        "Markdown(f\"# {carrot_inputs['metadata']['report_name']}\")"
+                        "# Start with report name\n",
+                        "md_string = f\"# {carrot_inputs['metadata']['report_name']}\\n\"\n",
+                        "# Now run information\n",
+                        "run_info = json.load(open(carrot_inputs['metadata']['run_info']))\n",
+                        "# Starting with name and id\n",
+                        "md_string += f\"## Run: {run_info['name']}\\n### ID: {run_info['run_id']}\\n\"\n",
+                        "# Status\n",
+                        "md_string += f\"#### Status: {run_info['status']}\\n\"\n",
+                        "# Start and end time\n",
+                        "md_string += f\"#### Start time: {run_info['created_at']}\\n#### End time: {run_info['finished_at']}\\n\"\n",
+                        "# Cromwell ids\n",
+                        "md_string += f\"#### Test Cromwell ID: {run_info['test_cromwell_job_id']}\\n\"\n",
+                        "md_string += f\"#### Eval Cromwell ID: {run_info['eval_cromwell_job_id']}\\n\"\n",
+                        "# Inputs\n",
+                        "md_string += \"### Test Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+                        "for key, value in run_info['test_input'].items():\n",
+                        "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+                        "md_string += \"### Eval Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+                        "for key, value in run_info['eval_input'].items():\n",
+                        "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+                        "# Results\n",
+                        "md_string += \"### Results:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+                        "for key, value in run_info['results'].items():\n",
+                        "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+                        "# Display the metadata string\n",
+                        "Markdown(md_string)"
                     ]
                 },
                 {
@@ -2988,6 +3039,28 @@ mod tests {
             },
         ];
 
+        // Create a test RunWithResultData we can use
+        let test_run = RunWithResultData {
+            run_id: Uuid::parse_str("3dc682cc-5446-4696-9107-404b3520d2d8").unwrap(),
+            test_id: Uuid::parse_str("701c9e32-1c58-468d-b808-f66daebb5938").unwrap(),
+            name: "Test run name".to_string(),
+            status: RunStatusEnum::Succeeded,
+            test_input: json!({
+                "input1": "val1"
+            }),
+            eval_input: json!({
+                "input2": "val2"
+            }),
+            test_cromwell_job_id: Some("cb9471e1-7871-4a20-8b8f-128e47cd33d3".to_string()),
+            eval_cromwell_job_id: Some("6a023918-b2b4-4f85-a58f-dbf21c61df38".to_string()),
+            created_at: Utc::now().naive_utc(),
+            created_by: Some("kevin@example.com".to_string()),
+            finished_at: Some(Utc::now().naive_utc()),
+            results: Some(json!({
+                "result1": "val1"
+            })),
+        };
+
         let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
         section_inputs_map.insert(String::from("Section 2"), {
             let mut inputs: HashMap<String, ReportInput> = HashMap::new();
@@ -3024,6 +3097,7 @@ mod tests {
             "example.com/test/location",
             &report_sections,
             &section_inputs_map,
+            &serde_json::to_value(&test_run).unwrap(),
         );
 
         let expected_input_json = json!({
@@ -3031,7 +3105,8 @@ mod tests {
             "generate_report_file_workflow.report_name" : "test",
             "generate_report_file_workflow.section0_test_file": "example.com/path/to/file.txt",
             "generate_report_file_workflow.section0_test_string": "hello",
-            "generate_report_file_workflow.section1_number": "3"
+            "generate_report_file_workflow.section1_number": "3",
+            "generate_report_file_workflow.run_info": &serde_json::to_value(&test_run).unwrap()
         });
 
         assert_eq!(result_input_json, expected_input_json);
@@ -3069,6 +3144,27 @@ mod tests {
                 contents: json!({}),
             },
         ];
+        // Create a test RunWithResultData we can use
+        let test_run = RunWithResultData {
+            run_id: Uuid::parse_str("3dc682cc-5446-4696-9107-404b3520d2d8").unwrap(),
+            test_id: Uuid::parse_str("701c9e32-1c58-468d-b808-f66daebb5938").unwrap(),
+            name: "Test run name".to_string(),
+            status: RunStatusEnum::Succeeded,
+            test_input: json!({
+                "input1": "val1"
+            }),
+            eval_input: json!({
+                "input2": "val2"
+            }),
+            test_cromwell_job_id: Some("cb9471e1-7871-4a20-8b8f-128e47cd33d3".to_string()),
+            eval_cromwell_job_id: Some("6a023918-b2b4-4f85-a58f-dbf21c61df38".to_string()),
+            created_at: Utc::now().naive_utc(),
+            created_by: Some("kevin@example.com".to_string()),
+            finished_at: Some(Utc::now().naive_utc()),
+            results: Some(json!({
+                "result1": "val1"
+            })),
+        };
 
         let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
         section_inputs_map.insert(String::from("Section 2"), {
@@ -3106,6 +3202,7 @@ mod tests {
             "example.com/test/location",
             &report_sections,
             &section_inputs_map,
+            &serde_json::to_value(&test_run).unwrap(),
         );
 
         let expected_input_json = json!({
@@ -3113,7 +3210,8 @@ mod tests {
             "generate_report_file_workflow.report_name" : "test",
             "generate_report_file_workflow.section0_test_file": "example.com/path/to/file.txt",
             "generate_report_file_workflow.section0_test_string": "hello",
-            "generate_report_file_workflow.section1_number": "3"
+            "generate_report_file_workflow.section1_number": "3",
+            "generate_report_file_workflow.run_info": &serde_json::to_value(&test_run).unwrap()
         });
 
         assert_eq!(result_input_json, expected_input_json);

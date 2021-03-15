@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::manager::report_builder;
-use crate::models::run_report::{DeleteError, RunReportData, RunReportQuery};
+use crate::models::run_report::{RunReportData, RunReportQuery};
 use crate::routes::error_body::ErrorBody;
 use actix_web::client::Client;
 use actix_web::dev::HttpResponseBuilder;
@@ -312,11 +312,6 @@ async fn create(
                         e
                     ),
                 },
-                report_builder::Error::Delete(e) => ErrorBody {
-                    title: "Delete error".to_string(),
-                    status: 500,
-                    detail: format!("Error while attempting to delete failed run report: {}", e),
-                },
                 report_builder::Error::Request(e) => ErrorBody {
                     title: "Request error".to_string(),
                     status: 500,
@@ -407,16 +402,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
     })
     .map_err(|e| {
         error!("{}", e);
-        println!("{}", e);
         match e {
-            // If no run is found, return a 404
-            BlockingError::Error(DeleteError::Prohibited(_)) => {
-                HttpResponse::Forbidden().json(ErrorBody {
-                    title: "Cannot delete".to_string(),
-                    status: 403,
-                    detail: "Cannot delete a run_report with a non-failed status".to_string(),
-                })
-            }
             // For other errors, return a 500
             _ => HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
@@ -1815,35 +1801,6 @@ mod tests {
         assert_eq!(
             error_body.detail,
             "No run_report found for the specified id"
-        );
-    }
-
-    #[actix_rt::test]
-    async fn delete_failure_not_allowed() {
-        let pool = get_test_db_pool();
-
-        let run_report = insert_test_run_report_not_failed(&pool.get().unwrap());
-
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
-
-        let req = test::TestRequest::delete()
-            .uri(&format!(
-                "/runs/{}/reports/{}",
-                run_report.run_id, run_report.report_id
-            ))
-            .to_request();
-        let resp = test::call_service(&mut app, req).await;
-
-        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
-
-        let report = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
-
-        assert_eq!(error_body.title, "Cannot delete");
-        assert_eq!(error_body.status, 403);
-        assert_eq!(
-            error_body.detail,
-            "Cannot delete a run_report with a non-failed status"
         );
     }
 
