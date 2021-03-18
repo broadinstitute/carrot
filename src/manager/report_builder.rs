@@ -317,6 +317,7 @@ async fn create_run_report(
     let input_json = create_input_json(
         &format!("{} : {}", &run.name.replace(" ", "_"), &report.name),
         &report_template_location,
+        &*config::REPORT_DOCKER_LOCATION,
         &section_maps,
         &section_inputs_map,
         &serialized_run,
@@ -625,15 +626,17 @@ fn create_generator_wdl(
 }
 
 /// Creates a returns an input json to send to cromwell along with a report generator wdl using
-/// `report_name` as the title, `notebook_location` as the jupyter notebook file, `run_info` as a
-/// json containing the metadata for the run (currently this means a RunWithReportData instance as
-/// a Value, but having it be a Value leaves the opportunity to more easily change that in the
-/// future) `sections` to determine the order of the sections so we can prefix them properly to
-/// match the input names used in `create_generator_wdl`, and `section_inputs_map` to get the
-/// actual input values to fill in the json
+/// `report_name` as the title, `notebook_location` as the jupyter notebook file,
+/// `report_docker_location` as the location of the docker image we'll use to generate the report,
+/// `run_info` as a json containing the metadata for the run (currently this means a
+/// RunWithReportData instance as a Value, but having it be a Value leaves the opportunity to more
+/// easily change that in the future) `sections` to determine the order of the sections so we can
+/// prefix them properly to match the input names used in `create_generator_wdl`, and
+/// `section_inputs_map` to get the actual input values to fill in the json
 fn create_input_json(
     report_name: &str,
     notebook_location: &str,
+    report_docker_location: &str,
     section_maps: &Vec<ReportSectionWithContentsData>,
     section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>,
     run_info: &Value,
@@ -652,6 +655,10 @@ fn create_input_json(
     inputs_map.insert(
         format!("{}.run_info", GENERATOR_WORKFLOW_NAME),
         run_info.to_owned(),
+    );
+    inputs_map.insert(
+        format!("{}.report_docker", GENERATOR_WORKFLOW_NAME),
+        Value::String(String::from(report_docker_location)),
     );
     // Loop through sections to add section inputs
     for position in 0..section_maps.len() {
@@ -1360,6 +1367,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs::read_to_string;
     use uuid::Uuid;
+    use std::env;
 
     fn insert_test_report_mapped_to_sections(
         conn: &PgConnection,
@@ -1988,6 +1996,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (run, reports) = insert_data_for_create_run_reports_for_completed_run_success(&conn);
         // Make mockito mappings for the wdls and cromwell
@@ -2064,6 +2075,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
@@ -2123,6 +2137,9 @@ mod tests {
     async fn create_run_report_with_delete_failed_success() {
         let conn = get_test_db_connection();
         let client = Client::default();
+
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
@@ -2185,6 +2202,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         insert_bad_section_for_report(&conn, report_id);
@@ -2233,6 +2253,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_failure_missing_input(&conn);
         // Make mockito mappings for the wdls and cromwell
@@ -2279,6 +2302,9 @@ mod tests {
     async fn create_run_report_failure_missing_result() {
         let conn = get_test_db_connection();
         let client = Client::default();
+
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_failure_missing_result(&conn);
@@ -2327,6 +2353,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
@@ -2368,6 +2397,9 @@ mod tests {
     async fn create_run_report_failure_wdl_download() {
         let conn = get_test_db_connection();
         let client = Client::default();
+
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
@@ -2412,6 +2444,9 @@ mod tests {
     async fn create_run_report_failure_no_run() {
         let conn = get_test_db_connection();
         let client = Client::default();
+
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
@@ -2463,6 +2498,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         // Make mockito mappings for the wdls and cromwell
@@ -2513,6 +2551,9 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
 
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
         insert_test_run_report_nonfailed(&conn, run_id, report_id);
@@ -2560,6 +2601,9 @@ mod tests {
     async fn create_run_report_with_delete_failed_failure_already_exists() {
         let conn = get_test_db_connection();
         let client = Client::default();
+
+        // Set test location for report docker
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
@@ -3095,6 +3139,7 @@ mod tests {
         let result_input_json = create_input_json(
             "test",
             "example.com/test/location",
+            "example.com/test:test",
             &report_sections,
             &section_inputs_map,
             &serde_json::to_value(&test_run).unwrap(),
@@ -3103,6 +3148,7 @@ mod tests {
         let expected_input_json = json!({
             "generate_report_file_workflow.notebook_template": "example.com/test/location",
             "generate_report_file_workflow.report_name" : "test",
+            "generate_report_file_workflow.report_docker" : "example.com/test:test",
             "generate_report_file_workflow.section0_test_file": "example.com/path/to/file.txt",
             "generate_report_file_workflow.section0_test_string": "hello",
             "generate_report_file_workflow.section1_number": "3",
@@ -3200,6 +3246,7 @@ mod tests {
         let result_input_json = create_input_json(
             "test",
             "example.com/test/location",
+            "example.com/test:test",
             &report_sections,
             &section_inputs_map,
             &serde_json::to_value(&test_run).unwrap(),
@@ -3208,6 +3255,7 @@ mod tests {
         let expected_input_json = json!({
             "generate_report_file_workflow.notebook_template": "example.com/test/location",
             "generate_report_file_workflow.report_name" : "test",
+            "generate_report_file_workflow.report_docker" : "example.com/test:test",
             "generate_report_file_workflow.section0_test_file": "example.com/path/to/file.txt",
             "generate_report_file_workflow.section0_test_string": "hello",
             "generate_report_file_workflow.section1_number": "3",

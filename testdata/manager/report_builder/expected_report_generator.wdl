@@ -8,6 +8,8 @@ task generate_report_file {
     }
 
     input {
+        String report_docker
+
         File notebook_template
 
         String report_name
@@ -19,6 +21,8 @@ task generate_report_file {
     }
 
     parameter_meta {
+        report_docker : "A docker image for generating the notebook"
+
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
 
         report_name : "The base name to use for the report files, and to include in the metadata section of the report"
@@ -80,7 +84,7 @@ task generate_report_file {
         bootDiskSizeGb: 10
         preemptible: 0
         maxRetries: 1
-        docker: "us.gcr.io/dsde-methods-carrot/jupyter-vis:test"
+        docker: report_docker
     }
 }
 
@@ -92,6 +96,8 @@ workflow generate_report_file_workflow {
     }
 
     input {
+        String report_docker
+
         File notebook_template
 
         String report_name
@@ -102,6 +108,8 @@ workflow generate_report_file_workflow {
         Float section1_number
     }
     parameter_meta {
+        report_docker : "A docker image for generating the notebook"
+
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
 
         report_name : "The base name to use for the report files, and to include in the metadata section of the report"
@@ -110,6 +118,7 @@ workflow generate_report_file_workflow {
 
     call generate_report_file {
         input:
+            report_docker = report_docker,
             notebook_template = notebook_template,
             report_name = report_name,
             run_info = run_info,

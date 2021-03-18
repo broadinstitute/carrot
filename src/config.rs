@@ -187,6 +187,9 @@ lazy_static! {
     /// GCS directory where we'll put generated report files (in the form bucket-name/my/report/directory)
     pub static ref REPORT_LOCATION: String =
         env::var("REPORT_LOCATION").expect("REPORT_LOCATION environment variable not set");
+    /// Docker repo location of the docker image that will be used to run the report generation WDLs
+    pub static ref REPORT_DOCKER_LOCATION: String = env::var("REPORT_DOCKER_LOCATION")
+        .expect("REPORT_DOCKER_LOCATION environment variable not set");
 }
 
 /// Initializes all the necessary configuration variables
@@ -240,4 +243,5 @@ pub fn initialize() {
 
     // Reporting
     lazy_static::initialize(&REPORT_LOCATION);
+    lazy_static::initialize(&REPORT_DOCKER_LOCATION);
 }
