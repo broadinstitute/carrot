@@ -70,7 +70,7 @@ task generate_report_file {
 
     runtime {
         cpu: 1
-        memory: "64 GiB"
+        memory: "32 GiB"
         disks: "local-disk " + disk_size + " HDD"
         bootDiskSizeGb: 10
         preemptible: 0
