@@ -37,7 +37,6 @@ task generate_report_file {
 
     String nb_name = "report.ipynb"
     String html_out = "report.html"
-    String pdf_out = "report.pdf"
     File run_info_file = write_json(run_info)
 
     command <<<
@@ -66,15 +65,11 @@ task generate_report_file {
 
         # Convert the notebook output we created just above here to the HTML report:
         jupyter nbconvert ~{nb_name} --to html --no-prompt --no-input --debug --ExecutePreprocessor.timeout=7200
-
-        # One more for good measure - make a PDF so we don't need to wait for the browser all the time.
-        jupyter nbconvert ~{nb_name} --to pdf --no-prompt --no-input --debug --ExecutePreprocessor.timeout=7200
     >>>
 
     output {
         File populated_notebook = nb_name
         File html_report = html_out
-        File pdf_report = pdf_out
     }
 
     runtime {
@@ -130,6 +125,5 @@ workflow generate_report_file_workflow {
     output {
         File populated_notebook = generate_report_file.populated_notebook
         File html_report = generate_report_file.html_report
-        File pdf_report = generate_report_file.pdf_report
     }
 }

@@ -811,7 +811,7 @@ fn get_run_report_changeset_from_succeeded_cromwell_metadata(
     let mut run_report_outputs_map: Map<String, Value> = Map::new();
     // Loop through the three outputs we want, get them from `outputs`, and put them in our outputs
     // map
-    for output_key in vec!["populated_notebook", "html_report", "pdf_report"] {
+    for output_key in vec!["populated_notebook", "html_report"] {
         // Get the output from the cromwell outputs
         let output_val = match outputs.get(&format!("generate_report_file_workflow.{}", output_key))
         {
@@ -2213,8 +2213,7 @@ mod tests {
             "status": "Succeeded",
             "outputs": {
                 "generate_report_file_workflow.populated_notebook": "gs://example/example/populated_notebook.ipynb",
-                "generate_report_file_workflow.html_report": "gs://example/example/html_report.html",
-                "generate_report_file_workflow.pdf_report": "gs://example/example/pdf_report.pdf",
+                "generate_report_file_workflow.html_report": "gs://example/example/html_report.html"
             },
             "end": "2020-12-31T11:11:11.0000Z"
         });
@@ -2250,8 +2249,7 @@ mod tests {
             result_run_report.results.unwrap(),
             json!({
                 "populated_notebook": "gs://example/example/populated_notebook.ipynb",
-                "html_report": "gs://example/example/html_report.html",
-                "pdf_report": "gs://example/example/pdf_report.pdf"
+                "html_report": "gs://example/example/html_report.html"
             })
         );
     }
