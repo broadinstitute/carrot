@@ -17,12 +17,11 @@ use uuid::Uuid;
 /// Represents the part of a new template_report mapping that is received as a request body
 ///
 /// The mapping for creating template_report mappings has template_id and report_id as path params
-/// and input_map and created_by are expected as part of the request body.  A NewTemplateReport
-/// cannot be deserialized from the request body, so this is used instead, and then a
-/// NewTemplateReport can be built from the instance of this and the ids from the path
+/// and created_by is expected as part of the request body.  A NewTemplateReport cannot be
+/// deserialized from the request body, so this is used instead, and then a NewTemplateReport can be
+/// built from the instance of this and the ids from the path
 #[derive(Deserialize, Serialize)]
 struct NewTemplateReportIncomplete {
-    pub input_map: Value,
     pub created_by: Option<String>,
 }
 
@@ -231,7 +230,6 @@ async fn create(
     let new_test = NewTemplateReport {
         template_id: id,
         report_id: report_id,
-        input_map: new_test.input_map,
         created_by: new_test.created_by,
     };
 
@@ -387,7 +385,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test":"test"}]}),
+            notebook: json!({"metadata":[{"test":"test"}]}),
+            config: Some(json!({"cpu": "4"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -417,7 +416,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"test":"test"}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -429,7 +427,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test":"test"}]}),
+            notebook: json!({"metadata":[{"test":"test"}]}),
+            config: Some(json!({"memory": "32 GiB"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -665,7 +664,6 @@ mod tests {
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
         let new_template_report = NewTemplateReportIncomplete {
-            input_map: json!({"test":"test"}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

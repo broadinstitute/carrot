@@ -12,61 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-/// A new report to be received by the create mapping
-///
-/// Differs from the NewReport in the models module in that it excludes the metadata, which, for
-/// now, will be filled with a default value that is compatible with the docker image we're using
-/// for generating reports
-#[derive(Deserialize, Serialize)]
-struct NewReportIncomplete {
-    pub name: String,
-    pub description: Option<String>,
-    pub created_by: Option<String>,
-}
-
-/// A set of changes to a report to be received by the update mapping
-///
-/// Differs from the ReportChangeset in the models module in that it excludes the metadata, which,
-/// for now, will be filled with a default value that is compatible with the docker image we're
-/// using for generating reports and will not be changeable
-#[derive(Deserialize, Serialize)]
-struct ReportChangesetIncomplete {
-    pub name: Option<String>,
-    pub description: Option<String>,
-}
-
-lazy_static! {
-    /// The default metadata value to use when creating a report
-    static ref DEFAULT_REPORT_METADATA: Value = json!({
-        "metadata": {
-            "language_info": {
-                "codemirror_mode": {
-                    "name": "ipython",
-                    "version": 3
-                },
-                "file_extension": ".py",
-                "mimetype": "text/x-python",
-                "name": "python",
-                "nbconvert_exporter": "python",
-                "pygments_lexer": "ipython3",
-                "version": "3.8.5-final"
-            },
-            "orig_nbformat": 2,
-            "kernelspec": {
-                "name": "python3",
-                "display_name": "Python 3.8.5 64-bit",
-                "metadata": {
-                    "interpreter": {
-                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                    }
-                }
-            }
-        },
-        "nbformat": 4,
-        "nbformat_minor": 2
-    });
-}
-
 /// Handles requests to /reports/{id} for retrieving report info by report_id
 ///
 /// This function is called by Actix-Web when a get request is made to the /reports/{id} mapping
@@ -192,16 +137,9 @@ async fn find(
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn create(
-    web::Json(new_report): web::Json<NewReportIncomplete>,
+    web::Json(new_report): web::Json<NewReport>,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    // Create a NewReport instance with the data from new_report and a default metadata value
-    let new_report = NewReport {
-        name: new_report.name,
-        description: new_report.description,
-        metadata: DEFAULT_REPORT_METADATA.clone(),
-        created_by: new_report.created_by,
-    };
     // Insert in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -240,7 +178,7 @@ async fn create(
 /// Panics if attempting to connect to the database results in an error
 async fn update(
     id: web::Path<String>,
-    web::Json(report_changes): web::Json<ReportChangesetIncomplete>,
+    web::Json(report_changes): web::Json<ReportChangeset>,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Parse ID into Uuid
@@ -255,13 +193,6 @@ async fn update(
                 detail: "ID must be formatted as a Uuid".to_string(),
             }));
         }
-    };
-
-    // Create a ReportChangeset instance with the data from new_report and a default metadata value
-    let report_changes = ReportChangeset {
-        name: report_changes.name,
-        description: report_changes.description,
-        metadata: None,
     };
 
     // Update in new thread
@@ -286,7 +217,7 @@ async fn update(
                     HttpResponse::Forbidden().json(ErrorBody {
                         title: "Update params not allowed".to_string(),
                         status: 403,
-                        detail: "Updating metadata is not allowed if there is a run_report tied to this report that is running or has succeeded".to_string(),
+                        detail: "Updating notebook or config is not allowed if there is a run_report tied to this report that is running or has succeeded".to_string(),
                     })
                 },
                 _ => {
@@ -417,7 +348,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test1":"test"}]}),
+            notebook: json!({"cells":[{"test1":"test"}]}),
+            config: Some(json!({"cpu":"4"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -478,7 +410,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test2":"test"}]}),
+            notebook: json!({"cells":[{"test2":"test"}]}),
+            config: Some(json!{"memory": "32 GiB"}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -598,7 +531,6 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/reports?name=Gibberish")
-            .param("name", "Gibberish")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -620,9 +552,11 @@ mod tests {
         let pool = get_test_db_pool();
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_report = NewReportIncomplete {
+        let new_report = NewReport {
             name: String::from("Kevin's test"),
             description: Some(String::from("Kevin's test description")),
+            notebook: json!({"cells":[{"test": "test"}]}),
+            config: Some(json!({"cpu": "2"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -650,7 +584,8 @@ mod tests {
                 .expect("Created report missing created_by"),
             new_report.created_by.unwrap()
         );
-        assert_eq!(test_report.metadata, *DEFAULT_REPORT_METADATA);
+        assert_eq!(test_report.notebook, new_report.notebook);
+        assert_eq!(test_report.config, new_report.config);
     }
 
     #[actix_rt::test]
@@ -663,6 +598,8 @@ mod tests {
 
         let new_report = NewReportIncomplete {
             name: report.name.clone(),
+            notebook: json!({"cells":[{"test": "test"}]}),
+            config: Some(json!({"cpu": "2"})),
             description: Some(String::from("Kevin's test description")),
             created_by: Some(String::from("Kevin@example.com")),
         };
@@ -695,9 +632,11 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let report_change = ReportChangesetIncomplete {
+        let report_change = ReportChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            notebook: Some(json!({"cells":[{"test": "test"}]})),
+            config: Some(json!({"cpu": "2"})),
         };
 
         let req = test::TestRequest::put()
@@ -718,6 +657,8 @@ mod tests {
                 .expect("Created report missing description"),
             report_change.description.unwrap()
         );
+        assert_eq!(test_report.notebook, report_change.notebook.unwrap());
+        assert_eq!(test_report.config, report_change.config);
     }
 
     #[actix_rt::test]
@@ -728,9 +669,11 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let report_change = ReportChangesetIncomplete {
+        let report_change = ReportChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            notebook: Some(json!({"cells":[{"test": "test"}]})),
+            config: Some(json!({"cpu": "2"})),
         };
 
         let req = test::TestRequest::put()
@@ -761,6 +704,8 @@ mod tests {
         let report_change = ReportChangesetIncomplete {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            notebook: Some(json!({"cells":[{"test": "test"}]})),
+            config: Some(json!({"cpu": "2"})),
         };
 
         let req = test::TestRequest::put()

@@ -29,7 +29,6 @@ use uuid::Uuid;
 pub struct TemplateReportData {
     pub template_id: Uuid,
     pub report_id: Uuid,
-    pub input_map: Value,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
 }
@@ -43,7 +42,6 @@ pub struct TemplateReportData {
 pub struct TemplateReportQuery {
     pub template_id: Option<Uuid>,
     pub report_id: Option<Uuid>,
-    pub input_map: Option<Value>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -54,14 +52,13 @@ pub struct TemplateReportQuery {
 
 /// A new template_report mapping to be inserted into the DB
 ///
-/// template_id, report_id, and input_map are all required fields, but created_by is not
+/// template_id and report_id are required fields, but created_by is not
 /// created_at is populated automatically by the DB
 #[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "template_report"]
 pub struct NewTemplateReport {
     pub template_id: Uuid,
     pub report_id: Uuid,
-    pub input_map: Value,
     pub created_by: Option<String>,
 }
 
@@ -131,9 +128,6 @@ impl TemplateReportData {
         if let Some(param) = params.report_id {
             query = query.filter(report_id.eq(param));
         }
-        if let Some(param) = params.input_map {
-            query = query.filter(input_map.eq(param));
-        }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
         }
@@ -161,13 +155,6 @@ impl TemplateReportData {
                             query = query.then_order_by(report_id.asc());
                         } else {
                             query = query.then_order_by(report_id.desc());
-                        }
-                    }
-                    "input_map" => {
-                        if sort_clause.ascending {
-                            query = query.then_order_by(input_map.asc());
-                        } else {
-                            query = query.then_order_by(input_map.desc());
                         }
                     }
                     "created_at" => {
@@ -229,7 +216,6 @@ impl TemplateReportData {
     /// Returns a result containing either the retrieved template_report mapping as a
     /// TemplateReportData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
-    #[allow(dead_code)]
     pub fn find_by_test_and_report(
         conn: &PgConnection,
         query_test_id: Uuid,
@@ -469,7 +455,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"section4":{"input1":"value1"}}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -494,7 +479,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"section3":{"input1":"value1"}}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -515,7 +499,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"section2":{"input1":"value1"}}),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -538,7 +521,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
-            input_map: json!({"section1":{"input1":"value1"}}),
             created_by: Some(String::from("Kelvin@example.com")),
         };
 
@@ -749,7 +731,6 @@ mod tests {
         let test_query = TemplateReportQuery {
             template_id: Some(test_template_reports[2].template_id),
             report_id: None,
-            input_map: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -774,7 +755,6 @@ mod tests {
         let test_query = TemplateReportQuery {
             template_id: None,
             report_id: Some(test_template_reports[1].report_id),
-            input_map: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -791,31 +771,6 @@ mod tests {
     }
 
     #[test]
-    fn find_with_input_map() {
-        let conn = get_test_db_connection();
-
-        let test_template_reports = insert_test_template_reports(&conn);
-
-        let test_query = TemplateReportQuery {
-            template_id: None,
-            report_id: None,
-            input_map: Some(test_template_reports[2].input_map.clone()),
-            created_before: None,
-            created_after: None,
-            created_by: None,
-            sort: None,
-            limit: None,
-            offset: None,
-        };
-
-        let found_template_reports =
-            TemplateReportData::find(&conn, test_query).expect("Failed to find template_reports");
-
-        assert_eq!(found_template_reports.len(), 1);
-        assert_eq!(found_template_reports[0], test_template_reports[2]);
-    }
-
-    #[test]
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
 
@@ -824,7 +779,6 @@ mod tests {
         let test_query = TemplateReportQuery {
             template_id: None,
             report_id: None,
-            input_map: None,
             created_before: None,
             created_after: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -842,7 +796,6 @@ mod tests {
         let test_query = TemplateReportQuery {
             template_id: None,
             report_id: None,
-            input_map: None,
             created_before: None,
             created_after: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -867,7 +820,6 @@ mod tests {
         let test_query = TemplateReportQuery {
             template_id: None,
             report_id: None,
-            input_map: None,
             created_before: None,
             created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_by: None,
@@ -884,7 +836,6 @@ mod tests {
         let test_query = TemplateReportQuery {
             template_id: None,
             report_id: None,
-            input_map: None,
             created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_after: None,
             created_by: None,
@@ -924,7 +875,6 @@ mod tests {
         let copy_template_report = NewTemplateReport {
             template_id: test_template_report.template_id,
             report_id: test_template_report.report_id,
-            input_map: json!({"test12":"test"}),
             created_by: Some(String::from("Kevin2@example.com")),
         };
 

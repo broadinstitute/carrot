@@ -8,46 +8,32 @@ task generate_report_file {
     }
 
     input {
-        String report_docker
+        # Runtime params
+        String cpu
+        String memory
+        String disks
+        String docker
+        String maxRetries
+        String continueOnReturnCode
+        String failOnStderr
+        String preemptible
+        String bootDiskSizeGb
 
         File notebook_template
-
-        String report_name
-        Object run_info
-
-[~task_inputs~]
     }
 
     parameter_meta {
-        report_docker : "A docker image for generating the notebook"
-
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
-
-        report_name : "The base name to use for the report files, and to include in the metadata section of the report"
-        run_info: "A JSON containing metadata about the run that will be included in the report header"
     }
-
-    # Determine the disk size based on the files we're using
-    Int disk_size = 20 + 8*ceil((
-            size(notebook_template, "GB") +
-[~input_sizes~]
-        ))
 
     String nb_name = "report.ipynb"
     String html_out = "report.html"
-    File run_info_file = write_json(run_info)
 
     command <<<
         set -euxo pipefail
 
         # Copy the notebook template to our current folder:
         cp "~{notebook_template}" ~{nb_name}
-
-        # Prepare the input file:
-        rm -f inputs.config
-        echo '{"metadata":{"report_name":"~{report_name}", "run_info":"~{run_info_file}"},"sections":{' >> inputs.config
-[~inputs_json~]
-        echo '}}' >> inputs.config
 
         # Do the conversion:
 
@@ -64,13 +50,15 @@ task generate_report_file {
     }
 
     runtime {
-        cpu: 1
-        memory: "32 GiB"
-        disks: "local-disk " + disk_size + " HDD"
-        bootDiskSizeGb: 10
-        preemptible: 0
-        maxRetries: 1
-        docker: report_docker
+        cpu: cpu
+        memory: memory
+        disks: disks
+        docker: docker
+        maxRetries: maxRetries
+        continueOnReturnCode: continueOnReturnCode
+        failOnStderr: failOnStderr
+        preemptible: preemptible
+        bootDiskSizeGb: bootDiskSizeGb
     }
 }
 
@@ -82,34 +70,39 @@ workflow generate_report_file_workflow {
     }
 
     input {
-        String report_docker
+        # Runtime params
+        String cpu = "1"
+        String memory = "32 GiB"
+        String disks = "local-disk 10 SSD"
+        String docker
+        String maxRetries = "1"
+        String continueOnReturnCode = "0"
+        String failOnStderr = "false"
+        String preemptible = "0"
+        String bootDiskSizeGb = "10"
 
         File notebook_template
-
-        String report_name
-        Object run_info
-
-[~workflow_inputs~]
     }
     parameter_meta {
-        report_docker : "A docker image for generating the notebook"
-
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
-
-        report_name : "The base name to use for the report files, and to include in the metadata section of the report"
-        run_info: "A JSON containing metadata about the run"
     }
 
     call generate_report_file {
         input:
-            report_docker = report_docker,
+            cpu = cpu,
+            memory = memory,
+            disks = disks,
+            docker = docker,
+            maxRetries = maxRetries,
+            continueOnReturnCode = continueOnReturnCode,
+            failOnStderr = failOnStderr,
+            preemptible = preemptible,
+            bootDiskSizeGb = bootDiskSizeGb,
             notebook_template = notebook_template,
-            report_name = report_name,
-            run_info = run_info,
-[~call_inputs~]
     }
 
     output {
+        File empty_notebook = notebook_template
         File populated_notebook = generate_report_file.populated_notebook
         File html_report = generate_report_file.html_report
     }

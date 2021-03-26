@@ -98,11 +98,11 @@ fn initialize_storage_hub() -> StorageHub {
     )
 }
 
-/// Retrieves the data the specified gs `address` as a String
+/// Retrieves the media at the specified gs `address` as a String
 ///
 /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
 /// Storage JSON API, specifically to retrieve the file contents as a String
-pub fn retrieve_object_with_gs_uri(address: &str) -> Result<String, Error> {
+pub fn retrieve_object_media_with_gs_uri(address: &str) -> Result<String, Error> {
     // Parse address to get bucket and object name
     let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
     // Percent encode the object name because the Google Cloud Storage JSON API, which the
@@ -122,6 +122,29 @@ pub fn retrieve_object_with_gs_uri(address: &str) -> Result<String, Error> {
     response.read_to_string(&mut response_body)?;
     // Return the response body as a string
     Ok(response_body)
+}
+
+/// Retrieves the gcs object at the specified gs `address`
+///
+/// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
+/// Storage JSON API, specifically to retrieve the google storage object (the metadata, not the
+/// actual file)
+pub fn retrieve_object_with_gs_uri(address: &str) -> Result<Object, Error> {
+    // Parse address to get bucket and object name
+    let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
+    // Percent encode the object name because the Google Cloud Storage JSON API, which the
+    // google_storage1 crate uses, requires that (for some reason)
+    let object_name =
+        percent_encoding::utf8_percent_encode(&object_name, GCLOUD_ENCODING_SET).to_string();
+    // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
+    let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
+    // Request the object from its gcloud location
+    let (_, gcs_object) = borrowed_storage_hub
+        .objects()
+        .get(&bucket_name, &object_name)
+        .doit()?;
+    // Return the object
+    Ok(gcs_object)
 }
 
 /// Uploads `file` to the specified gs `address` with the name `name`
@@ -175,7 +198,7 @@ fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Er
 #[cfg(test)]
 mod tests {
     use crate::storage::gcloud_storage::{
-        initialize_storage_hub, parse_bucket_and_object_name, retrieve_object_with_gs_uri,
+        initialize_storage_hub, parse_bucket_and_object_name, retrieve_object_media_with_gs_uri,
         upload_file_to_gs_uri, Error,
     };
     use crate::unit_test_util;

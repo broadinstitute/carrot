@@ -105,59 +105,54 @@ impl From<test_resource_requests::Error> for Error {
 }
 
 lazy_static! {
-    /// The cells that will go at the top of the cells array for every generated report
-    static ref DEFAULT_HEADER_CELLS: Vec<Value> = vec![
-        json!({
-            "cell_type": "code",
-            "execution_count": null,
-            "metadata": {},
-            "outputs": [],
-            "source": [
-                "import json\n",
-                "\n",
-                "# Load inputs from input file\n",
-                "input_file = open('inputs.config')\n",
-                "carrot_inputs = json.load(input_file)\n",
-                "input_file.close()"
-            ]
-        }),
-        json!({
-            "cell_type": "code",
-            "execution_count": null,
-            "metadata": {},
-            "outputs": [],
-            "source": [
-                "# Print metadata\n",
-                "from IPython.display import Markdown\n",
-                "# Start with report name\n",
-                "md_string = f\"# {carrot_inputs['metadata']['report_name']}\\n\"\n",
-                "# Now run information\n",
-                "run_info = json.load(open(carrot_inputs['metadata']['run_info']))\n",
-                "# Starting with name and id\n",
-                "md_string += f\"## Run: {run_info['name']}\\n### ID: {run_info['run_id']}\\n\"\n",
-                "# Status\n",
-                "md_string += f\"#### Status: {run_info['status']}\\n\"\n",
-                "# Start and end time\n",
-                "md_string += f\"#### Start time: {run_info['created_at']}\\n#### End time: {run_info['finished_at']}\\n\"\n",
-                "# Cromwell ids\n",
-                "md_string += f\"#### Test Cromwell ID: {run_info['test_cromwell_job_id']}\\n\"\n",
-                "md_string += f\"#### Eval Cromwell ID: {run_info['eval_cromwell_job_id']}\\n\"\n",
-                "# Inputs\n",
-                "md_string += \"### Test Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
-                "for key, value in run_info['test_input'].items():\n",
-                "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
-                "md_string += \"### Eval Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
-                "for key, value in run_info['eval_input'].items():\n",
-                "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
-                "# Results\n",
-                "md_string += \"### Results:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
-                "for key, value in run_info['results'].items():\n",
-                "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
-                "# Display the metadata string\n",
-                "Markdown(md_string)"
-            ]
-        })
-    ];
+    /// A cell for displaying run metadata at the top of a report
+    static ref RUN_METADATA_CELL: Value = json!({
+        "cell_type": "code",
+        "execution_count": null,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Print metadata\n",
+            "from IPython.display import Markdown\n",
+            "# Start with name and id\n",
+            "md_string = f\"# {carrot_run_data['name']}\\n### ID: {carrot_run_data['run_id']}\\n\"\n",
+            "# Status\n",
+            "md_string += f\"#### Status: {carrot_run_data['status']}\\n\"\n",
+            "# Start and end time\n",
+            "md_string += f\"#### Start time: {carrot_run_data['created_at']}\\n#### End time: {carrot_run_data['finished_at']}\\n\"\n",
+            "# Cromwell ids\n",
+            "md_string += f\"#### Test Cromwell ID: {carrot_run_data['test_cromwell_job_id']}\\n\"\n",
+            "md_string += f\"#### Eval Cromwell ID: {carrot_run_data['eval_cromwell_job_id']}\\n\"\n",
+            "# Display the metadata string\n",
+            "Markdown(md_string)"
+        ]
+    });
+
+    /// A cell for displaying run inputs and results at the bottom of a report
+    static ref RUN_DATA_CELL: Value = json!({
+        "cell_type": "code",
+        "execution_count": null,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Print metadata\n",
+            "from IPython.display import Markdown\n",
+            "# Display inputs and results for reference\n",
+            "# Inputs\n",
+            "md_string = \"### Test Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+            "for key, value in carrot_run_data['test_input'].items():\n",
+            "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+            "md_string += \"### Eval Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+            "for key, value in carrot_run_data['eval_input'].items():\n",
+            "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+            "# Results\n",
+            "md_string += \"### Results:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
+            "for key, value in carrot_run_data['results'].items():\n",
+            "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
+            "# Display the metadata string\n",
+            "Markdown(md_string)"
+        ]
+    });
 }
 
 /// The name of the workflow in the jupyter_report_generator_template.wdl file
@@ -172,7 +167,7 @@ pub async fn create_run_reports_for_completed_run(
 ) -> Result<Vec<RunReportData>, Error> {
     // Keep track of the run reports we create so we can return them
     let mut run_reports: Vec<RunReportData> = Vec::new();
-    // Get template so we can get wdls and template_reports
+    // Get template so we can get template_reports
     let template = TemplateData::find_by_test(conn, run.test_id)?;
     // Get template_reports for reports mapped to the template for `run` so we have the report_ids
     let template_reports = TemplateReportData::find(
@@ -191,11 +186,6 @@ pub async fn create_run_reports_for_completed_run(
     )?;
     // If there are reports to generate, generate them
     if template_reports.len() > 0 {
-        // Retrieve the wdls from where they're stored
-        let test_wdl =
-            test_resource_requests::get_resource_as_string(client, &template.test_wdl).await?;
-        let eval_wdl =
-            test_resource_requests::get_resource_as_string(client, &template.eval_wdl).await?;
 
         // Loop through the mappings and create a report for each
         for mapping in template_reports {
@@ -208,10 +198,7 @@ pub async fn create_run_reports_for_completed_run(
                     conn,
                     client,
                     run.run_id,
-                    &template,
                     &mapping,
-                    &test_wdl,
-                    &eval_wdl,
                     &run.created_by,
                 )
                 .await?,
@@ -238,25 +225,17 @@ pub async fn create_run_report_from_run_id_and_report_id(
 ) -> Result<RunReportData, Error> {
     // Check if we already have a run report for this run and report
     check_for_existing_run_report(conn, run_id, report_id, delete_failed)?;
-    // Get template so we can get wdls and template_reports
+    // Get template so we can get template_reports
     let template = TemplateData::find_by_run(conn, run_id)?;
     // Get template report
     let template_report =
         TemplateReportData::find_by_template_and_report(conn, template.template_id, report_id)?;
-    // Retrieve the wdls from where they're stored
-    let test_wdl =
-        test_resource_requests::get_resource_as_string(client, &template.test_wdl).await?;
-    let eval_wdl =
-        test_resource_requests::get_resource_as_string(client, &template.eval_wdl).await?;
     // Create the run report
     create_run_report(
         conn,
         client,
         run_id,
-        &template,
         &template_report,
-        &test_wdl,
-        &eval_wdl,
         created_by,
     )
     .await
@@ -270,10 +249,7 @@ async fn create_run_report(
     conn: &PgConnection,
     client: &Client,
     run_id: Uuid,
-    template: &TemplateData,
     template_report: &TemplateReportData,
-    test_wdl: &str,
-    eval_wdl: &str,
     created_by: &Option<String>,
 ) -> Result<RunReportData, Error> {
     // Retrieve run and report
@@ -294,10 +270,9 @@ async fn create_run_report(
         conn,
         report.report_id,
     )?;
-    // Assemble list of inputs with types and values
-    let section_inputs_map =
-        input_map::build_section_inputs_map(conn, input_map, &template, test_wdl, eval_wdl, &run)
-            .await?;
+    // Assemble map of sections to inputs with values
+    let section_inputs_map: HashMap<String, HashMap<String, String>> =
+        input_map::build_section_inputs_map(input_map, &run).await?;
     // Assemble the report and its sections into a complete Jupyter Notebook json
     let report_json = create_report_template(&report, &section_maps, &section_inputs_map)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
@@ -307,8 +282,6 @@ async fn create_run_report(
     // mock up the google api with the google_storage1 library
     #[cfg(test)]
     let report_template_location = String::from("example.com/report/template/location.ipynb");
-    // Create WDL from default WDL template
-    let generator_wdl = create_generator_wdl(&section_maps, &section_inputs_map);
     // Write it to a file
     let wdl_file = util::get_temp_file(&generator_wdl)?;
     // Build inputs json sections and section inputs map, titled with a name built from run_name and
@@ -377,7 +350,7 @@ fn check_for_existing_run_report(
 fn create_report_template(
     report: &ReportData,
     section_maps: &Vec<ReportSectionWithContentsData>,
-    section_inputs: &HashMap<String, HashMap<String, ReportInput>>,
+    section_inputs: &HashMap<String, HashMap<String, String>>,
 ) -> Result<Value, Error> {
     // Build a cells array for the notebook from sections_contents, starting with the default header
     // cells
@@ -510,121 +483,6 @@ fn upload_report_template(
     )?)
 }
 
-/// Generates a filled wdl that will run the jupyter notebook to generate reports.  The WDL fills in
-/// the placeholder values in the jupyter_report_generator_template.wdl file
-fn create_generator_wdl(
-    section_maps: &Vec<ReportSectionWithContentsData>,
-    section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>,
-) -> String {
-    // Load the wdl template as part of the build so it will be included as a static string in the
-    // carrot application binary
-    let wdl_template = include_str!("../../scripts/wdl/jupyter_report_generator_template.wdl");
-    // There are five placeholders that need to be filled in within the wdl template:
-    // 1. [~task_inputs~] - the inputs to the jupyter notebook, formatted for the input block for
-    //    the wdl task that runs the notebook
-    // 2. [~input_sizes~] - a series of calls to the wdl `size` function to get the size of each
-    //    File input so we can size the disk properly within the wdl task runtime section
-    // 3. [~inputs_json~] - a series of echo commands to write the input json which will be read by
-    //    the jupyter notebook (writing this as echo commands within the command block is necessary
-    //     so we can get the localized filenames of any File inputs, and using multiple echo lines
-    //     is a measure to avoid exceeding the bash command length limit)
-    // 4. [~workflow_inputs~] - the same as [~task_inputs~], but in the workflow input block
-    // 5. [~call_inputs~] - the inputs to the notebook, formatted for the input section of the call
-    //    block
-
-    // We'll assemble lists of lines/expressions for each input for each of the placeholders before
-    // joining them together and filling them in in the template
-    let mut workflow_inputs_lines: Vec<String> = Vec::new();
-    let mut input_sizes_lines: Vec<String> = Vec::new();
-    let mut call_inputs_lines: Vec<String> = Vec::new();
-    let mut inputs_json_lines: Vec<String> = Vec::new();
-    // Loop through each section and generate the appropriate lines of code for each input for each
-    // placeholder
-    for position in 0..section_maps.len() {
-        // Get name and inputs for this section (continue if there are no inputs for this section)
-        let section_name = &section_maps[position].name;
-        let section_inputs = match section_inputs_map.get(section_name) {
-            Some(inputs) => inputs,
-            None => continue,
-        };
-        // If this is a test, we convert section_inputs into a BTreeMap, because we can iterate over
-        // the inputs in a BTreeMap in sorted order, which is necessary for doing a string equality
-        // comparison between the generated wdl and our expected wdl
-        #[cfg(test)]
-        let section_inputs: BTreeMap<&String, &ReportInput> = {
-            let mut btree_map: BTreeMap<&String, &ReportInput> = BTreeMap::new();
-            for (key, value) in section_inputs {
-                btree_map.insert(key, value);
-            }
-            btree_map
-        };
-        // If there are already lines in inputs_json_lines, then we need to add a comma to separate
-        // sections within the json (I'm open to the idea that there's a cleaner way to do this)
-        if !inputs_json_lines.is_empty() {
-            inputs_json_lines.push(String::from("        echo ',' >> inputs.config"));
-        }
-        // Add a line to inputs_json_lines for the start of the section
-        inputs_json_lines.push(format!(
-            "        echo '\"{}\":{{' >> inputs.config",
-            section_name
-        ));
-
-        // Loop through the inputs
-        let mut remaining_inputs = section_inputs.len();
-        for (input_name, report_input) in section_inputs {
-            remaining_inputs -= 1;
-            // Make a version of the input name that is prefixed with position so we can avoid the
-            // problem of having multiple inputs with the same name
-            let wdl_input_name = get_section_wdl_input_name(position, input_name);
-            // [~task_inputs~] and [~workflow_inputs]
-            workflow_inputs_lines.push(format!(
-                "        {} {}",
-                report_input.input_type, wdl_input_name
-            ));
-            // [~input_sizes~]
-            // We only need one if this input is a file
-            if report_input.input_type == "File" {
-                input_sizes_lines.push(format!("            size({}, \"GB\")", wdl_input_name));
-            }
-            // [~inputs_json~]
-            // Include a comma if there's still more inputs after this one
-            if remaining_inputs > 0 {
-                inputs_json_lines.push(format!(
-                    "        echo '\"{}\":\"~{{{}}}\",' >> inputs.config",
-                    input_name, wdl_input_name
-                ));
-            } else {
-                inputs_json_lines.push(format!(
-                    "        echo '\"{}\":\"~{{{}}}\"' >> inputs.config",
-                    input_name, wdl_input_name
-                ));
-            }
-            // [~call_inputs~]
-            call_inputs_lines.push(format!(
-                "            {} = {}",
-                wdl_input_name, wdl_input_name
-            ));
-        }
-        // Close the section in the json
-        inputs_json_lines.push(String::from("        echo '}' >> inputs.config"));
-    }
-    // Join the elements in each placeholder list into a string for each placeholder
-    let workflow_inputs = workflow_inputs_lines.join("\n");
-    let input_sizes = input_sizes_lines.join(" +\n");
-    let call_inputs = call_inputs_lines.join(",\n");
-    let inputs_json = inputs_json_lines.join("\n");
-
-    // Fill in each of the placeholders
-    let mut filled_wdl = String::from(wdl_template);
-    filled_wdl = filled_wdl.replace("[~task_inputs~]", &workflow_inputs);
-    filled_wdl = filled_wdl.replace("[~workflow_inputs~]", &workflow_inputs);
-    filled_wdl = filled_wdl.replace("[~input_sizes~]", &input_sizes);
-    filled_wdl = filled_wdl.replace("[~call_inputs~]", &call_inputs);
-    filled_wdl = filled_wdl.replace("[~inputs_json~]", &inputs_json);
-
-    filled_wdl
-}
-
 /// Creates a returns an input json to send to cromwell along with a report generator wdl using
 /// `report_name` as the title, `notebook_location` as the jupyter notebook file,
 /// `report_docker_location` as the location of the docker image we'll use to generate the report,
@@ -704,39 +562,19 @@ mod input_map {
     use std::collections::HashMap;
     use uuid::Uuid;
 
-    /// Defines an input to a report, including its value, and type (the type it would have in a
-    /// wdl), to be used for filling in report templates
-    #[derive(Debug, PartialEq)]
-    pub(super) struct ReportInput {
-        pub value: String,
-        pub input_type: String,
-    }
-
     /// Uses `input_map`, the WDLs and result definitions for `template`, and the results in `run`
     /// to build a return a map of inputs, divided up by section, with their names, values, and
     /// types
     ///
     /// Returns a map of sections to maps of their inputs, or an error if something goes wrong
     pub(super) async fn build_section_inputs_map(
-        conn: &PgConnection,
         input_map: &Map<String, Value>,
-        template: &TemplateData,
-        test_wdl: &str,
-        eval_wdl: &str,
         run: &RunWithResultData,
-    ) -> Result<HashMap<String, HashMap<String, ReportInput>>, Error> {
+    ) -> Result<HashMap<String, HashMap<String, String>>, Error> {
         // Empty map that will eventually contain all our inputs
-        let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
-        // Parse input types from WDLs
-        let test_wdl_input_types: HashMap<String, String> =
-            womtool::get_wdl_inputs_with_simple_types(test_wdl)?;
-        let eval_wdl_input_types: HashMap<String, String> =
-            womtool::get_wdl_inputs_with_simple_types(eval_wdl)?;
+        let mut section_inputs_map: HashMap<String, HashMap<String, String>> = HashMap::new();
         // Get the test and eval inputs from `run` as maps so we can work with them more easily
         let (run_test_input, run_eval_input, run_result_map) = get_run_input_and_result_maps(&run)?;
-        // Retrieve results for the template so we can get the types of results (in a hashmap for
-        // quicker reference later
-        let results_with_types = get_result_types_map_for_template(conn, template.template_id)?;
         // Loop through the sections in input_map and build input lists for each
         for section_name in input_map.keys() {
             // Create a hashmap for inputs for this section
@@ -757,43 +595,35 @@ mod input_map {
                         return Err(Error::Parse(err_msg));
                     }
                 };
-                // If it's a test_input, we'll get the value from the run's test_inputs and the
-                // type from the test wdl
+                // If it's a test_input, we'll get the value from the run's test_inputs
                 if input_value.starts_with("test_input:") {
                     // Parse and extract the input indicated by input_value
-                    let report_input = get_report_input_from_input(
+                    let report_input = get_report_input_from_input_or_results(
                         input_value,
                         &run_test_input,
-                        &test_wdl_input_types,
-                        &template.test_wdl,
-                        "test",
+                        "test_input",
                     )?;
                     // Add it to the list of inputs for this section
                     section_inputs.insert(input_name.clone(), report_input);
                 }
-                // If it's an eval_input, we'll get the value from the run's eval_inputs and the
-                // type from the eval wdl
+                // If it's an eval_input, we'll get the value from the run's eval_inputs
                 else if input_value.starts_with("eval_input:") {
                     // Parse and extract the input indicated by input_value
-                    let report_input = get_report_input_from_input(
+                    let report_input = get_report_input_from_input_or_results(
                         input_value,
                         &run_eval_input,
-                        &eval_wdl_input_types,
-                        &template.eval_wdl,
-                        "eval",
+                        "eval_input",
                     )?;
                     // Add it to the list of inputs for this section
                     section_inputs.insert(input_name.clone(), report_input);
                 }
-                // If it's a result, we'll get the value from run's results and the type from the
-                // result type map
+                // If it's a result, we'll get the value from run's results
                 else if input_value.starts_with("result:") {
                     // Parse and extract the input indicated by input_value
-                    let report_input = get_report_input_from_results(
+                    let report_input = get_report_input_from_input_or_results(
                         input_value,
                         &run_result_map,
-                        &results_with_types,
-                        &run.results,
+                        "result"
                     )?;
                     // Add it to the list of inputs for this section
                     section_inputs.insert(input_name.clone(), report_input);
@@ -802,10 +632,7 @@ mod input_map {
                 else {
                     section_inputs.insert(
                         input_name.clone(),
-                        ReportInput {
-                            value: String::from(input_value),
-                            input_type: String::from("String"),
-                        },
+                        String::from(input_value),
                     );
                 }
             }
@@ -859,23 +686,6 @@ mod input_map {
         };
 
         Ok((run_test_input, run_eval_input, run_results))
-    }
-
-    /// Gets a map of result names to their WDL types for the template specified by `template_id`
-    fn get_result_types_map_for_template(
-        conn: &PgConnection,
-        template_id: Uuid,
-    ) -> Result<HashMap<String, &str>, diesel::result::Error> {
-        let mut results: HashMap<String, &str> = HashMap::new();
-        for result in ResultData::find_for_template(conn, template_id)? {
-            // Make sure to convert the type for this result to its equivalent WDL type, since
-            // that's what we'll actually be using
-            results.insert(
-                result.name,
-                convert_result_type_to_wdl_type(&result.result_type),
-            );
-        }
-        Ok(results)
     }
 
     /// Gets the value for `key` from `input_map` as a String, or returns an error with `context`
@@ -935,84 +745,22 @@ mod input_map {
         }
     }
 
-    /// Builds a ReportInput by parsing `input_value`, extracting the indicated value from
-    /// `test_input`, and getting the type from `input_types`.  `context` corresponds to where the
-    /// input is from (either test or eval) and `wdl_location` is included if necessary in the error
-    /// message if the input is not present in the wdl
-    fn get_report_input_from_input(
+    /// Parses `input_value`,  and extracts and returns the indicated value from `value_map`.
+    /// `context` corresponds to where the input is from (either test_input, eval_input, or result)
+    fn get_report_input_from_input_or_results(
         input_value: &str,
-        run_input: &Map<String, Value>,
-        input_types: &HashMap<String, String>,
-        wdl_location: &str,
+        value_map: &Map<String, Value>,
         context: &str,
-    ) -> Result<ReportInput, Error> {
+    ) -> Result<String, Error> {
         // Parse the value to get the actual name of the input we want
-        let input_value_parsed = input_value.trim_start_matches(&format!("{}_input:", context));
+        let input_value_parsed = input_value.trim_start_matches(&format!("{}:", context));
         // Get the actual value from the run's test_input
         let actual_input_value = get_value_from_map_as_string(
-            run_input,
+            value_map,
             input_value_parsed,
-            &format!("{}_input", context),
+            context,
         )?;
-        // Get the type from the test wdl
-        let input_type = match input_types.get(input_value_parsed) {
-            Some(input_type) => input_type.clone(),
-            None => {
-                let err_msg = format!(
-                    "{} WDL {} does not contain an input called {}",
-                    context, wdl_location, input_value_parsed
-                );
-                error!("{}", err_msg);
-                return Err(Error::Inputs(err_msg));
-            }
-        };
-        // Add it to the list of inputs for this section
-        Ok(ReportInput {
-            value: actual_input_value,
-            input_type,
-        })
-    }
-
-    /// Builds a ReportInputs by parsing `input_value`, extracting the indicated value from
-    /// `run_result_map`, and getting the type from `results_with_types`. `run_results` is included
-    /// in the error message if results do not contain the specified value
-    fn get_report_input_from_results(
-        input_value: &str,
-        run_result_map: &Map<String, Value>,
-        results_with_types: &HashMap<String, &str>,
-        run_results: &Option<Value>,
-    ) -> Result<ReportInput, Error> {
-        // Parse the value to get the name of the result
-        let input_value_parsed = input_value.trim_start_matches("result:");
-        // Get result value from results map
-        let actual_input_value =
-            get_value_from_map_as_string(&run_result_map, input_value_parsed, "results")?;
-        // Get the type from the result type map
-        let input_type = match results_with_types.get(input_value_parsed) {
-            Some(input_type) => String::from(*input_type),
-            None => {
-                let err_msg = format!(
-                    "Results {:?} do not contain an input called {}",
-                    run_results, input_value_parsed
-                );
-                error!("{}", err_msg);
-                return Err(Error::Inputs(err_msg));
-            }
-        };
-        // Add it to the list of inputs for this section
-        Ok(ReportInput {
-            value: actual_input_value,
-            input_type,
-        })
-    }
-
-    /// Converts the provided `result_type` to its equivalent WDL type
-    fn convert_result_type_to_wdl_type(result_type: &ResultTypeEnum) -> &'static str {
-        match result_type {
-            ResultTypeEnum::Numeric => "Float",
-            ResultTypeEnum::File => "File",
-            ResultTypeEnum::Text => "String",
-        }
+        Ok(actual_input_value)
     }
 
     // Included here instead of in the super module's tests module pretty much just to make it

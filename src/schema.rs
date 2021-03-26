@@ -192,33 +192,8 @@ table! {
         report_id -> Uuid,
         name -> Text,
         description -> Nullable<Text>,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        created_by -> Nullable<Text>,
-    }
-}
-
-table! {
-    use diesel::sql_types::*;
-
-    section(section_id) {
-        section_id -> Uuid,
-        name -> Text,
-        description -> Nullable<Text>,
-        contents -> Jsonb,
-        created_at -> Timestamptz,
-        created_by -> Nullable<Text>,
-    }
-}
-
-table! {
-    use diesel::sql_types::*;
-
-    report_section(report_id, section_id, name) {
-        report_id -> Uuid,
-        section_id -> Uuid,
-        name -> Text,
-        position -> Integer,
+        notebook -> Jsonb,
+        config -> Nullable<Jsonb>,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,
     }
@@ -230,7 +205,6 @@ table! {
     template_report(template_id, report_id) {
         template_id -> Uuid,
         report_id -> Uuid,
-        input_map -> Jsonb,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,
     }
@@ -255,7 +229,6 @@ table! {
 joinable!(run -> run_id_with_results(run_id));
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
-joinable!(report_section -> section(section_id));
 
 allow_tables_to_appear_in_same_query!(
     pipeline,
@@ -273,8 +246,6 @@ allow_tables_to_appear_in_same_query!(
     subscription,
     run_is_from_github,
     report,
-    section,
-    report_section,
     template_report,
     run_report,
 );
