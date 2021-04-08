@@ -6,7 +6,6 @@ use crate::config;
 use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::manager::util;
 use crate::models::report::ReportData;
-use crate::models::report_section::ReportSectionWithContentsData;
 use crate::models::run::{RunData, RunWithResultData};
 use crate::models::run_report::{NewRunReport, RunReportData};
 use crate::models::template::TemplateData;
@@ -18,7 +17,6 @@ use crate::validation::womtool;
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
-use input_map::ReportInput;
 use log::{debug, error};
 use serde_json::{json, Map, Value};
 #[cfg(test)]
@@ -129,7 +127,7 @@ lazy_static! {
     });
 
     /// A cell for displaying run inputs and results at the bottom of a report
-    static ref RUN_DATA_CELL: Value = json!({
+    static ref RUN_INPUTS_AND_RESULTS_CELL: Value = json!({
         "cell_type": "code",
         "execution_count": null,
         "metadata": {},
@@ -153,10 +151,107 @@ lazy_static! {
             "Markdown(md_string)"
         ]
     });
+
+    /// The default control block cell that will be used if the user does not include a control
+    /// block cell in the notebook for their report
+    static ref DEFAULT_CONTROL_BLOCK_CELL: Value = json!({
+        "cell_type": "code",
+        "execution_count": null,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Control block\n",
+            "carrot_download_results = True\n",
+            "carrot_download_inputs = False\n",
+        ]
+    });
+
+    /// The download cell which will be inserted to allow automatic downloading of result and input
+    /// files
+    static ref FILE_DOWNLOAD_CELL: Value = json!({
+        "cell_type": "code",
+        "execution_count": null,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "import os\n",
+            "import sys\n",
+            "\n",
+            "# Keep track of the local location of our downloaded files\n",
+            "carrot_downloads = {}\n",
+            "\n",
+            "# Downloads any gcs files in the section of run_data indicated by `key` into a directory called carrot_downloads/{key}\n",
+            "def mkdir_and_download_files(key):\n",
+            "    # Make a sub directory to put the files in\n",
+            "    os.makedirs(f'carrot_downloads/{key}', exist_ok=True)\n",
+            "    # Keep track of result files\n",
+            "    carrot_downloads[key] = {}\n",
+            "    # Loop through section and download any that are gcs uris\n",
+            "    for file_key, file_val in carrot_run_data[key].items():\n",
+            "        # If it's a string and starts with \"gs://\", download it\n",
+            "        if isinstance(file_val, str) and file_val.startswith('gs://'):\n",
+            "            # Attempt to download with gsutil\n",
+            "            download_status = os.system(f'gsutil cp {file_val} carrot_downloads/{key}')\n",
+            "            # If it failed, print an error message and exit\n",
+            "            if download_status != 0:\n",
+            "                sys.exit(f\"gsutil terminated with an non-zero exit code when attempting to download {file_val}\")\n",
+            "            # Add it to our list of downloaded files\n",
+            "            carrot_downloads[key][file_key] = f'carrot_downloads/results/{file_val[file_val.rfind(\"/\")+1:]}'\n",
+            "        # If it's an array, check the array for strings\n",
+            "        elif isinstance(file_val, list):\n",
+            "            # We'll keep a list of the file locations\n",
+            "            carrot_downloads[key][file_key] = []\n",
+            "            for file_location in file_val:\n",
+            "                if isinstance(file_location, str) and file_location.startswith('gs://'):\n",
+            "                    # Attempt to download with gsutil\n",
+            "                    download_status = os.system(f'gsutil cp {file_location} carrot_downloads/{key}')\n",
+            "                    # If it failed, print an error message and exit\n",
+            "                    if download_status != 0:\n",
+            "                        sys.exit(f\"gsutil terminated with an non-zero exit code when attempting to download {file_location}\")\n",
+            "                    # Add it to our list of downloaded files\n",
+            "                    carrot_downloads[key][file_key].append(f'carrot_downloads/results/{file_location[file_location.rfind(\"/\")+1:]}')\n",
+            "            # If the list is empty (meaning the array didn't actually have any gcs files in it), delete it\n",
+            "            if len(carrot_downloads[key][file_key]) < 1:\n",
+            "                del carrot_downloads[key][file_key]\n",
+            "# If either download control variables are True, we'll do some downloading\n",
+            "if carrot_download_results or carrot_download_inputs:\n",
+            "    # Make a directory for any files we want to download\n",
+            "    os.makedirs('carrot_downloads', exist_ok=True)\n",
+            "    # If we're supposed to download results, do that\n",
+            "    if carrot_download_results:\n",
+            "        mkdir_and_download_files('results')\n",
+            "    # Do the same for inputs\n",
+            "    if carrot_download_inputs:\n",
+            "        # Test inputs\n",
+            "        mkdir_and_download_files('test_input')\n",
+            "        # Eval inputs\n",
+            "        mkdir_and_download_files('eval_input')"
+        ]
+    });
 }
 
 /// The name of the workflow in the jupyter_report_generator_template.wdl file
 const GENERATOR_WORKFLOW_NAME: &'static str = "generate_report_file_workflow";
+
+/// A list of all optional runtime attributes that can be supplied to the report generator wdl
+const GENERATOR_WORKFLOW_RUNTIME_ATTRS: [&'static str; 9] = [
+    "cpu",
+    "memory",
+    "disks",
+    "maxRetries",
+    "continueOnReturnCode",
+    "failOnStdErr",
+    "preemptible",
+    "bootDiskSizeGb",
+    "docker"
+];
+
+/// A list of all control variables that can be set in a control block of a notebook by the user to
+/// change the default functionality of the report
+const NOTEBOOK_CONTROL_VARIABLES: [&'static str; 2] = [
+    "carrot_download_results",
+    "carrot_download_inputs",
+];
 
 /// Starts creation of run reports via calls to `create_run_report` for any reports mapped to the
 /// template for `run`
@@ -175,7 +270,6 @@ pub async fn create_run_reports_for_completed_run(
         TemplateReportQuery {
             template_id: Some(template.template_id),
             report_id: None,
-            input_map: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -186,7 +280,6 @@ pub async fn create_run_reports_for_completed_run(
     )?;
     // If there are reports to generate, generate them
     if template_reports.len() > 0 {
-
         // Loop through the mappings and create a report for each
         for mapping in template_reports {
             debug!(
@@ -198,8 +291,9 @@ pub async fn create_run_reports_for_completed_run(
                     conn,
                     client,
                     run.run_id,
-                    &mapping,
+                    mapping.report_id,
                     &run.created_by,
+                    false
                 )
                 .await?,
             );
@@ -209,13 +303,14 @@ pub async fn create_run_reports_for_completed_run(
     Ok(run_reports)
 }
 
-/// Assembles a report template and a wdl for filling it for `report_id`, submits it to cromwell with
-/// data filled in from `run_id`, and creates and returns a RunReportData instance for it.  Before
+/// Assembles a report Jupyter Notebook from the data for the run specified by `run_id` and the
+/// report configuration in the report specified by `report`, submits a job to cromwell for
+/// processing it, and creates a run_report record (with created_by if set) for tracking it. Before
 /// anything, checks if a run_report row already exists for the specified run_id and report_id.  If
 /// it does and it hasn't failed, returns an error.  If it has failed and `delete_failed` is true,
 /// it deletes the row and continues processing.  If it has failed and `delete_failed` is false,
 /// it returns an error.
-pub async fn create_run_report_from_run_id_and_report_id(
+pub async fn create_run_report(
     conn: &PgConnection,
     client: &Client,
     run_id: Uuid,
@@ -223,58 +318,15 @@ pub async fn create_run_report_from_run_id_and_report_id(
     created_by: &Option<String>,
     delete_failed: bool,
 ) -> Result<RunReportData, Error> {
+    // Include the generator wdl file in the build
+    let generator_wdl = include_str!("../../scripts/wdl/jupyter_report_generator_template.wdl");
     // Check if we already have a run report for this run and report
-    check_for_existing_run_report(conn, run_id, report_id, delete_failed)?;
-    // Get template so we can get template_reports
-    let template = TemplateData::find_by_run(conn, run_id)?;
-    // Get template report
-    let template_report =
-        TemplateReportData::find_by_template_and_report(conn, template.template_id, report_id)?;
-    // Create the run report
-    create_run_report(
-        conn,
-        client,
-        run_id,
-        &template_report,
-        created_by,
-    )
-    .await
-}
-
-/// Assembles a report template and a wdl for filling it for `template_report`'s `report_id`,
-/// submits it to cromwell with data filled in from `run_id`, and creates and returns a
-/// RunReportData instance for it.  Uses metadata from `template` and `template_report`, along with
-/// input information from `test_wdl` and `eval_wdl`
-async fn create_run_report(
-    conn: &PgConnection,
-    client: &Client,
-    run_id: Uuid,
-    template_report: &TemplateReportData,
-    created_by: &Option<String>,
-) -> Result<RunReportData, Error> {
+    verify_no_existing_run_report(conn, run_id, report_id, delete_failed)?;
     // Retrieve run and report
     let run = RunWithResultData::find_by_id(conn, run_id)?;
-    let report = ReportData::find_by_id(conn, template_report.report_id)?;
-    // Extract the input map from the template_report
-    let input_map = match &template_report.input_map {
-        Value::Object(map) => map,
-        _ => {
-            error!("Failed to parse input map as map");
-            return Err(Error::Parse(String::from(
-                "Failed to parse input map from template_report mapping as map",
-            )));
-        }
-    };
-    // Get report_sections with section contents ordered by position
-    let section_maps = ReportSectionWithContentsData::find_by_report_id_ordered_by_position(
-        conn,
-        report.report_id,
-    )?;
-    // Assemble map of sections to inputs with values
-    let section_inputs_map: HashMap<String, HashMap<String, String>> =
-        input_map::build_section_inputs_map(input_map, &run).await?;
-    // Assemble the report and its sections into a complete Jupyter Notebook json
-    let report_json = create_report_template(&report, &section_maps, &section_inputs_map)?;
+    let report = ReportData::find_by_id(conn, report_id)?;
+    // Build the notebook we will submit from the notebook specified in the report and the run data
+    let report_json = create_report_template(&report.notebook, &run)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
     #[cfg(not(test))]
     let report_template_location = upload_report_template(report_json, &report.name, &run.name)?;
@@ -282,21 +334,17 @@ async fn create_run_report(
     // mock up the google api with the google_storage1 library
     #[cfg(test)]
     let report_template_location = String::from("example.com/report/template/location.ipynb");
-    // Write it to a file
-    let wdl_file = util::get_temp_file(&generator_wdl)?;
-    // Build inputs json sections and section inputs map, titled with a name built from run_name and
-    // report_name
-    let serialized_run = serde_json::to_value(&run)?;
+    // Build the input json we'll include in the cromwell request, with the docker and report
+    // locations and any config attributes from the report config
     let input_json = create_input_json(
-        &format!("{} : {}", &run.name.replace(" ", "_"), &report.name),
         &report_template_location,
         &*config::REPORT_DOCKER_LOCATION,
-        &section_maps,
-        &section_inputs_map,
-        &serialized_run,
-    );
+        &report.config,
+    )?;
     // Write it to a file
     let json_file = util::get_temp_file(&input_json.to_string())?;
+    // Write the wdl to a file
+    let wdl_file = util::get_temp_file(generator_wdl)?;
     // Submit report generation job to cromwell
     let start_job_response =
         util::start_job_from_file(client, &wdl_file.path(), &json_file.path()).await?;
@@ -313,7 +361,12 @@ async fn create_run_report(
     Ok(RunReportData::create(conn, new_run_report)?)
 }
 
-fn check_for_existing_run_report(
+/// Checks the DB for an existing run_report record with the specified `run_id` and `report_id`. If
+/// such a record does not exist, returns Ok(()).  If there is a record, and `deleted_failed` is
+/// false, returns a Prohibited error.  If there is a record, and `delete_failed` is true, checks if
+/// the record has a failure value for its status.  If so, deletes that record and returns Ok(()).
+/// If not, returns a Prohibited error.
+fn verify_no_existing_run_report(
     conn: &PgConnection,
     run_id: Uuid,
     report_id: Uuid,
@@ -345,117 +398,169 @@ fn check_for_existing_run_report(
     Ok(())
 }
 
-/// Gets section contents for the specified report, and combines it with the report's metadata to
-/// produce the Jupyter Notebook (in json form) that will be used as a template for the report
+/// Starts with `notebook` (from a report), adds the necessary cells (a run data cell using `run`, a
+/// control block if no provided, metadata header and footer cells, and a cell for downloading data
+/// related to the run) and returns the Jupyter Notebook (in json form) that will be used as a
+/// template for the report
 fn create_report_template(
-    report: &ReportData,
-    section_maps: &Vec<ReportSectionWithContentsData>,
-    section_inputs: &HashMap<String, HashMap<String, String>>,
+    notebook: &Value,
+    run: &RunWithResultData
 ) -> Result<Value, Error> {
-    // Build a cells array for the notebook from sections_contents, starting with the default header
-    // cells
-    let mut cells: Vec<Value> = DEFAULT_HEADER_CELLS.clone();
-    for report_section in section_maps {
-        let contents = &report_section.contents;
-        // Add a header cell
-        cells.push(create_section_header_cell(&report_section.name));
-        // Extract that cells array from contents (return an error if any step of this fails)
-        // First get it as an object
-        let contents_object = match contents {
-            Value::Object(o) => o,
-            _ => {
-                let error_msg = format!("Section contents: {} not formatted correctly", contents);
-                error!("{}", error_msg);
-                return Err(Error::Parse(error_msg));
-            }
-        };
-        // Then extract the cells array from that
-        let mut cells_array = match contents_object.get("cells") {
-            Some(cells_value) => match cells_value {
-                Value::Array(a) => a.to_owned(),
-                _ => {
-                    error!("Section contents: {} not formatted correctly", contents);
-                    return Err(Error::Parse(format!(
-                        "Section contents: {} not formatted correctly",
-                        contents
-                    )));
-                }
-            },
-            _ => {
-                error!("Section contents: {} not formatted correctly", contents);
-                return Err(Error::Parse(format!(
-                    "Section contents: {} not formatted correctly",
-                    contents
-                )));
-            }
-        };
-        // Next, extract the inputs for this section from the section inputs so we can make an input
-        // cell for this section
-        match section_inputs.get(&report_section.name) {
-            Some(section_input_map) => {
-                // Get list of input names for the section
-                let section_inputs: Vec<&str> = section_input_map.keys().map(|k| &**k).collect();
-                // Build the input cell and add it to the cells list
-                let input_cell = create_section_input_cell(&report_section.name, section_inputs);
-                cells.push(input_cell);
-            }
-            // If there's no inputs for this section, then we won't add an input cell
-            None => {}
-        }
-        // Then add them to the cells list
-        cells.append(&mut cells_array);
-    }
-    // Get the report object containing the metadata
-    let mut notebook = match report.metadata.clone() {
-        Value::Object(map) => map,
-        _ => {
-            let error_msg = format!(
-                "Report metadata: {} not formatted correctly",
-                report.metadata
-            );
-            error!("{}", error_msg);
-            return Err(Error::Parse(error_msg));
+    // Build a cells array for the notebook
+    let mut cells: Vec<Value> = Vec::new();
+    // We want to keep track of whether the user supplied a control block
+    let mut has_user_control_block: bool = false;
+    // Start with the run data cell
+    cells.push(create_run_data_cell(run)?);
+    // Get the cells array from the notebook
+    let notebook_cells = get_cells_array_from_notebook(notebook)?;
+    // Next, get the first cell in the report so we can check to see if it is a control block, and
+    // add one if not
+    let first_cell = match notebook_cells.get(0) {
+        Some(first_cell) => {
+            first_cell
+        },
+        None => {
+            // Return an error if the cells array is empty
+            return Err(Error::Parse(String::from("Notebook \"cells\" array is empty")));
         }
     };
-    // Add the cells to it
-    notebook.insert(String::from("cells"), Value::Array(cells));
-    // Return the final notebook json
-    Ok(Value::Object(notebook))
+    // If the first cell is a control block, add it to our cells array
+    if cell_is_a_control_block(first_cell)? {
+        has_user_control_block = true;
+        cells.push(first_cell.to_owned());
+    }
+    // Otherwise, add a control block cell
+    else {
+        cells.push(DEFAULT_CONTROL_BLOCK_CELL.to_owned());
+    }
+    // Add the header cell which contains run metadata
+    cells.push(RUN_METADATA_CELL.to_owned());
+    // Add the data download cell
+    cells.push(FILE_DOWNLOAD_CELL.to_owned());
+    // Add the rest of the cells in the notebook (if there are any)
+    // Skip the first one if it's a control block since we already added it
+    let start_index = if has_user_control_block && notebook_cells.len() > 1 {1} else {0};
+    if start_index < notebook_cells.len(){
+        cells.extend(notebook_cells[start_index..].iter().cloned());
+    }
+    // Add the footer cell which contains a list of inputs and results for display
+    cells.push(RUN_INPUTS_AND_RESULTS_CELL.to_owned());
+    // We'll copy the input notebook and replace its cells array with the one we just assembled
+    // Note: we can unwrap here because we already verified above that this is formatted as an
+    // object
+    let mut new_notebook_object: Map<String, Value> = notebook.as_object().unwrap().to_owned();
+    // Replace cells array with our new one
+    new_notebook_object.insert(String::from("cells"), Value::Array(cells));
+    // Wrap it in a Value and return it
+    Ok(Value::Object(new_notebook_object))
 }
 
-/// Assembles and returns an ipynb json cell for reading inputs for a section from the inputs
-/// provided in the input file
-fn create_section_input_cell(section_name: &str, inputs: Vec<&str>) -> Value {
-    // We'll put each line of code in the section into this vector so we can fill in the source
-    // field in the cell json at the end (ipynb files expect code to be in a json array of lines in
-    // the source field within a cell)
-    let mut source: Vec<String> = Vec::new();
-    // Loop through the inputs and add a line for each to the source vector
-    for input in inputs {
-        source.push(format!(
-            "{} = carrot_inputs[\"sections\"][\"{}\"][\"{}\"]",
-            input, section_name, input
-        ));
+/// Returns true if `cell` is a control block (i.e. it is specifically for setting control values),
+/// or false if not
+fn cell_is_a_control_block(cell: &Value) -> Result<bool, Error> {
+    // Start by getting cell as object so we can look at its source array
+    let cell_as_object: &Map<String,Value> = match cell.as_object() {
+        Some(cell_as_object) => cell_as_object,
+        None => {
+            // If the cell isn't an object, return an error (this really shouldn't happen)
+            return Err(Error::Parse(String::from("Failed to parse element in cells array of notebook as object")));
+        }
+    };
+    // Get the "source" array
+    let source_array: &Vec<Value> = match cell_as_object.get("source") {
+        Some(source_value) => {
+            // Now get it as an array
+            match source_value.as_array() {
+                Some(source_array) => source_array,
+                None => {
+                    // If "source" isn't an array, return an error (this really shouldn't happen)
+                    return Err(Error::Parse(String::from("Failed to parse source value in cell as an array")));
+                }
+            }
+        },
+        None => {
+            // If there isn't a source value, we'll return false (because it could be a markdown cell)
+            return Ok(false);
+        }
+    };
+    // Loop through the source array to see if we can find instances of the control variables being
+    // set.  If we find one, we'll say this is a control block and return true. If, during our
+    // search, we find a line that is not that, whitespace, or a single-line comment, we'll return
+    // false
+    for line_value in source_array {
+        // Get the line as a string
+        let line_string = match line_value.as_str() {
+            Some(line_string) => line_string,
+            None => {
+                // If this isn't a string, return an error (this really shouldn't happen)
+                return Err(Error::Parse(String::from("Failed to parse contents of cell's source array as strings")));
+            }
+        };
+        // If it starts with the name of one of the control variables, it's a control block
+        for control_variable in &NOTEBOOK_CONTROL_VARIABLES {
+            if line_string.starts_with(control_variable) {
+                return Ok(true);
+            }
+        }
+        // If not, then return false if this line is not whitespace or a comment
+        if !line_string.starts_with("#") && !line_string.trim().is_empty() {
+            return Ok(false);
+        }
     }
+    // If we got through the whole block and didn't find the control variables, then this isn't a
+    // control block
+    return Ok(false);
+
+}
+
+/// Extracts and returns the "cells" array from `notebook`
+fn get_cells_array_from_notebook(notebook: &Value) -> Result<&Vec<Value>, Error> {
+    // Try to get the notebook as a json object
+    match notebook.as_object() {
+        Some(notebook_as_map) => {
+            // Try to get the value of "cells" from the notebook
+            match notebook_as_map.get("cells") {
+                Some(cells_value) => {
+                    // Try to get the value for "cells" as an array
+                    match cells_value.as_array() {
+                        Some(cells_array) => Ok(cells_array),
+                        None => {
+                            Err(Error::Parse(String::from("Cells value in notebook not formatted as array")))
+                        }
+                    }
+                },
+                None => {
+                    Err(Error::Parse(String::from("Failed to get cells array from notebook")))
+                }
+            }
+        },
+        None => {
+            Err(Error::Parse(String::from("Failed to parse notebook as JSON object")))
+        }
+    }
+}
+
+/// Assembles and returns an ipynb json cell that defines a python dictionary containing data for
+/// `run`
+fn create_run_data_cell(run: &RunWithResultData) -> Result<Value, Error> {
+    // Convert run into a pretty json
+    let pretty_run: String = serde_json::to_string_pretty(run)?;
+    // Add the python variable declaration and split into lines. We'll put the lines of code into a
+    // vector so we can fill in the source field in the cell json with it (ipynb files expect code
+    // to be in a json array of lines in the source field within a cell)
+    let source_string = format!("carrot_run_data = {}", pretty_run);
+    let source: Vec<&str> = source_string
+        .split_inclusive("\n") // Jupyter expects the \n at the end of each line, so we include it
+        .collect();
     // Fill in the source section of the cell and return it as a json value
-    json!({
+    Ok(json!({
         "cell_type": "code",
         "execution_count": null,
         "metadata": {},
         "outputs": [],
         "source": source
-    })
-}
-
-/// Assembles and returns an ipynb json cell for displaying the title of the section
-fn create_section_header_cell(section_name: &str) -> Value {
-    json!({
-        "source": [
-            format!("## {}", section_name)
-        ],
-        "cell_type": "markdown",
-        "metadata": {}
-    })
+    }))
 }
 
 /// Writes `report_json` to an ipynb file, uploads it to GCS, and returns the gs uri of the file
@@ -483,604 +588,53 @@ fn upload_report_template(
     )?)
 }
 
-/// Creates a returns an input json to send to cromwell along with a report generator wdl using
-/// `report_name` as the title, `notebook_location` as the jupyter notebook file,
-/// `report_docker_location` as the location of the docker image we'll use to generate the report,
-/// `run_info` as a json containing the metadata for the run (currently this means a
-/// RunWithReportData instance as a Value, but having it be a Value leaves the opportunity to more
-/// easily change that in the future) `sections` to determine the order of the sections so we can
-/// prefix them properly to match the input names used in `create_generator_wdl`, and
-/// `section_inputs_map` to get the actual input values to fill in the json
+/// Creates and returns an input json to send to cromwell along with a report generator wdl using
+/// `notebook_location` as the jupyter notebook file, `report_docker_location` as the location of
+/// the docker image we'll use to generate the report, and `report_config` as a json containing any
+/// of the allowed optional runtime values (see scripts/wdl/jupyter_report_generator_template.wdl
+/// to see that wdl these are being supplied to)
 fn create_input_json(
-    report_name: &str,
     notebook_location: &str,
     report_docker_location: &str,
-    section_maps: &Vec<ReportSectionWithContentsData>,
-    section_inputs_map: &HashMap<String, HashMap<String, ReportInput>>,
-    run_info: &Value,
-) -> Value {
+    report_config: &Option<Value>,
+) -> Result<Value, Error> {
     // Map that we'll add all our inputs to
     let mut inputs_map: Map<String, Value> = Map::new();
-    // Start with metadata stuff
+    // Start with notebook and docker
     inputs_map.insert(
         format!("{}.notebook_template", GENERATOR_WORKFLOW_NAME),
         Value::String(String::from(notebook_location)),
     );
     inputs_map.insert(
-        format!("{}.report_name", GENERATOR_WORKFLOW_NAME),
-        Value::String(String::from(report_name)),
-    );
-    inputs_map.insert(
-        format!("{}.run_info", GENERATOR_WORKFLOW_NAME),
-        run_info.to_owned(),
-    );
-    inputs_map.insert(
-        format!("{}.report_docker", GENERATOR_WORKFLOW_NAME),
+        format!("{}.docker", GENERATOR_WORKFLOW_NAME),
         Value::String(String::from(report_docker_location)),
     );
-    // Loop through sections to add section inputs
-    for position in 0..section_maps.len() {
-        // Get inputs for this section (continue if there are no inputs for this section)
-        let section_inputs = match section_inputs_map.get(&section_maps[position].name) {
-            Some(inputs) => inputs,
-            None => continue,
+    // If there is a value for report_config, use it for runtime attributes
+    if let Some(report_config_value) = report_config {
+        // Get report_config as a map so we can access the values
+        let report_config_map: &Map<String, Value> = match report_config_value.as_object() {
+            Some(report_config_map) => report_config_map,
+            None => {
+                // If it's not a map, that's a problem, so return an error
+                return Err(Error::Parse(String::from("Failed to parse report config as object")));
+            }
         };
-        for (input_name, report_input) in section_inputs {
-            // Make a version of the input name that is prefixed with position so we can avoid the
-            // problem of having multiple inputs with the same name
-            let wdl_input_name = format!(
-                "{}.{}",
-                GENERATOR_WORKFLOW_NAME,
-                get_section_wdl_input_name(position, input_name)
-            );
-            // Add input to our inputs_map
-            inputs_map.insert(wdl_input_name, Value::String(report_input.value.clone()));
+        // We'll check the config_info for each of the optional runtime attributes and add them to the
+        // inputs_map if they've been set
+        for attribute in &GENERATOR_WORKFLOW_RUNTIME_ATTRS {
+            if report_config_map.contains_key(*attribute) {
+                let attribute_as_string = String::from(*attribute);
+                // Insert the value into the map (we can unwrap here because we already know
+                // report_config contains the key)
+                inputs_map.insert(
+                    attribute_as_string,
+                    report_config_map.get(*attribute).unwrap().to_owned()
+                );
+            }
         }
     }
     // Wrap the map in a json Value
-    Value::Object(inputs_map)
-}
-
-/// Returns the name that will be used to refer to the input specified by `input_name` in the report
-/// generator wdl.  `position` refers to the ordered position of the section in the report
-fn get_section_wdl_input_name(position: usize, input_name: &str) -> String {
-    format!("section{}_{}", position, input_name)
-}
-
-mod input_map {
-    //! Defines structs and functionality for assembling a list of inputs with relevant data for a
-    //! report
-    use super::Error;
-    use crate::custom_sql_types::ResultTypeEnum;
-    use crate::models::result::ResultData;
-    use crate::models::run::RunWithResultData;
-    use crate::models::template::TemplateData;
-    use crate::validation::womtool;
-    use diesel::PgConnection;
-    use log::error;
-    use serde_json::{Map, Value};
-    use std::collections::HashMap;
-    use uuid::Uuid;
-
-    /// Uses `input_map`, the WDLs and result definitions for `template`, and the results in `run`
-    /// to build a return a map of inputs, divided up by section, with their names, values, and
-    /// types
-    ///
-    /// Returns a map of sections to maps of their inputs, or an error if something goes wrong
-    pub(super) async fn build_section_inputs_map(
-        input_map: &Map<String, Value>,
-        run: &RunWithResultData,
-    ) -> Result<HashMap<String, HashMap<String, String>>, Error> {
-        // Empty map that will eventually contain all our inputs
-        let mut section_inputs_map: HashMap<String, HashMap<String, String>> = HashMap::new();
-        // Get the test and eval inputs from `run` as maps so we can work with them more easily
-        let (run_test_input, run_eval_input, run_result_map) = get_run_input_and_result_maps(&run)?;
-        // Loop through the sections in input_map and build input lists for each
-        for section_name in input_map.keys() {
-            // Create a hashmap for inputs for this section
-            let mut section_inputs: HashMap<String, ReportInput> = HashMap::new();
-            // Each value in the input_map should be a map of inputs for that section
-            let section_input_map = get_section_input_map(input_map, section_name)?;
-            // Loop through the inputs for the section and get the value and type for each
-            for (input_name, input_value) in section_input_map {
-                // Get input value as a str
-                let input_value = match input_value.as_str() {
-                    Some(val) => val,
-                    None => {
-                        let err_msg = format!(
-                            "Section input value {} not formatted correctly.  Should be a string",
-                            input_value
-                        );
-                        error!("{}", err_msg);
-                        return Err(Error::Parse(err_msg));
-                    }
-                };
-                // If it's a test_input, we'll get the value from the run's test_inputs
-                if input_value.starts_with("test_input:") {
-                    // Parse and extract the input indicated by input_value
-                    let report_input = get_report_input_from_input_or_results(
-                        input_value,
-                        &run_test_input,
-                        "test_input",
-                    )?;
-                    // Add it to the list of inputs for this section
-                    section_inputs.insert(input_name.clone(), report_input);
-                }
-                // If it's an eval_input, we'll get the value from the run's eval_inputs
-                else if input_value.starts_with("eval_input:") {
-                    // Parse and extract the input indicated by input_value
-                    let report_input = get_report_input_from_input_or_results(
-                        input_value,
-                        &run_eval_input,
-                        "eval_input",
-                    )?;
-                    // Add it to the list of inputs for this section
-                    section_inputs.insert(input_name.clone(), report_input);
-                }
-                // If it's a result, we'll get the value from run's results
-                else if input_value.starts_with("result:") {
-                    // Parse and extract the input indicated by input_value
-                    let report_input = get_report_input_from_input_or_results(
-                        input_value,
-                        &run_result_map,
-                        "result"
-                    )?;
-                    // Add it to the list of inputs for this section
-                    section_inputs.insert(input_name.clone(), report_input);
-                }
-                // If it's none of the above, we just take the value as is as a string
-                else {
-                    section_inputs.insert(
-                        input_name.clone(),
-                        String::from(input_value),
-                    );
-                }
-            }
-            // Add the inputs for this section to input_list
-            section_inputs_map.insert(section_name.clone(), section_inputs);
-        }
-
-        Ok(section_inputs_map)
-    }
-
-    /// Extracts test and eval inputs from `run` as maps. This function only really exists to
-    /// declutter `build_input_list` a bit
-    fn get_run_input_and_result_maps(
-        run: &RunWithResultData,
-    ) -> Result<(&Map<String, Value>, &Map<String, Value>, Map<String, Value>), Error> {
-        let run_test_input: &Map<String, Value> = match run.test_input.as_object() {
-            Some(map) => map,
-            None => {
-                let err_msg = format!(
-                    "Test input {} is not formatted as a map. This should not happen.",
-                    run.test_input
-                );
-                error!("{}", err_msg);
-                return Err(Error::Inputs(err_msg));
-            }
-        };
-        let run_eval_input: &Map<String, Value> = match run.eval_input.as_object() {
-            Some(map) => map,
-            None => {
-                let err_msg = format!(
-                    "Eval input {} is not formatted as a map. This should not happen.",
-                    run.eval_input
-                );
-                error!("{}", err_msg);
-                return Err(Error::Inputs(err_msg));
-            }
-        };
-        let run_results = match &run.results {
-            Some(run_results) => match run_results.as_object() {
-                Some(map) => map.clone(),
-                None => {
-                    let err_msg = format!(
-                        "Run results {} are not formatted as a map. This should not happen.",
-                        run_results
-                    );
-                    error!("{}", err_msg);
-                    return Err(Error::Inputs(err_msg));
-                }
-            },
-            None => Map::new(),
-        };
-
-        Ok((run_test_input, run_eval_input, run_results))
-    }
-
-    /// Gets the value for `key` from `input_map` as a String, or returns an error with `context`
-    /// to explain the source of the map (e.g. test_input)
-    fn get_value_from_map_as_string(
-        input_map: &Map<String, Value>,
-        key: &str,
-        context: &str,
-    ) -> Result<String, Error> {
-        match input_map.get(key) {
-            Some(value) => match value {
-                Value::String(string_val) => Ok(string_val.clone()),
-                _ => {
-                    let err_msg = format!("{} value for {} is not formatted as a string, which is necessary. This should not happen. {}: {:?}", context, key, context, input_map);
-                    error!("{}", err_msg);
-                    return Err(Error::Inputs(err_msg));
-                }
-            },
-            None => {
-                let err_msg = format!(
-                    "{} {:?} does not contain value for {}",
-                    context, input_map, key
-                );
-                error!("{}", err_msg);
-                return Err(Error::Inputs(err_msg));
-            }
-        }
-    }
-
-    /// Extracts the value for `section_name` from `input_map` as a &Map<String,Value> and returns
-    /// it. This function only really exists to declutter `build_input_list` a bit
-    fn get_section_input_map<'a>(
-        input_map: &'a Map<String, Value>,
-        section_name: &str,
-    ) -> Result<&'a Map<String, Value>, Error> {
-        match input_map.get(section_name) {
-            Some(obj) => match obj {
-                Value::Object(map) => Ok(map),
-                // If it's not a map, we have an issue, so return an error
-                _ => {
-                    let err_msg = format!(
-                        "Section input map: {} not formatted correctly.  Should be an object",
-                        obj
-                    );
-                    error!("{}", err_msg);
-                    Err(Error::Inputs(err_msg))
-                }
-            },
-            None => {
-                // Including this instead of using unwrap so, if this happens:
-                // 1. We don't panic!, and
-                // 2. I know I did something dumb and forgot to update the error message
-                let err_msg = format!("Input map doesn't contain a section called {} even though we got it from input_map.keys(). This should not happen.", section_name);
-                error!("{}", err_msg);
-                Err(Error::Inputs(err_msg))
-            }
-        }
-    }
-
-    /// Parses `input_value`,  and extracts and returns the indicated value from `value_map`.
-    /// `context` corresponds to where the input is from (either test_input, eval_input, or result)
-    fn get_report_input_from_input_or_results(
-        input_value: &str,
-        value_map: &Map<String, Value>,
-        context: &str,
-    ) -> Result<String, Error> {
-        // Parse the value to get the actual name of the input we want
-        let input_value_parsed = input_value.trim_start_matches(&format!("{}:", context));
-        // Get the actual value from the run's test_input
-        let actual_input_value = get_value_from_map_as_string(
-            value_map,
-            input_value_parsed,
-            context,
-        )?;
-        Ok(actual_input_value)
-    }
-
-    // Included here instead of in the super module's tests module pretty much just to make it
-    // easier to move this module to a separate file if we decide in the future to do that
-    #[cfg(test)]
-    mod tests {
-        use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
-        use crate::manager::report_builder;
-        use crate::manager::report_builder::input_map::{build_section_inputs_map, ReportInput};
-        use crate::models::pipeline::{NewPipeline, PipelineData};
-        use crate::models::result::{NewResult, ResultData};
-        use crate::models::run::RunWithResultData;
-        use crate::models::template::{NewTemplate, TemplateData};
-        use crate::models::template_result::{NewTemplateResult, TemplateResultData};
-        use crate::unit_test_util;
-        use actix_web::client::Client;
-        use chrono::Utc;
-        use diesel::PgConnection;
-        use serde_json::json;
-        use std::collections::HashMap;
-        use std::fs::read_to_string;
-        use uuid::Uuid;
-
-        fn insert_test_template_and_results(
-            conn: &PgConnection,
-        ) -> (TemplateData, Vec<ResultData>, Vec<TemplateResultData>) {
-            let new_pipeline = NewPipeline {
-                name: String::from("Kevin's Pipeline"),
-                description: Some(String::from("Kevin made this pipeline for testing")),
-                created_by: Some(String::from("Kevin@example.com")),
-            };
-
-            let pipeline =
-                PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
-
-            let new_template = NewTemplate {
-                name: String::from("Kevin's test template"),
-                pipeline_id: pipeline.pipeline_id,
-                description: None,
-                test_wdl: format!("{}/test", mockito::server_url()),
-                eval_wdl: format!("{}/eval", mockito::server_url()),
-                created_by: None,
-            };
-
-            let template =
-                TemplateData::create(&conn, new_template).expect("Failed to insert test template");
-
-            let new_result = NewResult {
-                name: String::from("Greeting"),
-                result_type: ResultTypeEnum::Text,
-                description: Some(String::from("A greeting string")),
-                created_by: Some(String::from("Kevin@example.com")),
-            };
-
-            let result1 =
-                ResultData::create(conn, new_result).expect("Failed inserting test result");
-
-            let new_result = NewResult {
-                name: String::from("Greeting File"),
-                result_type: ResultTypeEnum::File,
-                description: Some(String::from("A greeting file")),
-                created_by: Some(String::from("Kevin@example.com")),
-            };
-
-            let result2 =
-                ResultData::create(conn, new_result).expect("Failed inserting test result");
-
-            let new_template_result = NewTemplateResult {
-                template_id: template.template_id,
-                result_id: result1.result_id,
-                result_key: String::from("greeting_workflow.out_greeting"),
-                created_by: Some(String::from("Kevin@example.com")),
-            };
-
-            let template_result1 = TemplateResultData::create(conn, new_template_result)
-                .expect("Failed inserting test template_result");
-
-            let new_template_result = NewTemplateResult {
-                template_id: template.template_id,
-                result_id: result2.result_id,
-                result_key: String::from("greeting_file_workflow.out_file"),
-                created_by: Some(String::from("Kevin@example.com")),
-            };
-
-            let template_result2 = TemplateResultData::create(conn, new_template_result)
-                .expect("Failed inserting test template_result");
-
-            (
-                template,
-                vec![result1, result2],
-                vec![template_result1, template_result2],
-            )
-        }
-
-        #[actix_rt::test]
-        async fn test_build_input_list_missing_input() {
-            let conn = unit_test_util::get_test_db_connection();
-            // Insert template and results so they can be mapped
-            let (test_template, _, _) = insert_test_template_and_results(&conn);
-            // Load test and eval wdls
-            let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").unwrap();
-            let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").unwrap();
-            // Make an input map with greeted mapped to a nonexistent input name
-            let input_map = json!({
-                "String Section": {
-                    "greeting": "result:Greeting",
-                    "greeted": "test_input:greeting_workflow.greeted"
-                },
-                "File Section": {
-                    "greeting_file": "result:Greeting File",
-                    "original_filename": "eval_input:greeting_file_workflow.in_output_filename",
-                    "version": "3"
-                }
-            });
-            // Make a run
-            let run = RunWithResultData {
-                run_id: Uuid::new_v4(),
-                test_id: Uuid::new_v4(),
-                name: String::from("Cool Test Run"),
-                status: RunStatusEnum::Succeeded,
-                test_input: json!({
-                    "greeting_workflow.in_greeting": "Yo",
-                    "greeting_workflow.in_greeted": "Test Person"
-                }),
-                eval_input: json!({
-                    "greeting_file_workflow.in_output_filename": "greeting_file.txt",
-                    "greeting_file_workflow.in_greeting": "test_output:greeting_workflow.out_greeting"
-                }),
-                test_cromwell_job_id: Some(String::from("afffdfgaw4egedetwefe")),
-                eval_cromwell_job_id: Some(String::from("jfiopewjgfoiewmcopaw")),
-                created_at: Utc::now().naive_utc(),
-                created_by: Some(String::from("kevin@example.com")),
-                finished_at: Some(Utc::now().naive_utc()),
-                results: Some(json!({
-                    "Greeting":"Yo, Test Person",
-                    "Greeting File":"example.com/path/to/greeting/file"
-                })),
-            };
-            // Build the input list
-            let result_error = build_section_inputs_map(
-                &conn,
-                input_map.as_object().unwrap(),
-                &test_template,
-                &test_wdl,
-                &eval_wdl,
-                &run,
-            )
-            .await;
-
-            assert!(matches!(
-                result_error,
-                Err(report_builder::Error::Inputs(_))
-            ));
-        }
-
-        #[actix_rt::test]
-        async fn test_build_input_list_missing_result() {
-            let conn = unit_test_util::get_test_db_connection();
-            // Insert template and results so they can be mapped
-            let (test_template, _, _) = insert_test_template_and_results(&conn);
-            // Load test and eval wdls
-            let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").unwrap();
-            let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").unwrap();
-            // Make an input map
-            let input_map = json!({
-                "String Section": {
-                    "greeting": "result:Greeting",
-                    "greeted": "test_input:greeting_workflow.in_greeted"
-                },
-                "File Section": {
-                    "greeting_file": "result:Greeting File",
-                    "original_filename": "eval_input:greeting_file_workflow.in_output_filename",
-                    "version": "3"
-                }
-            });
-            // Make a run, missing the greeting file result
-            let run = RunWithResultData {
-                run_id: Uuid::new_v4(),
-                test_id: Uuid::new_v4(),
-                name: String::from("Cool Test Run"),
-                status: RunStatusEnum::Succeeded,
-                test_input: json!({
-                    "greeting_workflow.in_greeting": "Yo",
-                    "greeting_workflow.in_greeted": "Test Person"
-                }),
-                eval_input: json!({
-                    "greeting_file_workflow.in_output_filename": "greeting_file.txt",
-                    "greeting_file_workflow.in_greeting": "test_output:greeting_workflow.out_greeting"
-                }),
-                test_cromwell_job_id: Some(String::from("afffdfgaw4egedetwefe")),
-                eval_cromwell_job_id: Some(String::from("jfiopewjgfoiewmcopaw")),
-                created_at: Utc::now().naive_utc(),
-                created_by: Some(String::from("kevin@example.com")),
-                finished_at: Some(Utc::now().naive_utc()),
-                results: Some(json!({
-                    "Greeting":"Yo, Test Person",
-                })),
-            };
-            // Build the input list
-            let result_error = build_section_inputs_map(
-                &conn,
-                input_map.as_object().unwrap(),
-                &test_template,
-                &test_wdl,
-                &eval_wdl,
-                &run,
-            )
-            .await;
-
-            assert!(matches!(
-                result_error,
-                Err(report_builder::Error::Inputs(_))
-            ));
-        }
-
-        #[actix_rt::test]
-        async fn test_build_input_list_success() {
-            let conn = unit_test_util::get_test_db_connection();
-            // Insert template and results so they can be mapped
-            let (test_template, _, _) = insert_test_template_and_results(&conn);
-            // Load test and eval wdls
-            let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl").unwrap();
-            let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl").unwrap();
-            // Make an input map
-            let input_map = json!({
-                "String Section": {
-                    "greeting": "result:Greeting",
-                    "greeted": "test_input:greeting_workflow.in_greeted"
-                },
-                "File Section": {
-                    "greeting_file": "result:Greeting File",
-                    "original_filename": "eval_input:greeting_file_workflow.in_output_filename",
-                    "version": "3"
-                }
-            });
-            // Make a run
-            let run = RunWithResultData {
-                run_id: Uuid::new_v4(),
-                test_id: Uuid::new_v4(),
-                name: String::from("Cool Test Run"),
-                status: RunStatusEnum::Succeeded,
-                test_input: json!({
-                    "greeting_workflow.in_greeting": "Yo",
-                    "greeting_workflow.in_greeted": "Test Person"
-                }),
-                eval_input: json!({
-                    "greeting_file_workflow.in_output_filename": "greeting_file.txt",
-                    "greeting_file_workflow.in_greeting": "test_output:greeting_workflow.out_greeting"
-                }),
-                test_cromwell_job_id: Some(String::from("afffdfgaw4egedetwefe")),
-                eval_cromwell_job_id: Some(String::from("jfiopewjgfoiewmcopaw")),
-                created_at: Utc::now().naive_utc(),
-                created_by: Some(String::from("kevin@example.com")),
-                finished_at: Some(Utc::now().naive_utc()),
-                results: Some(json!({
-                    "Greeting":"Yo, Test Person",
-                    "Greeting File":"example.com/path/to/greeting/file"
-                })),
-            };
-            // Build the input list
-            let result_input_map = build_section_inputs_map(
-                &conn,
-                input_map.as_object().unwrap(),
-                &test_template,
-                &test_wdl,
-                &eval_wdl,
-                &run,
-            )
-            .await
-            .unwrap();
-            // Compare it to our expectation
-            let mut expected_input_map: HashMap<String, HashMap<String, ReportInput>> =
-                HashMap::new();
-            expected_input_map.insert(String::from("File Section"), {
-                let mut section_input_map: HashMap<String, ReportInput> = HashMap::new();
-                section_input_map.insert(
-                    String::from("greeting_file"),
-                    ReportInput {
-                        value: String::from("example.com/path/to/greeting/file"),
-                        input_type: String::from("File"),
-                    },
-                );
-                section_input_map.insert(
-                    String::from("original_filename"),
-                    ReportInput {
-                        value: String::from("greeting_file.txt"),
-                        input_type: String::from("String"),
-                    },
-                );
-                section_input_map.insert(
-                    String::from("version"),
-                    ReportInput {
-                        value: String::from("3"),
-                        input_type: String::from("String"),
-                    },
-                );
-                section_input_map
-            });
-            expected_input_map.insert(String::from("String Section"), {
-                let mut section_input_map: HashMap<String, ReportInput> = HashMap::new();
-                section_input_map.insert(
-                    String::from("greeted"),
-                    ReportInput {
-                        value: String::from("Test Person"),
-                        input_type: String::from("String"),
-                    },
-                );
-                section_input_map.insert(
-                    String::from("greeting"),
-                    ReportInput {
-                        value: String::from("Yo, Test Person"),
-                        input_type: String::from("String"),
-                    },
-                );
-                section_input_map
-            });
-
-            assert_eq!(result_input_map, expected_input_map);
-        }
-    }
+    Ok(Value::Object(inputs_map))
 }
 
 #[cfg(test)]
@@ -1117,328 +671,7 @@ mod tests {
     use uuid::Uuid;
     use std::env;
 
-    fn insert_test_report_mapped_to_sections(
-        conn: &PgConnection,
-    ) -> (ReportData, Vec<ReportSectionData>, Vec<SectionData>) {
-        let mut report_sections = Vec::new();
-        let mut sections = Vec::new();
 
-        let new_report = NewReport {
-            name: String::from("Kevin's Report2"),
-            description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({
-                "metadata": {
-                    "language_info": {
-                        "codemirror_mode": {
-                            "name": "ipython",
-                            "version": 3
-                        },
-                        "file_extension": ".py",
-                        "mimetype": "text/x-python",
-                        "name": "python",
-                        "nbconvert_exporter": "python",
-                        "pygments_lexer": "ipython3",
-                        "version": "3.8.5-final"
-                    },
-                    "orig_nbformat": 2,
-                    "kernelspec": {
-                        "name": "python3",
-                        "display_name": "Python 3.8.5 64-bit",
-                        "metadata": {
-                            "interpreter": {
-                                "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                            }
-                        }
-                    }
-                },
-                "nbformat": 4,
-                "nbformat_minor": 2
-            }),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
-
-        let new_section = NewSection {
-            name: String::from("Top Section"),
-            description: Some(String::from("Description4")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print(message)",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Test@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Top Section 1"),
-            position: 1,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        let new_section = NewSection {
-            name: String::from("Middle Section"),
-            description: Some(String::from("Description5")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "file_message = open(result_file, 'r').read()",
-                        "print(message)",
-                        "print(file_message)",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Middle Section 1"),
-            position: 2,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Middle Section 2"),
-            position: 3,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        let new_section = NewSection {
-            name: String::from("Bottom Section"),
-            description: Some(String::from("Description12")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print('Thanks')",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Test@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Bottom Section 3"),
-            position: 4,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        (report, report_sections, sections)
-    }
-
-    fn insert_different_test_report_mapped_to_sections(
-        conn: &PgConnection,
-    ) -> (ReportData, Vec<ReportSectionData>, Vec<SectionData>) {
-        let mut report_sections = Vec::new();
-        let mut sections = Vec::new();
-
-        let new_report = NewReport {
-            name: String::from("Kevin's Report3"),
-            description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({
-                "metadata": {
-                    "language_info": {
-                        "codemirror_mode": {
-                            "name": "ipython",
-                            "version": 3
-                        },
-                        "file_extension": ".py",
-                        "mimetype": "text/x-python",
-                        "name": "python",
-                        "nbconvert_exporter": "python",
-                        "pygments_lexer": "ipython3",
-                        "version": "3.8.5-final"
-                    },
-                    "orig_nbformat": 2,
-                    "kernelspec": {
-                        "name": "python3",
-                        "display_name": "Python 3.8.5 64-bit",
-                        "metadata": {
-                            "interpreter": {
-                                "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                            }
-                        }
-                    }
-                },
-                "nbformat": 4,
-                "nbformat_minor": 2
-            }),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
-
-        let new_section = NewSection {
-            name: String::from("Top Section2"),
-            description: Some(String::from("Description4")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print(message)",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Test@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Top Section 1"),
-            position: 1,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        let new_section = NewSection {
-            name: String::from("Middle Section2"),
-            description: Some(String::from("Description5")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "file_message = open(result_file, 'r').read()",
-                        "print(message)",
-                        "print(file_message)",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Middle Section 2"),
-            position: 2,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        let new_section = NewSection {
-            name: String::from("Bottom Section2"),
-            description: Some(String::from("Description12")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print('Thanks')",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Test@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Bottom Section 1"),
-            position: 3,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Bottom Section 2"),
-            position: 4,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        (report, report_sections, sections)
-    }
 
     fn insert_test_run_with_results(
         conn: &PgConnection,
@@ -1562,63 +795,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             template_id,
             report_id,
-            input_map: json!({
-                "Top Section 1": {
-                    "message":"test_input:greeting_workflow.in_greeting"
-                },
-                "Middle Section 2": {
-                    "message":"eval_input:greeting_file_workflow.in_greeting",
-                    "message_file":"result:File Result"
-                }
-            }),
-            created_by: Some(String::from("kevin@example.com")),
-        };
-
-        TemplateReportData::create(conn, new_template_report)
-            .expect("Failed to insert test template report")
-    }
-
-    fn insert_test_template_report_missing_input(
-        conn: &PgConnection,
-        template_id: Uuid,
-        report_id: Uuid,
-    ) -> TemplateReportData {
-        let new_template_report = NewTemplateReport {
-            template_id,
-            report_id,
-            input_map: json!({
-                "Top Section 1": {
-                    "message":"test_input:greeting_workflow.nonexistent_input"
-                },
-                "Middle Section 2": {
-                    "message":"eval_input:greeting_file_workflow.in_greeting",
-                    "message_file":"result:File Result"
-                }
-            }),
-            created_by: Some(String::from("kevin@example.com")),
-        };
-
-        TemplateReportData::create(conn, new_template_report)
-            .expect("Failed to insert test template report")
-    }
-
-    fn insert_test_template_report_missing_result(
-        conn: &PgConnection,
-        template_id: Uuid,
-        report_id: Uuid,
-    ) -> TemplateReportData {
-        let new_template_report = NewTemplateReport {
-            template_id,
-            report_id,
-            input_map: json!({
-                "Top Section": {
-                    "message":"test_input:greeting_workflow.in_greeting"
-                },
-                "Middle Section": {
-                    "message":"eval_input:greeting_file_workflow.in_greeting",
-                    "message_file":"result:Nonexistent Result"
-                }
-            }),
             created_by: Some(String::from("kevin@example.com")),
         };
 
@@ -1686,59 +862,6 @@ mod tests {
         (report.report_id, run.run_id)
     }
 
-    fn insert_data_for_create_run_report_failure_missing_input(
-        conn: &PgConnection,
-    ) -> (Uuid, Uuid) {
-        let (report, _report_sections, _sections) = insert_test_report_mapped_to_sections(conn);
-        let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
-        let _template_report =
-            insert_test_template_report_missing_input(conn, template.template_id, report.report_id);
-
-        (report.report_id, run.run_id)
-    }
-
-    fn insert_data_for_create_run_report_failure_missing_result(
-        conn: &PgConnection,
-    ) -> (Uuid, Uuid) {
-        let (report, _report_sections, _sections) = insert_test_report_mapped_to_sections(conn);
-        let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
-        let _template_report = insert_test_template_report_missing_result(
-            conn,
-            template.template_id,
-            report.report_id,
-        );
-
-        (report.report_id, run.run_id)
-    }
-
-    fn insert_bad_section_for_report(
-        conn: &PgConnection,
-        id: Uuid,
-    ) -> (ReportSectionData, SectionData) {
-        let new_section = NewSection {
-            name: String::from("BadName"),
-            description: Some(String::from("BadDescription")),
-            contents: json!({}),
-            created_by: Some(String::from("Bad@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: id,
-            name: String::from("Bad Name 4"),
-            position: 4,
-            created_by: Some(String::from("Kelvin@example.com")),
-        };
-
-        let report_section = ReportSectionData::create(conn, new_report_section)
-            .expect("Failed inserting test report_section");
-
-        (report_section, section)
-    }
-
     #[actix_rt::test]
     async fn create_run_reports_for_completed_run_success() {
         let conn = get_test_db_connection();
@@ -1749,21 +872,6 @@ mod tests {
 
         // Set up data in DB
         let (run, reports) = insert_data_for_create_run_reports_for_completed_run_success(&conn);
-        // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
-            .expect("Failed to load test wdl from testdata");
-        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
-            .expect("Failed to load eval wdl from testdata");
-        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(eval_wdl)
-            .create();
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Submitted"
@@ -1779,8 +887,6 @@ mod tests {
             .await
             .unwrap();
 
-        test_wdl_mock.assert();
-        eval_wdl_mock.assert();
         cromwell_mock.assert();
 
         assert_eq!(result_run_reports.len(), 2);
@@ -1946,157 +1052,6 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_failure_bad_section() {
-        let conn = get_test_db_connection();
-        let client = Client::default();
-
-        // Set test location for report docker
-        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
-
-        // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
-        insert_bad_section_for_report(&conn, report_id);
-        // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
-            .expect("Failed to load test wdl from testdata");
-        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
-            .expect("Failed to load eval wdl from testdata");
-        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(eval_wdl)
-            .create();
-        let mock_response_body = json!({
-          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
-          "status": "Submitted"
-        });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .create();
-
-        let result_run_report = create_run_report_from_run_id_and_report_id(
-            &conn,
-            &client,
-            run_id,
-            report_id,
-            &Some(String::from("kevin@example.com")),
-            false,
-        )
-        .await
-        .err()
-        .unwrap();
-
-        assert!(matches!(result_run_report, Error::Parse(_)));
-    }
-
-    #[actix_rt::test]
-    async fn create_run_report_failure_missing_input() {
-        let conn = get_test_db_connection();
-        let client = Client::default();
-
-        // Set test location for report docker
-        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
-
-        // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_failure_missing_input(&conn);
-        // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
-            .expect("Failed to load test wdl from testdata");
-        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
-            .expect("Failed to load eval wdl from testdata");
-        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(eval_wdl)
-            .create();
-        let mock_response_body = json!({
-          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
-          "status": "Submitted"
-        });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .create();
-
-        let result_run_report = create_run_report_from_run_id_and_report_id(
-            &conn,
-            &client,
-            run_id,
-            report_id,
-            &Some(String::from("kevin@example.com")),
-            false,
-        )
-        .await
-        .err()
-        .unwrap();
-
-        assert!(matches!(result_run_report, Error::Inputs(_)));
-    }
-
-    #[actix_rt::test]
-    async fn create_run_report_failure_missing_result() {
-        let conn = get_test_db_connection();
-        let client = Client::default();
-
-        // Set test location for report docker
-        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
-
-        // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_failure_missing_result(&conn);
-        // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
-            .expect("Failed to load test wdl from testdata");
-        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
-            .expect("Failed to load eval wdl from testdata");
-        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(eval_wdl)
-            .create();
-        let mock_response_body = json!({
-          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
-          "status": "Submitted"
-        });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .create();
-
-        let result_run_report = create_run_report_from_run_id_and_report_id(
-            &conn,
-            &client,
-            run_id,
-            report_id,
-            &Some(String::from("kevin@example.com")),
-            false,
-        )
-        .await
-        .err()
-        .unwrap();
-
-        assert!(matches!(result_run_report, Error::Inputs(_)));
-    }
-
-    #[actix_rt::test]
     async fn create_run_report_failure_cromwell() {
         let conn = get_test_db_connection();
         let client = Client::default();
@@ -2139,53 +1094,6 @@ mod tests {
         .unwrap();
 
         assert!(matches!(result_run_report, Error::Cromwell(_)))
-    }
-
-    #[actix_rt::test]
-    async fn create_run_report_failure_wdl_download() {
-        let conn = get_test_db_connection();
-        let client = Client::default();
-
-        // Set test location for report docker
-        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
-
-        // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
-        // Make mockito mappings for the wdls and cromwell
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
-            .expect("Failed to load test wdl from testdata");
-        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
-        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
-            .with_status(404)
-            .with_header("content_type", "text/plain")
-            .create();
-        let mock_response_body = json!({
-          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
-          "status": "Submitted"
-        });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .create();
-
-        let result_run_report = create_run_report_from_run_id_and_report_id(
-            &conn,
-            &client,
-            run_id,
-            report_id,
-            &Some(String::from("kevin@example.com")),
-            false,
-        )
-        .await
-        .err()
-        .unwrap();
-
-        assert!(matches!(result_run_report, Error::Request(_)));
     }
 
     #[actix_rt::test]
@@ -2669,145 +1577,6 @@ mod tests {
     }
 
     #[test]
-    fn create_generator_wdl_success() {
-        // Empty report_sections since create_generator_wdl only really needs the order of the names
-        let report_sections = vec![
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Section 2".to_string(),
-                position: 1,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Section 1".to_string(),
-                position: 2,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-        ];
-
-        let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
-        section_inputs_map.insert(String::from("Section 2"), {
-            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
-            inputs.insert(
-                String::from("test_file"),
-                ReportInput {
-                    value: "example.com/path/to/file.txt".to_string(),
-                    input_type: "File".to_string(),
-                },
-            );
-            inputs.insert(
-                String::from("test_string"),
-                ReportInput {
-                    value: "hello".to_string(),
-                    input_type: "String".to_string(),
-                },
-            );
-            inputs
-        });
-        section_inputs_map.insert(String::from("Section 1"), {
-            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
-            inputs.insert(
-                String::from("number"),
-                ReportInput {
-                    value: "3".to_string(),
-                    input_type: "Float".to_string(),
-                },
-            );
-            inputs
-        });
-
-        let result_wdl = create_generator_wdl(&report_sections, &section_inputs_map);
-
-        // Get expected value from file
-        let expected_wdl =
-            read_to_string("testdata/manager/report_builder/expected_report_generator.wdl")
-                .unwrap();
-
-        assert_eq!(result_wdl, expected_wdl);
-    }
-
-    #[test]
-    fn create_generator_wdl_success_empty_section() {
-        // Empty sections since create_generator_wdl only really needs the order of the names
-        let report_sections = vec![
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Section 2".to_string(),
-                position: 1,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Section 1".to_string(),
-                position: 2,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Empty Section".to_string(),
-                position: 3,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-        ];
-
-        let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
-        section_inputs_map.insert(String::from("Section 2"), {
-            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
-            inputs.insert(
-                String::from("test_file"),
-                ReportInput {
-                    value: "example.com/path/to/file.txt".to_string(),
-                    input_type: "File".to_string(),
-                },
-            );
-            inputs.insert(
-                String::from("test_string"),
-                ReportInput {
-                    value: "hello".to_string(),
-                    input_type: "String".to_string(),
-                },
-            );
-            inputs
-        });
-        section_inputs_map.insert(String::from("Section 1"), {
-            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
-            inputs.insert(
-                String::from("number"),
-                ReportInput {
-                    value: "3".to_string(),
-                    input_type: "Float".to_string(),
-                },
-            );
-            inputs
-        });
-
-        let result_wdl = create_generator_wdl(&report_sections, &section_inputs_map);
-
-        // Get expected value from file
-        let expected_wdl =
-            read_to_string("testdata/manager/report_builder/expected_report_generator.wdl")
-                .unwrap();
-
-        assert_eq!(result_wdl, expected_wdl);
-    }
-
-    #[test]
     fn create_input_json_success() {
         // Empty sections since create_input_json only really needs the order of the names
         let report_sections = vec![
@@ -2831,113 +1600,6 @@ mod tests {
             },
         ];
 
-        // Create a test RunWithResultData we can use
-        let test_run = RunWithResultData {
-            run_id: Uuid::parse_str("3dc682cc-5446-4696-9107-404b3520d2d8").unwrap(),
-            test_id: Uuid::parse_str("701c9e32-1c58-468d-b808-f66daebb5938").unwrap(),
-            name: "Test run name".to_string(),
-            status: RunStatusEnum::Succeeded,
-            test_input: json!({
-                "input1": "val1"
-            }),
-            eval_input: json!({
-                "input2": "val2"
-            }),
-            test_cromwell_job_id: Some("cb9471e1-7871-4a20-8b8f-128e47cd33d3".to_string()),
-            eval_cromwell_job_id: Some("6a023918-b2b4-4f85-a58f-dbf21c61df38".to_string()),
-            created_at: Utc::now().naive_utc(),
-            created_by: Some("kevin@example.com".to_string()),
-            finished_at: Some(Utc::now().naive_utc()),
-            results: Some(json!({
-                "result1": "val1"
-            })),
-        };
-
-        let mut section_inputs_map: HashMap<String, HashMap<String, ReportInput>> = HashMap::new();
-        section_inputs_map.insert(String::from("Section 2"), {
-            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
-            inputs.insert(
-                String::from("test_file"),
-                ReportInput {
-                    value: "example.com/path/to/file.txt".to_string(),
-                    input_type: "File".to_string(),
-                },
-            );
-            inputs.insert(
-                String::from("test_string"),
-                ReportInput {
-                    value: "hello".to_string(),
-                    input_type: "String".to_string(),
-                },
-            );
-            inputs
-        });
-        section_inputs_map.insert(String::from("Section 1"), {
-            let mut inputs: HashMap<String, ReportInput> = HashMap::new();
-            inputs.insert(
-                String::from("number"),
-                ReportInput {
-                    value: "3".to_string(),
-                    input_type: "Float".to_string(),
-                },
-            );
-            inputs
-        });
-
-        let result_input_json = create_input_json(
-            "test",
-            "example.com/test/location",
-            "example.com/test:test",
-            &report_sections,
-            &section_inputs_map,
-            &serde_json::to_value(&test_run).unwrap(),
-        );
-
-        let expected_input_json = json!({
-            "generate_report_file_workflow.notebook_template": "example.com/test/location",
-            "generate_report_file_workflow.report_name" : "test",
-            "generate_report_file_workflow.report_docker" : "example.com/test:test",
-            "generate_report_file_workflow.section0_test_file": "example.com/path/to/file.txt",
-            "generate_report_file_workflow.section0_test_string": "hello",
-            "generate_report_file_workflow.section1_number": "3",
-            "generate_report_file_workflow.run_info": &serde_json::to_value(&test_run).unwrap()
-        });
-
-        assert_eq!(result_input_json, expected_input_json);
-    }
-
-    #[test]
-    fn create_input_json_success_empty_sections() {
-        // Empty sections since create_input_json only really needs the order of the names
-        let report_sections = vec![
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Section 2".to_string(),
-                position: 1,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Section 1".to_string(),
-                position: 2,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-            ReportSectionWithContentsData {
-                report_id: Uuid::new_v4(),
-                section_id: Uuid::new_v4(),
-                name: "Empty Section".to_string(),
-                position: 3,
-                created_at: Utc::now().naive_utc(),
-                created_by: None,
-                contents: json!({}),
-            },
-        ];
         // Create a test RunWithResultData we can use
         let test_run = RunWithResultData {
             run_id: Uuid::parse_str("3dc682cc-5446-4696-9107-404b3520d2d8").unwrap(),

@@ -235,7 +235,7 @@ async fn create(
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
     // Create run report
-    match report_builder::create_run_report_from_run_id_and_report_id(
+    match report_builder::create_run_report(
         &conn,
         &client,
         id,

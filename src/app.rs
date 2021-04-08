@@ -56,8 +56,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     routes::software_version::init_routes(cfg);
     routes::software_build::init_routes(cfg);
     routes::report::init_routes(cfg);
-    routes::report_section::init_routes(cfg);
     routes::run_report::init_routes(cfg);
-    routes::section::init_routes(cfg);
     routes::template_report::init_routes(cfg);
 }

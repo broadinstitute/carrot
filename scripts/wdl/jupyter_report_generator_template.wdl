@@ -74,7 +74,7 @@ workflow generate_report_file_workflow {
         String cpu = "1"
         String memory = "32 GiB"
         String disks = "local-disk 10 SSD"
-        String docker
+        String docker # The only one that's actually required
         String maxRetries = "1"
         String continueOnReturnCode = "0"
         String failOnStderr = "false"

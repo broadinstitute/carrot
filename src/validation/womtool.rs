@@ -74,53 +74,11 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
     Ok(womtool_validate(wdl_file.path())?)
 }
 
-/// Retrieves the WDL at `wdl_location` and extracts inputs using WOMtool.  Returns a HashMap
-/// containing the input names mapped to their types (without qualifiers like optional or default
-/// values) if it's successful, or an error if there is some issue retrieving the file
-/// or running WOMtool
-pub fn get_wdl_inputs_with_simple_types(wdl: &str) -> Result<HashMap<String, String>, Error> {
-    // Write it to a temporary file for parsing
-    let mut wdl_file = NamedTempFile::new()?;
-    write!(wdl_file, "{}", wdl)?;
-    // Extract inputs and parse into string
-    let inputs_string = String::from_utf8(womtool_inputs(wdl_file.path())?)?;
-    // Parse into json
-    let inputs_json_map = match serde_json::from_str(&inputs_string)? {
-        Value::Object(map) => map,
-        _ => {
-            let error_msg = format!("Running womtool inputs on WDL {} did not encounter an error but returned a result that is not a json object: {}", wdl, inputs_string);
-            error!("{}", error_msg);
-            return Err(Error::Invalid(error_msg));
-        }
-    };
-    // Convert it into a HashMap<String, String>
-    let mut inputs_map: HashMap<String, String> = HashMap::new();
-    for (key, value) in &inputs_json_map {
-        let value_string = match value {
-            Value::String(value_str) => {
-                // Get only the part of the value that comes before the first space (or ? if there
-                // is one before a space), which is the WDL type of the input
-                // Note: we're using [..] to convert the array into a slice, which is what split
-                // expects if you want to split on any of a list of characters
-                String::from(value_str.splitn(2, &[' ', '?'][..]).next().unwrap())
-                // Unwrapping should be fine here because splitn will always return at least one element
-            }
-            _ => {
-                let err_msg = format!("Womtool inputs type for {} is not formatted as a string. This should not happen. inputs: {:?}", key, &inputs_json_map);
-                error!("{}", err_msg);
-                return Err(Error::Invalid(err_msg));
-            }
-        };
-        inputs_map.insert(key.clone(), value_string.clone());
-    }
-
-    Ok(inputs_map)
-}
-
 /// Runs the womtool validate utility on the WDL at the specified path
 ///
-/// Returns ()) if the WDL is valid, an Invalid error if the WDL is invalid, or a different error if
+/// Returns Ok(()) if the WDL is valid, an Invalid error if the WDL is invalid, or a different error if
 /// there is some other issue running WOMTool
+#[allow(dead_code)]
 fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
     // Run womtool validate on the wdl
     let output = Command::new("sh")

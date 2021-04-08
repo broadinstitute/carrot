@@ -60,7 +60,7 @@ impl From<gcloud_storage::Error> for Error {
 pub async fn get_resource_as_string(client: &Client, address: &str) -> Result<String, Error> {
     // If the address is a gs address, retrieve the data using the gcloud storage api
     if address.starts_with("gs://") {
-        Ok(gcloud_storage::retrieve_object_with_gs_uri(address)?)
+        Ok(gcloud_storage::retrieve_object_media_with_gs_uri(address)?)
     }
     // Otherwise, it's probably a normal location, so we'll retrieve it with a normal http get
     else {

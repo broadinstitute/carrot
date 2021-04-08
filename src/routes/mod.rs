@@ -3,11 +3,9 @@
 // Declare route modules as public so they can be accessed elsewhere
 pub mod pipeline;
 pub mod report;
-pub mod report_section;
 pub mod result;
 pub mod run;
 pub mod run_report;
-pub mod section;
 pub mod software;
 pub mod software_build;
 pub mod software_version;
