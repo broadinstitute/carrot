@@ -11,7 +11,7 @@ use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 /// Represents the part of a new template_report mapping that is received as a request body
@@ -367,7 +367,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData};
@@ -681,10 +681,6 @@ mod tests {
         let report = test::read_body(resp).await;
         let test_template_report: TemplateReportData = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(
-            test_template_report.input_map,
-            new_template_report.input_map
-        );
         assert_eq!(
             test_template_report
                 .created_by

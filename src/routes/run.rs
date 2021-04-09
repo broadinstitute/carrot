@@ -574,7 +574,6 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
     use serde_json::json;
-    use std::fs::read_to_string;
     use uuid::Uuid;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {

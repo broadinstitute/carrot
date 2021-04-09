@@ -787,12 +787,10 @@ mod tests {
 
         assert!(matches!(
             new_template_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 

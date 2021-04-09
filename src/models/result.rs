@@ -186,6 +186,7 @@ impl ResultData {
     /// a template_id equal to `id`
     /// Returns a result containing either a vector of the retrieved result records as ResultData
     /// instances or an error if the query fails for some reason
+    #[allow(dead_code)]
     pub fn find_for_template(
         conn: &PgConnection,
         id: Uuid,
@@ -588,12 +589,10 @@ mod tests {
 
         assert!(matches!(
             new_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -633,12 +632,10 @@ mod tests {
 
         assert!(matches!(
             updated_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -671,12 +668,10 @@ mod tests {
 
         assert!(matches!(
             delete_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            ),)
         ));
     }
 }

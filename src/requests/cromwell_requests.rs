@@ -1,19 +1,19 @@
 //! Module for making requests to Cromwell
 
+#[cfg(not(test))]
 use crate::config;
 use actix_multipart_rfc7578::client::multipart;
 use actix_web::client::{Client, SendRequestError};
 use actix_web::error::PayloadError;
 use log::debug;
+#[cfg(test)]
+use mockito;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::Utf8Error;
-
-#[cfg(test)]
-use mockito;
 
 /// Parameters for submitting a job to cromwell
 ///

@@ -92,7 +92,7 @@ async fn get_resource_from_normal_uri(client: &Client, address: &str) -> Result<
 #[cfg(test)]
 mod tests {
 
-    use crate::requests::test_resource_requests::{get_resource_as_string, Error};
+    use crate::requests::test_resource_requests::get_resource_as_string;
     use actix_web::client::Client;
 
     #[actix_rt::test]

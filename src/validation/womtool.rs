@@ -5,9 +5,6 @@ use crate::config;
 use crate::requests::test_resource_requests;
 use actix_web::client::Client;
 use core::fmt;
-use log::error;
-use serde_json::Value;
-use std::collections::HashMap;
 use std::error;
 use std::fs::read_to_string;
 use std::io::Write;
@@ -105,7 +102,8 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
 /// Runs the womtool inputs utility on the WDL at the specified path
 ///
 /// Returns the WOMtool output if parsing the WDL inputs is successful, or an error if there is some
-/// issue running WOMtool or
+/// issue running WOMtool
+#[allow(dead_code)]
 fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
     // Run womtool validate on the wdl
     let output = Command::new("sh")
@@ -141,17 +139,11 @@ fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::requests::test_resource_requests;
     use crate::unit_test_util::load_env_config;
-    use crate::validation::womtool::{
-        get_wdl_inputs_with_simple_types, wdl_is_valid, womtool_inputs, Error,
-    };
+    use crate::validation::womtool::{wdl_is_valid, Error};
     use actix_web::client::Client;
-    use serde_json::json;
     use std::collections::HashMap;
     use std::fs::read_to_string;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[actix_rt::test]
     async fn test_wdl_is_valid_true() {
@@ -217,29 +209,5 @@ mod tests {
         mock.assert();
 
         assert!(matches!(response, Err(Error::Request(_))));
-    }
-
-    #[actix_rt::test]
-    async fn test_get_wdl_inputs_with_simple_types_success() {
-        load_env_config();
-
-        // Get test file
-        let test_wdl = read_to_string("testdata/validation/womtool/valid_wdl.wdl").unwrap();
-
-        let response = get_wdl_inputs_with_simple_types(&test_wdl).unwrap();
-
-        let mut expected_response: HashMap<String, String> = HashMap::new();
-        expected_response.insert(String::from("myWorkflow.person"), String::from("String"));
-        expected_response.insert(String::from("myWorkflow.times"), String::from("Int"));
-        assert_eq!(response, expected_response);
-    }
-
-    #[actix_rt::test]
-    async fn test_get_wdl_inputs_with_simple_types_invalid() {
-        load_env_config();
-
-        let response = get_wdl_inputs_with_simple_types("test");
-
-        assert!(matches!(response, Err(Error::Invalid(_))));
     }
 }

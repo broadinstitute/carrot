@@ -18,7 +18,6 @@ use diesel::dsl::{all, any};
 use diesel::prelude::*;
 use log::error;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
 
 /// Mapping to a template_report mapping as it exists in the TEMPLATE_REPORT table in the
@@ -216,6 +215,7 @@ impl TemplateReportData {
     /// Returns a result containing either the retrieved template_report mapping as a
     /// TemplateReportData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
+    #[allow(dead_code)]
     pub fn find_by_test_and_report(
         conn: &PgConnection,
         query_test_id: Uuid,
@@ -321,7 +321,6 @@ mod tests {
     use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_report::{NewRunReport, RunReportData};
-    use crate::models::section::{NewSection, SectionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
@@ -425,7 +424,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test":"test"}]}),
+            notebook: json!({"test":[{"test":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -468,7 +468,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report2"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test2":"test"}]}),
+            notebook: json!({"test":[{"test2":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -490,7 +491,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report3"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test2":"test"}]}),
+            notebook: json!({"test":[{"test2":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -510,7 +512,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report4"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test4":"test"}]}),
+            notebook: json!({"test":[{"test4":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -857,10 +860,6 @@ mod tests {
         let test_template_report = insert_test_template_report(&conn);
 
         assert_eq!(
-            test_template_report.input_map,
-            json!({"section4":{"input1":"value1"}})
-        );
-        assert_eq!(
             test_template_report.created_by,
             Some(String::from("Kevin@example.com"))
         );
@@ -882,12 +881,10 @@ mod tests {
 
         assert!(matches!(
             new_template_report,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 

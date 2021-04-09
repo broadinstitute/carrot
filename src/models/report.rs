@@ -319,10 +319,8 @@ mod tests {
     use super::*;
     use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::report_section::{NewReportSection, ReportSectionData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_report::{NewRunReport, RunReportData};
-    use crate::models::section::{NewSection, SectionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
@@ -383,7 +381,7 @@ mod tests {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
             notebook: json!({"cells":[{"test1":"test"}]}),
-            config: Some(json!{"memory": "32 GiB"}),
+            config: Some(json!({"memory": "32 GiB"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -397,7 +395,7 @@ mod tests {
             name: String::from("Name1"),
             description: Some(String::from("Description4")),
             notebook: json!({"cells":[{"test1":"test"}]}),
-            config: Some(json!{"cpu": "4"}),
+            config: Some(json!({"cpu": "4"})),
             created_by: Some(String::from("Test@example.com")),
         };
 
@@ -417,7 +415,7 @@ mod tests {
             name: String::from("Name4"),
             description: Some(String::from("Description3")),
             notebook: json!({"cells":[{"test3":"test"}]}),
-            config: Some(json!{"preemptible": "1"}),
+            config: Some(json!({"preemptible": "1"})),
             created_by: Some(String::from("Test@example.com")),
         };
 
@@ -433,7 +431,7 @@ mod tests {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
             notebook: json!({"notebook":[{"test3":"test"}]}),
-            config: Some(json!{"cpu": "4"}),
+            config: Some(json!({"cpu": "4"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -460,7 +458,7 @@ mod tests {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
             notebook: json!({"notebook":[{"test2":"test"}]}),
-            config: Some(json!{"maxRetries": "4"}),
+            config: Some(json!({"maxRetries": "4"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -619,7 +617,7 @@ mod tests {
             name: None,
             description: None,
             notebook: None,
-            config: Some(json!{"cpu": "4"}),
+            config: Some(json!({"cpu": "4"})),
             created_before: None,
             created_after: None,
             created_by: None,
@@ -762,12 +760,10 @@ mod tests {
 
         assert!(matches!(
             new_report,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -811,14 +807,10 @@ mod tests {
 
         assert!(matches!(
             updated_report,
-            Err(
-                UpdateError::DB(
-                    diesel::result::Error::DatabaseError(
-                        diesel::result::DatabaseErrorKind::UniqueViolation,
-                        _,
-                    ),
-                ),
-            )
+            Err(UpdateError::DB(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),),)
         ));
     }
 
@@ -850,12 +842,10 @@ mod tests {
 
         assert!(matches!(
             delete_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            ),)
         ));
     }
 

@@ -8,8 +8,7 @@ use crate::models::report::{NewReport, ReportChangeset, ReportData, ReportQuery,
 use crate::routes::error_body::ErrorBody;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 /// Handles requests to /reports/{id} for retrieving report info by report_id
@@ -411,7 +410,7 @@ mod tests {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
             notebook: json!({"cells":[{"test2":"test"}]}),
-            config: Some(json!{"memory": "32 GiB"}),
+            config: Some(json!({"memory": "32 GiB"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -596,7 +595,7 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_report = NewReportIncomplete {
+        let new_report = NewReport {
             name: report.name.clone(),
             notebook: json!({"cells":[{"test": "test"}]}),
             config: Some(json!({"cpu": "2"})),
@@ -701,7 +700,7 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let report_change = ReportChangesetIncomplete {
+        let report_change = ReportChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             notebook: Some(json!({"cells":[{"test": "test"}]})),

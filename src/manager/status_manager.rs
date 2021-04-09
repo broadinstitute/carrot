@@ -1030,13 +1030,11 @@ mod tests {
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
-    use crate::models::report_section::{NewReportSection, ReportSectionData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
-    use crate::models::section::{NewSection, SectionData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
@@ -1048,7 +1046,7 @@ mod tests {
     use actix_web::client::Client;
     use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::fs::read_to_string;
     use uuid::Uuid;
 
@@ -1356,14 +1354,7 @@ mod tests {
     fn insert_test_run_report(conn: &PgConnection) -> RunReportData {
         let run = insert_test_run(conn);
 
-        let new_report = NewReport {
-            name: String::from("Kevin's Report"),
-            description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test1":"test"}]}),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+        let report = insert_test_report(conn);
 
         let new_run_report = NewRunReport {
             run_id: run.run_id,
@@ -1386,154 +1377,21 @@ mod tests {
 
         RunSoftwareVersionData::create(conn, map).expect("Failed to map run to software version");
     }
-
-    fn insert_test_report_mapped_to_sections(
-        conn: &PgConnection,
-    ) -> (ReportData, Vec<ReportSectionData>, Vec<SectionData>) {
-        let mut report_sections = Vec::new();
-        let mut sections = Vec::new();
+    fn insert_test_report(conn: &PgConnection) -> ReportData {
+        let notebook: Value = serde_json::from_str(
+            &read_to_string("testdata/manager/report_builder/report_notebook.ipynb").unwrap(),
+        )
+        .unwrap();
 
         let new_report = NewReport {
-            name: String::from("Kevin's Report2"),
+            name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({
-                "metadata": {
-                    "language_info": {
-                        "codemirror_mode": {
-                            "name": "ipython",
-                            "version": 3
-                        },
-                        "file_extension": ".py",
-                        "mimetype": "text/x-python",
-                        "name": "python",
-                        "nbconvert_exporter": "python",
-                        "pygments_lexer": "ipython3",
-                        "version": "3.8.5-final"
-                    },
-                    "orig_nbformat": 2,
-                    "kernelspec": {
-                        "name": "python3",
-                        "display_name": "Python 3.8.5 64-bit",
-                        "metadata": {
-                            "interpreter": {
-                                "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                            }
-                        }
-                    }
-                },
-                "nbformat": 4,
-                "nbformat_minor": 2
-            }),
+            notebook,
+            config: Some(json!({"memory": "32 GiB"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
-        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
-
-        let new_section = NewSection {
-            name: String::from("Top Section"),
-            description: Some(String::from("Description4")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print(message)",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Test@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Top Section 1"),
-            position: 1,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        let new_section = NewSection {
-            name: String::from("Middle Section"),
-            description: Some(String::from("Description5")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "file_message = open(result_file, 'r').read()",
-                        "print(message)",
-                        "print(file_message)",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Middle Section 2"),
-            position: 2,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        let new_section = NewSection {
-            name: String::from("Bottom Section"),
-            description: Some(String::from("Description12")),
-            contents: json!({"cells":[
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print('Thanks')",
-                   ]
-                }
-            ]}),
-            created_by: Some(String::from("Test@example.com")),
-        };
-
-        let section =
-            SectionData::create(conn, new_section).expect("Failed inserting test section");
-
-        let new_report_section = NewReportSection {
-            section_id: section.section_id,
-            report_id: report.report_id,
-            name: String::from("Bottom Section 3"),
-            position: 3,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        report_sections.push(
-            ReportSectionData::create(conn, new_report_section)
-                .expect("Failed inserting test report_section"),
-        );
-        sections.push(section);
-
-        (report, report_sections, sections)
+        ReportData::create(conn, new_report).expect("Failed inserting test report")
     }
 
     fn insert_test_template_report(
@@ -1544,15 +1402,6 @@ mod tests {
         let new_template_report = NewTemplateReport {
             template_id,
             report_id,
-            input_map: json!({
-                "Top Section 1": {
-                    "message":"test_input:greeting_workflow.in_greeting"
-                },
-                "Middle Section 2": {
-                    "message":"test_input:greeting_workflow.in_greeted",
-                    "message_file":"result:Greeting File"
-                }
-            }),
             created_by: Some(String::from("kevin@example.com")),
         };
 
@@ -1676,8 +1525,7 @@ mod tests {
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         // Define and map a report to this template
-        let (test_report, _test_report_sections, _testion_sections) =
-            insert_test_report_mapped_to_sections(&conn);
+        let test_report = insert_test_report(&conn);
         insert_test_template_report(&conn, template_id, test_report.report_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -1702,21 +1550,6 @@ mod tests {
             mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
         ]))
         .create();
-        // Make mockito mappings for the wdls
-        let test_wdl = read_to_string("testdata/manager/report_builder/test.wdl")
-            .expect("Failed to load test wdl from testdata");
-        let test_wdl_mock = mockito::mock("GET", "/test.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(test_wdl)
-            .create();
-        let eval_wdl = read_to_string("testdata/manager/report_builder/eval.wdl")
-            .expect("Failed to load eval wdl from testdata");
-        let eval_wdl_mock = mockito::mock("GET", "/eval.wdl")
-            .with_status(200)
-            .with_header("content_type", "text/plain")
-            .with_body(eval_wdl)
-            .create();
         // Mock for cromwell for submitting report job
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1748,8 +1581,6 @@ mod tests {
         );
         assert_eq!(results.get("Greeting Text").unwrap(), "Yo, Cool Person");
         // Make sure the report job was started
-        test_wdl_mock.assert();
-        eval_wdl_mock.assert();
         cromwell_mock.assert();
         let result_run_report =
             RunReportData::find_by_run_and_report(&conn, result_run.run_id, test_report.report_id)

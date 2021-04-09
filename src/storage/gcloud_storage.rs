@@ -129,6 +129,7 @@ pub fn retrieve_object_media_with_gs_uri(address: &str) -> Result<String, Error>
 /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
 /// Storage JSON API, specifically to retrieve the google storage object (the metadata, not the
 /// actual file)
+#[allow(dead_code)]
 pub fn retrieve_object_with_gs_uri(address: &str) -> Result<Object, Error> {
     // Parse address to get bucket and object name
     let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
@@ -197,14 +198,7 @@ fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Er
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::gcloud_storage::{
-        initialize_storage_hub, parse_bucket_and_object_name, retrieve_object_media_with_gs_uri,
-        upload_file_to_gs_uri, Error,
-    };
-    use crate::unit_test_util;
-    use serde_json::json;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
+    use crate::storage::gcloud_storage::{parse_bucket_and_object_name, Error};
 
     #[test]
     fn parse_bucket_and_object_name_success() {

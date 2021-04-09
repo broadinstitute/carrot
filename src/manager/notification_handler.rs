@@ -368,7 +368,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test1":"test"}]}),
+            notebook: json!({"test":[{"test1":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 

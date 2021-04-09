@@ -274,6 +274,7 @@ impl TemplateData {
     }
 
     /// Retrieves the template for the run specified by `run_id`
+    #[allow(dead_code)]
     pub fn find_by_run(conn: &PgConnection, run_id: Uuid) -> Result<Self, diesel::result::Error> {
         let run_subquery = run::dsl::run
             .filter(run::dsl::run_id.eq(run_id))
@@ -1008,12 +1009,10 @@ mod tests {
 
         assert!(matches!(
             new_template,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -1087,14 +1086,10 @@ mod tests {
 
         assert!(matches!(
             updated_template,
-            Err(
-                UpdateError::DB(
-                    diesel::result::Error::DatabaseError(
-                        diesel::result::DatabaseErrorKind::UniqueViolation,
-                        _,
-                    ),
-                ),
-            )
+            Err(UpdateError::DB(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),),)
         ));
     }
 
@@ -1147,12 +1142,10 @@ mod tests {
 
         assert!(matches!(
             delete_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            ),)
         ));
     }
 

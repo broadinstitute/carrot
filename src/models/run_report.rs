@@ -403,7 +403,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test1":"test"}]}),
+            notebook: json!({"test":[{"test1":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -430,7 +431,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report2"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test2":"test"}]}),
+            notebook: json!({"test":[{"test2":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -457,7 +459,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report3"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test3":"test"}]}),
+            notebook: json!({"test":[{"test3":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -480,7 +483,8 @@ mod tests {
         let new_report = NewReport {
             name: String::from("Kevin's Report4"),
             description: Some(String::from("Kevin made this report for testing")),
-            metadata: json!({"metadata":[{"test4":"test"}]}),
+            notebook: json!({"test":[{"test4":"test"}]}),
+            config: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -891,12 +895,10 @@ mod tests {
 
         assert!(matches!(
             new_run_report,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
