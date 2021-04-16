@@ -129,7 +129,6 @@ pub fn retrieve_object_media_with_gs_uri(address: &str) -> Result<String, Error>
 /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
 /// Storage JSON API, specifically to retrieve the google storage object (the metadata, not the
 /// actual file)
-#[allow(dead_code)]
 pub fn retrieve_object_with_gs_uri(address: &str) -> Result<Object, Error> {
     // Parse address to get bucket and object name
     let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
@@ -177,6 +176,22 @@ pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<St
     ))
 }
 
+/// Builds the corresponding Authenticated URL from `uri` and returns it
+pub fn convert_gs_uri_to_authenticated_url(uri: &str) -> Result<String, Error> {
+    // Get the contents of the uri minus the "gs://" at the beginning
+    let stripped_uri = match uri.get(5..) {
+        Some(stripped_uri) => stripped_uri,
+        None => {
+            // If there's nothing after where the "gs://" would be, return an error
+            return Err(Error::Parse(format!(
+                "Failed to parse input as gs uri: {}",
+                uri
+            )));
+        }
+    };
+    Ok(format!("https://storage.cloud.google.com/{}", stripped_uri))
+}
+
 /// Extracts the bucket name and the object name from the full gs uri of a file.  Expects
 /// `object_uri` in the format gs://bucketname/ob/ject/nam/e
 fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Error> {
@@ -198,7 +213,11 @@ fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Er
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::gcloud_storage::{parse_bucket_and_object_name, Error};
+    use crate::storage::gcloud_storage::{
+        convert_gs_uri_to_authenticated_url, initialize_storage_hub, parse_bucket_and_object_name,
+        retrieve_object_with_gs_uri, Error,
+    };
+    use crate::unit_test_util;
 
     #[test]
     fn parse_bucket_and_object_name_success() {
@@ -213,5 +232,22 @@ mod tests {
         let test_result_uri = "gs://filename.txt";
         let failure = parse_bucket_and_object_name(test_result_uri);
         assert!(matches!(failure, Err(Error::Parse(_))));
+    }
+
+    #[test]
+    fn convert_gs_uri_to_authenticated_url_success() {
+        let test_result_uri = "gs://bucket_name/some/garbage/filename.txt";
+        let authenticated_url = convert_gs_uri_to_authenticated_url(test_result_uri).unwrap();
+        assert_eq!(
+            authenticated_url,
+            "https://storage.cloud.google.com/bucket_name/some/garbage/filename.txt"
+        );
+    }
+
+    #[test]
+    fn convert_gs_uri_to_authenticated_url_failure() {
+        let test_result_uri = "";
+        let authenticated_url = convert_gs_uri_to_authenticated_url(test_result_uri);
+        assert!(matches!(authenticated_url, Err(Error::Parse(_))));
     }
 }

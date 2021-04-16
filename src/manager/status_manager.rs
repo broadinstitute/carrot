@@ -27,6 +27,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use crate::models::report::ReportData;
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
@@ -570,14 +571,41 @@ async fn send_notifications_for_run_completion(
 /// Sends any necessary terminal status notifications for `run_report`, currently emails
 async fn send_notifications_for_run_report_completion(
     conn: &PgConnection,
+    client: &Client,
     run_report: &RunReportData,
 ) -> Result<(), UpdateStatusError> {
+    // Get run and report
+    let run = match RunData::find_by_id(conn, run_report.run_id){
+        Ok(run) => run,
+        Err(e) => {
+            return Err(UpdateStatusError::DB(format!("Retrieving run with id {} failed with error {}", run_report.run_id, e)));
+        }
+    };
+    let report = match ReportData::find_by_id(conn, run_report.report_id){
+        Ok(report) => report,
+        Err(e) => {
+            return Err(UpdateStatusError::DB(format!("Retrieving report with id {} failed with error {}", run_report.report_id, e)));
+        }
+    };
     #[cfg(not(test))] // Skip the email step when testing
     notification_handler::send_run_report_complete_emails(
         conn,
-        run_report.run_id,
-        run_report.report_id,
+        run_report,
+        &run,
+        &report.name
     )?;
+    // If triggering runs from GitHub is enabled, check if the run was triggered from a
+    // a GitHub comment and reply if so
+    if *config::ENABLE_GITHUB_REQUESTS {
+        notification_handler::post_run_report_complete_comment_if_from_github(
+            conn,
+            client,
+            run_report,
+            &report.name,
+            &run.name
+        )
+            .await?;
+    }
     Ok(())
 }
 
@@ -784,7 +812,7 @@ async fn check_and_update_run_report_status(
             || status == ReportStatusEnum::Failed
             || status == ReportStatusEnum::Aborted
         {
-            send_notifications_for_run_report_completion(conn, &run_report).await?;
+            send_notifications_for_run_report_completion(conn, client, &run_report).await?;
         }
     }
 
@@ -811,7 +839,7 @@ fn get_run_report_changeset_from_succeeded_cromwell_metadata(
     let mut run_report_outputs_map: Map<String, Value> = Map::new();
     // Loop through the three outputs we want, get them from `outputs`, and put them in our outputs
     // map
-    for output_key in vec!["populated_notebook", "html_report"] {
+    for output_key in vec!["populated_notebook", "html_report", "empty_notebook"] {
         // Get the output from the cromwell outputs
         let output_val = match outputs.get(&format!("generate_report_file_workflow.{}", output_key))
         {
@@ -2038,12 +2066,15 @@ mod tests {
         let conn = pool.get().unwrap();
         // Insert run_report we'll use for testing
         let run_report = insert_test_run_report(&conn);
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, run_report.run_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
             "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
             "status": "Succeeded",
             "outputs": {
                 "generate_report_file_workflow.populated_notebook": "gs://example/example/populated_notebook.ipynb",
+                "generate_report_file_workflow.empty_notebook": "gs://example/example/empty_notebook.ipynb",
                 "generate_report_file_workflow.html_report": "gs://example/example/html_report.html"
             },
             "end": "2020-12-31T11:11:11.0000Z"
@@ -2080,7 +2111,8 @@ mod tests {
             result_run_report.results.unwrap(),
             json!({
                 "populated_notebook": "gs://example/example/populated_notebook.ipynb",
-                "html_report": "gs://example/example/html_report.html"
+                "html_report": "gs://example/example/html_report.html",
+                "empty_notebook": "gs://example/example/empty_notebook.ipynb",
             })
         );
     }

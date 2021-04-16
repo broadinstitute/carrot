@@ -16,9 +16,10 @@ use crate::storage::gcloud_storage;
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
-use log::{debug, error};
+use log::{debug, error, warn};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Error type for possible errors returned by generating a run report
@@ -34,6 +35,7 @@ pub enum Error {
     Cromwell(CromwellRequestError),
     Prohibited(String),
     Request(test_resource_requests::Error),
+    Autosize(String),
 }
 
 impl std::error::Error for Error {}
@@ -50,6 +52,7 @@ impl fmt::Display for Error {
             Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e),
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
             Error::Request(e) => write!(f, "report_builder Error Request {}", e),
+            Error::Autosize(e) => write!(f, "report_builder Error Autosize {}", e),
         }
     }
 }
@@ -647,12 +650,115 @@ fn create_input_json(
     Ok(Value::Object(inputs_map))
 }
 
+/// Checks inputs (if `include_inputs` is true) and results (if `include_results` is true) in
+/// `run_data` for gs uris, gets the sizes of the files for any that it finds, and returns a disk
+/// size to use based on that
+fn get_disk_size_based_on_inputs_and_results(
+    run_data: &RunWithResultData,
+    include_inputs: bool,
+    include_results: bool,
+) -> Result<u64, Error> {
+    // Keep track of the size of all the gs files
+    let mut size_total: u64 = 0;
+    // Get the uris for any inputs and results we plan to include
+    let mut gs_uris: Vec<String> = Vec::new();
+    if include_inputs {
+        // Get the gs uris from test and eval inputs
+        // We're only actually going to try to get the gs uris if the inputs value is an object (the
+        // other possibility is that it's null, if there are no inputs)
+        if let Some(test_inputs) = run_data.test_input.as_object() {
+            gs_uris.extend(get_gs_uris_from_map(test_inputs));
+        }
+        if let Some(eval_inputs) = run_data.eval_input.as_object() {
+            gs_uris.extend(get_gs_uris_from_map(eval_inputs));
+        }
+    }
+    if include_results {
+        // Get the gs uris from results
+        // Results can be None, we have to check for that and then check if it has an object with
+        // results
+        if let Some(results_obj) = &run_data.results {
+            if let Some(results) = results_obj.as_object() {
+                gs_uris.extend(get_gs_uris_from_map(results));
+            }
+        }
+    }
+    // Now, get the sizes of each of these files
+    for uri in gs_uris {
+        // Get the gs object metadata for this file
+        #[cfg(not(test))]
+        let object_metadata = gcloud_storage::retrieve_object_with_gs_uri(&uri)?;
+        #[cfg(test)]
+        // The google_storage1 library doesn't seem to play nice with tests, so we'll fake it
+        let object_metadata = {
+            let mut test_object = google_storage1::Object::default();
+            test_object.size = Some(String::from("610035000"));
+            test_object
+        };
+        // If the object has a size attribute, add that size to `size`
+        match object_metadata.size {
+            Some(size_value) => {
+                // Parse the size and add it to our running size total
+                match size_value.parse::<u64>() {
+                    Ok(parsed_size) => {
+                        // Add it to the size total
+                        size_total += parsed_size;
+                    }
+                    Err(e) => {
+                        // If we get an error parsing, return an error
+                        let error_msg = format!("Encountered the following error while attempting to parse size information({}), for object at gs uri({}): {}", size_value, uri, e);
+                        error!("{}", &error_msg);
+                        return Err(Error::Autosize(error_msg));
+                    }
+                }
+            }
+            None => {
+                // Print a warning, but don't error out, if there is no size value
+                warn!("Failed to retrieve size for GS Object at {}", uri);
+            }
+        }
+    }
+    // Multiply by two to give us wiggle room
+    size_total *= 2;
+    // Convert to GB and round up, plus 20 as a baseline
+    size_total = size_total / 1000000000 + 21;
+    Ok(size_total)
+}
+
+/// Loops through the values in `map` and adds each to a vec to return if it is formatted as gs uri
+fn get_gs_uris_from_map(map: &Map<String, Value>) -> Vec<String> {
+    let mut gs_uris: Vec<String> = Vec::new();
+    for (_, value) in map {
+        // If it's a string, we'll check if it's formatted as a gs uri
+        if let Some(value_as_str) = value.as_str() {
+            // If it starts with gs://, we'll say it's a gs uri, and add it
+            if value_as_str.starts_with("gs://") {
+                gs_uris.push(String::from(value_as_str));
+            }
+        }
+        // If it's an array, we'll loop through it and check for gs uri strings
+        else if let Some(value_as_array) = value.as_array() {
+            for value_in_array in value_as_array {
+                // If it's a string, we'll check if it's formatted as a gs uri
+                if let Some(value_as_str) = value_in_array.as_str() {
+                    // If it starts with gs://, we'll say it's a gs uri, and add it
+                    if value_as_str.starts_with("gs://") {
+                        gs_uris.push(String::from(value_as_str));
+                    }
+                }
+            }
+        }
+    }
+
+    gs_uris
+}
+
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
     use crate::manager::report_builder::{
         create_input_json, create_report_template, create_run_report,
-        create_run_reports_for_completed_run, Error,
+        create_run_reports_for_completed_run, get_disk_size_based_on_inputs_and_results, Error,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
@@ -666,7 +772,7 @@ mod tests {
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
-    use chrono::Utc;
+    use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
     use serde_json::{json, Value};
     use std::env;
@@ -1738,5 +1844,46 @@ mod tests {
         );
 
         assert!(matches!(result_input_json, Err(Error::Parse(_))));
+    }
+
+    #[test]
+    fn get_disk_size_based_on_inputs_and_results_success() {
+        let test_run = RunWithResultData {
+            run_id: Uuid::new_v4(),
+            test_id: Uuid::new_v4(),
+            name: "Test run".to_string(),
+            status: RunStatusEnum::Succeeded,
+            test_input: json!({
+                "test_workflow.number": 4,
+                "test_workflow.file": "gs://bucket/file.txt",
+                "test_workflow.second_file": "gs://bucket/second_file.bam"
+            }),
+            eval_input: json!({
+                "eval_workflow.string": "hello",
+                "eval_workflow.file_array": [
+                    "gs://other_bucket/file.bam",
+                    "gs://other_bucket/file2.bam",
+                    "test_value",
+                    4,
+                    {"key":true},
+                    false,
+                    null
+                ],
+            }),
+            test_cromwell_job_id: Some(String::from("123456908")),
+            eval_cromwell_job_id: Some(String::from("4584902437")),
+            created_at: Utc::now().naive_utc(),
+            created_by: Some(String::from("kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+            results: Some(json!({
+                "File Result": "gs://result_bucket/file.vcf",
+                "String Result": "hi"
+            })),
+        };
+
+        let disk_size = get_disk_size_based_on_inputs_and_results(&test_run, true, true).unwrap();
+        let expected_disk_size: u64 = 27;
+
+        assert_eq!(expected_disk_size, disk_size);
     }
 }

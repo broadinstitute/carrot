@@ -309,6 +309,11 @@ async fn create(
                         e
                     ),
                 },
+                report_builder::Error::Autosize(e) => ErrorBody {
+                    title: "Autosize error".to_string(),
+                    status: 500,
+                    detail: format!("{}", e),
+                },
             };
             HttpResponseBuilder::new(
                 StatusCode::from_u16(error_body.status)

@@ -127,23 +127,19 @@ pub fn send_notification_emails_for_test(
 }
 
 /// Sends email to each user subscribed to the test, template, or pipeline for the run specified
-/// by `run_id`, and the creator, if any, of the run_report specified by `run_id` and `report_id`.
-/// The email includes the contents of the RunReportData instance for that run_report
+/// by `run`, and the creator, if any, of the run_report specified by `run_report`.
+/// The email includes the contents of the RunReportData instance for that run_report, and indicates
+/// which report by `report_name`
 pub fn send_run_report_complete_emails(
     conn: &PgConnection,
-    run_id: Uuid,
-    report_id: Uuid,
+    run_report: &RunReportData,
+    run: &RunData,
+    report_name: &str,
 ) -> Result<(), Error> {
     // If the email mode is None, just return
     if matches!(*config::EMAIL_MODE, emailer::EmailMode::None) {
         return Ok(());
     }
-    // Get run_report
-    let run_report = RunReportData::find_by_run_and_report(conn, run_id, report_id)?;
-    // Get run data so we have created_by, test_id, and name
-    let run = RunData::find_by_id(conn, run_id)?;
-    // Get report so we have name
-    let report = ReportData::find_by_id(conn, report_id)?;
     // Get subscriptions
     let subs = SubscriptionData::find_all_for_test(conn, run.test_id)?;
 
@@ -162,7 +158,7 @@ pub fn send_run_report_complete_emails(
     // Put together subject and message for emails
     let subject = format!(
         "Run report completed for run {} and report {} with status {}",
-        run.name, report.name, run_report.status
+        run.name, report_name, run_report.status
     );
     let message = serde_json::to_string_pretty(&run_report)?;
 
@@ -209,13 +205,48 @@ pub async fn post_run_complete_comment_if_from_github(
     }
 }
 
+/// Checks to see if the run for `run_report` was triggered from Github (i.e has a
+/// corresponding row in the RUN_IS_FROM_GITHUB table) and, if so, attempts to post a comment to
+/// GitHub to indicate `run_report` has finished, with the results. Returns an error if there is
+/// some issue querying the db or posting the comment
+pub async fn post_run_report_complete_comment_if_from_github(
+    conn: &PgConnection,
+    client: &Client,
+    run_report: &RunReportData,
+    report_name: &str,
+    run_name: &str
+) -> Result<(), Error> {
+    // Check if run was triggered by a github comment and retrieve relevant data if so
+    match RunIsFromGithubData::find_by_run_id(conn, run_report.run_id) {
+        Ok(data_from_github) => {
+            // If the run was triggered from github, post the report info to github as a reply
+            github_commenter::post_run_report_finished_comment(
+                client,
+                &data_from_github.owner,
+                &data_from_github.repo,
+                data_from_github.issue_number.clone(),
+                run_report,
+                report_name,
+                run_name
+            )
+                .await?;
+            Ok(())
+        }
+        Err(e) => {
+            match e {
+                // If we just didn't get a record, that's fine
+                diesel::result::Error::NotFound => Ok(()),
+                // We want to return any other error
+                _ => Err(Error::DB(e)),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{EntityTypeEnum, ReportStatusEnum, RunStatusEnum};
-    use crate::manager::notification_handler::{
-        post_run_complete_comment_if_from_github, send_notification_emails_for_test,
-        send_run_complete_emails, send_run_report_complete_emails,
-    };
+    use crate::manager::notification_handler::{post_run_complete_comment_if_from_github, send_notification_emails_for_test, send_run_complete_emails, send_run_report_complete_emails, post_run_report_complete_comment_if_from_github};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
@@ -381,9 +412,9 @@ mod tests {
             status: ReportStatusEnum::Succeeded,
             cromwell_job_id: Some(String::from("testtesttesttest")),
             results: Some(json!({
-                "populated_notebook": "gs://example/example.ipynb",
-                "html_report": "gs://example/example.html",
-                "pdf_report": "gs://example/example.pdf"
+                "populated_notebook": "gs://test_bucket/filled_report.ipynb",
+                "html_report": "gs://test_bucket/report.html",
+                "empty_notebook": "gs://test_bucket/empty_report.ipynb"
             })),
             created_by: Some(format!("{}@example.com", email_base_name)),
             finished_at: Some(Utc::now().naive_utc()),
@@ -547,8 +578,9 @@ mod tests {
         // Send email
         send_run_report_complete_emails(
             &pool.get().unwrap(),
-            new_run.run_id,
-            new_run_report.report_id,
+            &new_run_report,
+            &new_run,
+            "Kevin's Report"
         )
         .unwrap();
 
@@ -594,30 +626,6 @@ mod tests {
     }
 
     #[test]
-    fn test_send_run_report_complete_emails_failure_no_run_report() {
-        // Set environment variables so they don't break the test
-        std::env::set_var("EMAIL_MODE", "SENDMAIL");
-        std::env::set_var("EMAIL_FROM", "kevin@example.com");
-
-        let pool = get_test_db_pool();
-
-        // Send emails
-        match send_run_report_complete_emails(&pool.get().unwrap(), Uuid::new_v4(), Uuid::new_v4())
-        {
-            Err(e) => match e {
-                super::Error::DB(_) => {}
-                _ => panic!(
-                    "Send run report complete emails failed with unexpected error: {}",
-                    e
-                ),
-            },
-            _ => {
-                panic!("Send run report complete emails succeeded unexpectedly");
-            }
-        }
-    }
-
-    #[test]
     fn test_send_run_report_complete_emails_failure_bad_email() {
         // Set environment variables so they don't break the test
         std::env::set_var("EMAIL_MODE", "SENDMAIL");
@@ -638,8 +646,9 @@ mod tests {
         // Send emails
         match send_run_report_complete_emails(
             &pool.get().unwrap(),
-            new_run.run_id,
-            new_run_report.report_id,
+            &new_run_report,
+            &new_run,
+            "Kevin's Report"
         ) {
             Err(e) => match e {
                 super::Error::Email(_) => {}
@@ -817,6 +826,81 @@ mod tests {
             .create();
 
         let result = post_run_complete_comment_if_from_github(&conn, &client, test_run.run_id)
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn test_post_run_report_complete_comment_if_from_github() {
+        std::env::set_var("GITHUB_CLIENT_ID", "user");
+        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        let client = Client::default();
+
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
+        let new_run_report = insert_test_run_report_with_run_id(
+            &conn,
+            test_run.run_id,
+            "test_post_run_report_complete_comment_if_from_github@",
+        );
+
+        let request_body = json!({
+            "body":
+                format!(
+                    "<details><summary>CARROT run report Kevin's Report finished for run Kevin's Run ({})</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
+                    test_run.run_id,
+                    json!({
+                        "populated_notebook":"https://storage.cloud.google.com/test_bucket/filled_report.ipynb",
+                        "empty_notebook":"https://storage.cloud.google.com/test_bucket/empty_report.ipynb",
+                        "html_report":"https://storage.cloud.google.com/test_bucket/report.html",
+                    })
+                )
+        });
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .match_body(mockito::Matcher::Json(request_body))
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let result = post_run_report_complete_comment_if_from_github(&conn, &client, &new_run_report, "Kevin's Report", "Kevin's Run")
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn test_post_run_report_complete_comment_if_from_github_not_from_github() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        let client = Client::default();
+
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
+        let new_run_report = insert_test_run_report_with_run_id(
+            &conn,
+            test_run.run_id,
+            "test_post_run_report_complete_comment_if_from_github_not_from_github@",
+        );
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .expect(0)
+            .create();
+
+        let result = post_run_report_complete_comment_if_from_github(&conn, &client, &new_run_report, "Kevin's Report", "Kevin's Run")
             .await
             .unwrap();
 
