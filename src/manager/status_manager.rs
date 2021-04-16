@@ -12,6 +12,7 @@ use crate::manager::report_builder;
 use crate::manager::test_runner::RunBuildStatus;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 use crate::manager::{notification_handler, software_builder, test_runner};
+use crate::models::report::ReportData;
 use crate::models::run::{RunChangeset, RunData};
 use crate::models::run_report::{RunReportChangeset, RunReportData};
 use crate::models::run_result::{NewRunResult, RunResultData};
@@ -27,7 +28,6 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use crate::models::report::ReportData;
 
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
@@ -575,25 +575,26 @@ async fn send_notifications_for_run_report_completion(
     run_report: &RunReportData,
 ) -> Result<(), UpdateStatusError> {
     // Get run and report
-    let run = match RunData::find_by_id(conn, run_report.run_id){
+    let run = match RunData::find_by_id(conn, run_report.run_id) {
         Ok(run) => run,
         Err(e) => {
-            return Err(UpdateStatusError::DB(format!("Retrieving run with id {} failed with error {}", run_report.run_id, e)));
+            return Err(UpdateStatusError::DB(format!(
+                "Retrieving run with id {} failed with error {}",
+                run_report.run_id, e
+            )));
         }
     };
-    let report = match ReportData::find_by_id(conn, run_report.report_id){
+    let report = match ReportData::find_by_id(conn, run_report.report_id) {
         Ok(report) => report,
         Err(e) => {
-            return Err(UpdateStatusError::DB(format!("Retrieving report with id {} failed with error {}", run_report.report_id, e)));
+            return Err(UpdateStatusError::DB(format!(
+                "Retrieving report with id {} failed with error {}",
+                run_report.report_id, e
+            )));
         }
     };
     #[cfg(not(test))] // Skip the email step when testing
-    notification_handler::send_run_report_complete_emails(
-        conn,
-        run_report,
-        &run,
-        &report.name
-    )?;
+    notification_handler::send_run_report_complete_emails(conn, run_report, &run, &report.name)?;
     // If triggering runs from GitHub is enabled, check if the run was triggered from a
     // a GitHub comment and reply if so
     if *config::ENABLE_GITHUB_REQUESTS {
@@ -602,9 +603,9 @@ async fn send_notifications_for_run_report_completion(
             client,
             run_report,
             &report.name,
-            &run.name
+            &run.name,
         )
-            .await?;
+        .await?;
     }
     Ok(())
 }

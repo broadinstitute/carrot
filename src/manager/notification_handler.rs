@@ -214,7 +214,7 @@ pub async fn post_run_report_complete_comment_if_from_github(
     client: &Client,
     run_report: &RunReportData,
     report_name: &str,
-    run_name: &str
+    run_name: &str,
 ) -> Result<(), Error> {
     // Check if run was triggered by a github comment and retrieve relevant data if so
     match RunIsFromGithubData::find_by_run_id(conn, run_report.run_id) {
@@ -227,9 +227,9 @@ pub async fn post_run_report_complete_comment_if_from_github(
                 data_from_github.issue_number.clone(),
                 run_report,
                 report_name,
-                run_name
+                run_name,
             )
-                .await?;
+            .await?;
             Ok(())
         }
         Err(e) => {
@@ -246,7 +246,11 @@ pub async fn post_run_report_complete_comment_if_from_github(
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{EntityTypeEnum, ReportStatusEnum, RunStatusEnum};
-    use crate::manager::notification_handler::{post_run_complete_comment_if_from_github, send_notification_emails_for_test, send_run_complete_emails, send_run_report_complete_emails, post_run_report_complete_comment_if_from_github};
+    use crate::manager::notification_handler::{
+        post_run_complete_comment_if_from_github, post_run_report_complete_comment_if_from_github,
+        send_notification_emails_for_test, send_run_complete_emails,
+        send_run_report_complete_emails,
+    };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData, RunWithResultData};
@@ -580,7 +584,7 @@ mod tests {
             &pool.get().unwrap(),
             &new_run_report,
             &new_run,
-            "Kevin's Report"
+            "Kevin's Report",
         )
         .unwrap();
 
@@ -648,7 +652,7 @@ mod tests {
             &pool.get().unwrap(),
             &new_run_report,
             &new_run,
-            "Kevin's Report"
+            "Kevin's Report",
         ) {
             Err(e) => match e {
                 super::Error::Email(_) => {}
@@ -872,9 +876,15 @@ mod tests {
             .with_status(201)
             .create();
 
-        let result = post_run_report_complete_comment_if_from_github(&conn, &client, &new_run_report, "Kevin's Report", "Kevin's Run")
-            .await
-            .unwrap();
+        let result = post_run_report_complete_comment_if_from_github(
+            &conn,
+            &client,
+            &new_run_report,
+            "Kevin's Report",
+            "Kevin's Run",
+        )
+        .await
+        .unwrap();
 
         mock.assert();
     }
@@ -900,9 +910,15 @@ mod tests {
             .expect(0)
             .create();
 
-        let result = post_run_report_complete_comment_if_from_github(&conn, &client, &new_run_report, "Kevin's Report", "Kevin's Run")
-            .await
-            .unwrap();
+        let result = post_run_report_complete_comment_if_from_github(
+            &conn,
+            &client,
+            &new_run_report,
+            "Kevin's Report",
+            "Kevin's Run",
+        )
+        .await
+        .unwrap();
 
         mock.assert();
     }
