@@ -694,7 +694,7 @@ mod tests {
         let mut app =
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
-        let (valid_wdl_address, mock) = setup_valid_wdl_address();
+        let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test"),
@@ -750,7 +750,7 @@ mod tests {
         )
         .await;
 
-        let (valid_wdl_address, mock) = setup_valid_wdl_address();
+        let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
         let new_template = NewTemplate {
             name: template.name.clone(),
@@ -796,7 +796,7 @@ mod tests {
         )
         .await;
 
-        let (invalid_wdl_address, mock) = setup_invalid_wdl_address();
+        let (invalid_wdl_address, _mock) = setup_invalid_wdl_address();
 
         let new_template = NewTemplate {
             name: template.name.clone(),
@@ -844,7 +844,7 @@ mod tests {
         )
         .await;
 
-        let (valid_wdl_address, mock) = setup_valid_wdl_address();
+        let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -927,7 +927,7 @@ mod tests {
         )
         .await;
 
-        let (valid_wdl_address, mock) = setup_valid_wdl_address();
+        let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -1014,8 +1014,8 @@ mod tests {
         )
         .await;
 
-        let (valid_wdl_address, valid_mock) = setup_valid_wdl_address();
-        let (invalid_wdl_address, invalid_mock) = setup_invalid_wdl_address();
+        let (valid_wdl_address, _valid_mock) = setup_valid_wdl_address();
+        let (invalid_wdl_address, _invalid_mock) = setup_invalid_wdl_address();
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -1073,7 +1073,7 @@ mod tests {
     async fn delete_failure_no_template() {
         let pool = get_test_db_pool();
 
-        let template = create_test_template(&pool.get().unwrap());
+        create_test_template(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -1097,7 +1097,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
-        let test = insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
+        insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 

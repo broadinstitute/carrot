@@ -683,7 +683,7 @@ mod tests {
     async fn delete_failure_no_result() {
         let pool = get_test_db_pool();
 
-        let result = create_test_result(&pool.get().unwrap());
+        let _result = create_test_result(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
@@ -707,7 +707,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         let result = create_test_result(&pool.get().unwrap());
-        let template =
+        let _template =
             insert_test_template_result_with_result_id(&pool.get().unwrap(), result.result_id);
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;

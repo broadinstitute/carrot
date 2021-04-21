@@ -162,7 +162,7 @@ mod tests {
             .with_body(test_wdl)
             .create();
 
-        let response = wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
+        let _response = wdl_is_valid(&client, &format!("{}/test/resource", mockito::server_url()))
             .await
             .unwrap();
 

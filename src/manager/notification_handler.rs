@@ -1,7 +1,6 @@
 //! Contains functions for sending notifications to users
 
 use crate::config;
-use crate::models::report::ReportData;
 use crate::models::run::{RunData, RunWithResultData};
 use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::run_report::RunReportData;

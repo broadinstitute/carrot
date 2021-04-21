@@ -13,13 +13,12 @@ use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::requests::cromwell_requests::CromwellRequestError;
 use crate::requests::test_resource_requests;
 use crate::storage::gcloud_storage;
+use crate::util::python_dict_formatter;
 use actix_web::client::Client;
 use core::fmt;
 use diesel::PgConnection;
 use log::{debug, error, warn};
-use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Error type for possible errors returned by generating a run report
@@ -36,6 +35,7 @@ pub enum Error {
     Prohibited(String),
     Request(test_resource_requests::Error),
     Autosize(String),
+    PythonDictFormatter(python_dict_formatter::Error),
 }
 
 impl std::error::Error for Error {}
@@ -53,6 +53,7 @@ impl fmt::Display for Error {
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
             Error::Request(e) => write!(f, "report_builder Error Request {}", e),
             Error::Autosize(e) => write!(f, "report_builder Error Autosize {}", e),
+            Error::PythonDictFormatter(e) => write!(f, "report_builder Error PythonDictFormatter {}", e),
         }
     }
 }
@@ -96,6 +97,12 @@ impl From<CromwellRequestError> for Error {
 impl From<test_resource_requests::Error> for Error {
     fn from(e: test_resource_requests::Error) -> Error {
         Error::Request(e)
+    }
+}
+
+impl From<python_dict_formatter::Error> for Error {
+    fn from(e: python_dict_formatter::Error) -> Error {
+        Error::PythonDictFormatter(e)
     }
 }
 
@@ -248,6 +255,8 @@ const GENERATOR_WORKFLOW_RUNTIME_ATTRS: [&'static str; 9] = [
 const NOTEBOOK_CONTROL_VARIABLES: [&'static str; 2] =
     ["carrot_download_results", "carrot_download_inputs"];
 
+const NOTEBOOK_CONTROL_VARIABLE_DEFAULT_VALUES: [bool; 2] = [true, false];
+
 /// Starts creation of run reports via calls to `create_run_report` for any reports mapped to the
 /// template for `run`
 pub async fn create_run_reports_for_completed_run(
@@ -324,16 +333,22 @@ pub async fn create_run_report(
     let report_json = create_report_template(&report.notebook, &run)?;
     // Upload the report json as a file to a GCS location where cromwell will be able to read it
     #[cfg(not(test))]
-    let report_template_location = upload_report_template(report_json, &report.name, &run.name)?;
+    let report_template_location = upload_report_template(&report_json, &report.name, &run.name)?;
     // If this is a test, we won't upload the report because (as far as I know) there's no way to
     // mock up the google api with the google_storage1 library
     #[cfg(test)]
     let report_template_location = String::from("example.com/report/template/location.ipynb");
+    // Get the values in the control block so we can use them for determining how much disk space
+    // we'll need
+    let control_block_values = get_control_block_values(&report_json)?;
+    // Figure out how much disk space we need
+    let disk_space = get_disk_size_based_on_inputs_and_results(&run, control_block_values[1], control_block_values[0])?;
     // Build the input json we'll include in the cromwell request, with the docker and report
     // locations and any config attributes from the report config
     let input_json = create_input_json(
         &report_template_location,
         &*config::REPORT_DOCKER_LOCATION,
+        &format!("local-disk {} HDD", disk_space),
         &report.config,
     )?;
     // Write it to a file
@@ -515,6 +530,87 @@ fn cell_is_a_control_block(cell: &Value) -> Result<bool, Error> {
     return Ok(false);
 }
 
+/// Returns vec of values for any control block values set in the control block of `notebook`, or
+/// an error if parsing the block fails for some reason.  Any control variables not found will be
+/// set with their default values
+fn get_control_block_values(notebook: &Value) -> Result<Vec<bool>, Error> {
+    // Keep track of any control block values we find
+    let mut control_variable_values: Vec<bool> = NOTEBOOK_CONTROL_VARIABLE_DEFAULT_VALUES.to_vec();
+    // Get the cells array from the notebook
+    let notebook_cells = get_cells_array_from_notebook(notebook)?;
+    // Next, get the first cell in the report so we can check it for control variables
+    let first_cell = match notebook_cells.get(0) {
+        Some(first_cell) => first_cell,
+        None => {
+            // Return an error if the cells array is empty
+            return Err(Error::Parse(String::from(
+                "Notebook \"cells\" array is empty",
+            )));
+        }
+    };
+    // Start by getting cell as object so we can look at its source array
+    let cell_as_object: &Map<String, Value> = match first_cell.as_object() {
+        Some(cell_as_object) => cell_as_object,
+        None => {
+            // If the cell isn't an object, return an error (this really shouldn't happen)
+            return Err(Error::Parse(String::from(
+                "Failed to parse element in cells array of notebook as object",
+            )));
+        }
+    };
+    // Get the "source" array
+    let source_array: &Vec<Value> = match cell_as_object.get("source") {
+        Some(source_value) => {
+            // Now get it as an array
+            match source_value.as_array() {
+                Some(source_array) => source_array,
+                None => {
+                    // If "source" isn't an array, return an error (this really shouldn't happen)
+                    return Err(Error::Parse(String::from(
+                        "Failed to parse source value in cell as an array",
+                    )));
+                }
+            }
+        }
+        None => {
+            // If there isn't a source value, we'll return the default vec (because it could be a
+            // markdown cell) (this also shouldn't happen)
+            return Ok(control_variable_values);
+        }
+    };
+    // Loop through the source array to see if we can find instances of the control variables being
+    // set.  If we find one, we'll add it to our control_variables vec
+    for line_value in source_array {
+        // Get the line as a string
+        let line_string = match line_value.as_str() {
+            Some(line_string) => line_string,
+            None => {
+                // If this isn't a string, return an error (this really shouldn't happen)
+                return Err(Error::Parse(String::from(
+                    "Failed to parse contents of cell's source array as strings",
+                )));
+            }
+        };
+        // If it starts with the name of one of the control variables, it's a control block
+        for index in 0..NOTEBOOK_CONTROL_VARIABLES.len() {
+            let control_variable = &NOTEBOOK_CONTROL_VARIABLES[index];
+            if line_string.starts_with(control_variable) {
+                // Check for a value of True or False, since those are the possible values for the
+                // control variables.  If we find one, set the value at the corresponding index for
+                // control_variable
+                if line_string.contains("True") {
+                    control_variable_values[index] = true;
+                }
+                else if line_string.contains("False") {
+                    control_variable_values[index] = false;
+                }
+            }
+        }
+    }
+    // Now return all the control variables we found
+    return Ok(control_variable_values);
+}
+
 /// Extracts and returns the "cells" array from `notebook`
 fn get_cells_array_from_notebook(notebook: &Value) -> Result<&Vec<Value>, Error> {
     // Try to get the notebook as a json object
@@ -545,23 +641,13 @@ fn get_cells_array_from_notebook(notebook: &Value) -> Result<&Vec<Value>, Error>
 /// Assembles and returns an ipynb json cell that defines a python dictionary containing data for
 /// `run`
 fn create_run_data_cell(run: &RunWithResultData) -> Result<Value, Error> {
-    // Convert run into a pretty json
-    let pretty_run = {
-        // We need a custom formatter to use a 4-space indent
-        let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
-        // Buffer for the serializer
-        let buf: Vec<u8> = Vec::new();
-        // Define the actual serializer
-        let mut serializer = serde_json::ser::Serializer::with_formatter(buf, formatter);
-        // Serialize, which will put the serialized data in the serializer's buffer
-        run.serialize(&mut serializer)?;
-        // Get the data from the serializer
-        String::from_utf8(serializer.into_inner())?
-    };
+    // Convert run into a python dict
+    let run_as_json = json!(run);
+    let run_as_dict = python_dict_formatter::get_python_dict_string_from_json(&run_as_json.as_object().unwrap())?;
     // Add the python variable declaration and split into lines. We'll put the lines of code into a
     // vector so we can fill in the source field in the cell json with it (ipynb files expect code
     // to be in a json array of lines in the source field within a cell)
-    let source_string = format!("carrot_run_data = {}", pretty_run);
+    let source_string = format!("carrot_run_data = {}", run_as_dict);
     let source: Vec<&str> = source_string
         .split_inclusive("\n") // Jupyter expects the \n at the end of each line, so we include it
         .collect();
@@ -577,7 +663,7 @@ fn create_run_data_cell(run: &RunWithResultData) -> Result<Value, Error> {
 
 /// Writes `report_json` to an ipynb file, uploads it to GCS, and returns the gs uri of the file
 fn upload_report_template(
-    report_json: Value,
+    report_json: &Value,
     report_name: &str,
     run_name: &str,
 ) -> Result<String, Error> {
@@ -602,17 +688,19 @@ fn upload_report_template(
 
 /// Creates and returns an input json to send to cromwell along with a report generator wdl using
 /// `notebook_location` as the jupyter notebook file, `report_docker_location` as the location of
-/// the docker image we'll use to generate the report, and `report_config` as a json containing any
-/// of the allowed optional runtime values (see scripts/wdl/jupyter_report_generator_template.wdl
-/// to see that wdl these are being supplied to)
+/// the docker image we'll use to generate the report, `disks` as the value for the "disks" wdl
+/// runtime attribute (which can be overwritten if a value is specified in `report_config`) and
+/// `report_config` as a json containing any of the allowed optional runtime values (see
+/// scripts/wdl/jupyter_report_generator_template.wdl to see that wdl these are being supplied to)
 fn create_input_json(
     notebook_location: &str,
     report_docker_location: &str,
+    disks: &str,
     report_config: &Option<Value>,
 ) -> Result<Value, Error> {
     // Map that we'll add all our inputs to
     let mut inputs_map: Map<String, Value> = Map::new();
-    // Start with notebook and docker
+    // Start with notebook, docker, and disks
     inputs_map.insert(
         format!("{}.notebook_template", GENERATOR_WORKFLOW_NAME),
         Value::String(String::from(notebook_location)),
@@ -620,6 +708,10 @@ fn create_input_json(
     inputs_map.insert(
         format!("{}.docker", GENERATOR_WORKFLOW_NAME),
         Value::String(String::from(report_docker_location)),
+    );
+    inputs_map.insert(
+        format!("{}.disks", GENERATOR_WORKFLOW_NAME),
+        Value::String(String::from(disks)),
     );
     // If there is a value for report_config, use it for runtime attributes
     if let Some(report_config_value) = report_config {
@@ -756,10 +848,7 @@ fn get_gs_uris_from_map(map: &Map<String, Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
-    use crate::manager::report_builder::{
-        create_input_json, create_report_template, create_run_report,
-        create_run_reports_for_completed_run, get_disk_size_based_on_inputs_and_results, Error,
-    };
+    use crate::manager::report_builder::{create_input_json, create_report_template, create_run_report, create_run_reports_for_completed_run, get_disk_size_based_on_inputs_and_results, Error, get_control_block_values};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::result::{NewResult, ResultData};
@@ -1402,27 +1491,27 @@ mod tests {
                     "outputs": [],
                     "source": [
                         "carrot_run_data = {\n",
-                        format!("    \"run_id\": \"{}\",\n", test_run.run_id),
-                        format!("    \"test_id\": \"{}\",\n", test_run.test_id),
-                        "    \"name\": \"Kevin's test run\",\n",
-                        "    \"status\": \"succeeded\",\n",
-                        "    \"test_input\": {\n",
-                        "        \"greeting_workflow.in_greeted\": \"Jean-Paul Gasse\",\n",
-                        "        \"greeting_workflow.in_greeting\": \"Yo\"\n",
+                        format!("    \"created_at\" : \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
+                        "    \"created_by\" : \"Kevin@example.com\",\n",
+                        "    \"eval_cromwell_job_id\" : \"12345678902\",\n",
+                        "    \"eval_input\" : {\n",
+                        "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
+                        "        \"greeting_file_workflow.in_output_filename\" : \"greeting.txt\",\n",
                         "    },\n",
-                        "    \"eval_input\": {\n",
-                        "        \"greeting_file_workflow.in_greeting\": \"test_output:greeting_workflow.out_greeting\",\n",
-                        "        \"greeting_file_workflow.in_output_filename\": \"greeting.txt\"\n",
+                        format!("    \"finished_at\" : \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
+                        "    \"name\" : \"Kevin's test run\",\n",
+                        "    \"results\" : {\n",
+                        "        \"File Result\" : \"example.com/test/result/greeting.txt\",\n",
+                        "        \"Greeting\" : \"Yo, Jean-Paul Gasse\",\n",
                         "    },\n",
-                        "    \"test_cromwell_job_id\": \"123456789\",\n",
-                        "    \"eval_cromwell_job_id\": \"12345678902\",\n",
-                        format!("    \"created_at\": \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"created_by\": \"Kevin@example.com\",\n",
-                        format!("    \"finished_at\": \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"results\": {\n",
-                        "        \"File Result\": \"example.com/test/result/greeting.txt\",\n",
-                        "        \"Greeting\": \"Yo, Jean-Paul Gasse\"\n",
-                        "    }\n",
+                        format!("    \"run_id\" : \"{}\",\n", test_run.run_id),
+                        "    \"status\" : \"succeeded\",\n",
+                        "    \"test_cromwell_job_id\" : \"123456789\",\n",
+                        format!("    \"test_id\" : \"{}\",\n", test_run.test_id),
+                        "    \"test_input\" : {\n",
+                        "        \"greeting_workflow.in_greeted\" : \"Jean-Paul Gasse\",\n",
+                        "        \"greeting_workflow.in_greeting\" : \"Yo\",\n",
+                        "    },\n",
                         "}"
                     ]
                 },
@@ -1623,27 +1712,27 @@ mod tests {
                     "outputs": [],
                     "source": [
                         "carrot_run_data = {\n",
-                        format!("    \"run_id\": \"{}\",\n", test_run.run_id),
-                        format!("    \"test_id\": \"{}\",\n", test_run.test_id),
-                        "    \"name\": \"Kevin's test run\",\n",
-                        "    \"status\": \"succeeded\",\n",
-                        "    \"test_input\": {\n",
-                        "        \"greeting_workflow.in_greeted\": \"Jean-Paul Gasse\",\n",
-                        "        \"greeting_workflow.in_greeting\": \"Yo\"\n",
+                        format!("    \"created_at\" : \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
+                        "    \"created_by\" : \"Kevin@example.com\",\n",
+                        "    \"eval_cromwell_job_id\" : \"12345678902\",\n",
+                        "    \"eval_input\" : {\n",
+                        "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
+                        "        \"greeting_file_workflow.in_output_filename\" : \"greeting.txt\",\n",
                         "    },\n",
-                        "    \"eval_input\": {\n",
-                        "        \"greeting_file_workflow.in_greeting\": \"test_output:greeting_workflow.out_greeting\",\n",
-                        "        \"greeting_file_workflow.in_output_filename\": \"greeting.txt\"\n",
+                        format!("    \"finished_at\" : \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
+                        "    \"name\" : \"Kevin's test run\",\n",
+                        "    \"results\" : {\n",
+                        "        \"File Result\" : \"example.com/test/result/greeting.txt\",\n",
+                        "        \"Greeting\" : \"Yo, Jean-Paul Gasse\",\n",
                         "    },\n",
-                        "    \"test_cromwell_job_id\": \"123456789\",\n",
-                        "    \"eval_cromwell_job_id\": \"12345678902\",\n",
-                        format!("    \"created_at\": \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"created_by\": \"Kevin@example.com\",\n",
-                        format!("    \"finished_at\": \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"results\": {\n",
-                        "        \"File Result\": \"example.com/test/result/greeting.txt\",\n",
-                        "        \"Greeting\": \"Yo, Jean-Paul Gasse\"\n",
-                        "    }\n",
+                        format!("    \"run_id\" : \"{}\",\n", test_run.run_id),
+                        "    \"status\" : \"succeeded\",\n",
+                        "    \"test_cromwell_job_id\" : \"123456789\",\n",
+                        format!("    \"test_id\" : \"{}\",\n", test_run.test_id),
+                        "    \"test_input\" : {\n",
+                        "        \"greeting_workflow.in_greeted\" : \"Jean-Paul Gasse\",\n",
+                        "        \"greeting_workflow.in_greeting\" : \"Yo\",\n",
+                        "    },\n",
                         "}"
                     ]
                 },
@@ -1819,6 +1908,7 @@ mod tests {
         let result_input_json = create_input_json(
             "example.com/test/location",
             "example.com/test:test",
+            "local-disk 500 HDD",
             &test_report.config,
         )
         .unwrap();
@@ -1827,6 +1917,7 @@ mod tests {
             "generate_report_file_workflow.notebook_template": "example.com/test/location",
             "generate_report_file_workflow.docker" : "example.com/test:test",
             "generate_report_file_workflow.memory": "32 GiB",
+            "generate_report_file_workflow.disks": "local-disk 500 HDD",
         });
 
         assert_eq!(result_input_json, expected_input_json);
@@ -1840,6 +1931,7 @@ mod tests {
         let result_input_json = create_input_json(
             "example.com/test/location",
             "example.com/test:test",
+            "local-disk 256 HDD",
             &test_report.config,
         );
 
@@ -1885,5 +1977,33 @@ mod tests {
         let expected_disk_size: u64 = 27;
 
         assert_eq!(expected_disk_size, disk_size);
+    }
+
+    #[test]
+    fn get_control_block_values_success() {
+        let notebook: Value = serde_json::from_str(
+            &read_to_string(
+                "testdata/manager/report_builder/report_notebook_with_control_block.ipynb",
+            )
+                .unwrap(),
+        )
+        .unwrap();
+
+        let expected_vec = vec![true, true];
+
+        let test_vec = get_control_block_values(&notebook).unwrap();
+
+        assert_eq!(expected_vec, test_vec);
+    }
+
+    #[test]
+    fn get_control_block_values_failure_no_cells() {
+        let notebook: Value = json!({
+            "cells": []
+        });
+
+        let test_err = get_control_block_values(&notebook).unwrap_err();
+
+        assert!(matches!(test_err, Error::Parse(_)));
     }
 }

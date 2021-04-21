@@ -314,6 +314,11 @@ async fn create(
                     status: 500,
                     detail: format!("{}", e),
                 },
+                report_builder::Error::PythonDictFormatter(e) => ErrorBody {
+                    title: "PythonDictFormatter error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to convert run data into python dictionary to include in report: {}", e),
+                },
             };
             HttpResponseBuilder::new(
                 StatusCode::from_u16(error_body.status)
@@ -641,7 +646,7 @@ mod tests {
             result_key: "greeting_workflow.out_greeting".to_string(),
             created_by: None,
         };
-        let new_template_result = TemplateResultData::create(conn, new_template_result)
+        let _new_template_result = TemplateResultData::create(conn, new_template_result)
             .expect("Failed inserting test template result");
 
         let new_run_result = NewRunResult {
@@ -650,7 +655,7 @@ mod tests {
             value: "Yo, Jean Paul Gasse".to_string(),
         };
 
-        let new_run_result =
+        let _new_run_result =
             RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
 
         let new_result2 = NewResult {
@@ -669,7 +674,7 @@ mod tests {
             result_key: "greeting_file_workflow.out_file".to_string(),
             created_by: None,
         };
-        let new_template_result2 = TemplateResultData::create(conn, new_template_result2)
+        let _new_template_result2 = TemplateResultData::create(conn, new_template_result2)
             .expect("Failed inserting test template result");
 
         let new_run_result2 = NewRunResult {
@@ -678,7 +683,7 @@ mod tests {
             value: String::from("example.com/test/result/greeting.txt"),
         };
 
-        let new_run_result2 =
+        let _new_run_result2 =
             RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
 
         (pipeline, template, test, run)
@@ -856,7 +861,7 @@ mod tests {
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+        let _cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
             .with_status(500)
             .with_header("content_type", "application/json")
             .create();
@@ -888,13 +893,13 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (report_id, _run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Submitted"
         });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+        let _cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
             .with_status(201)
             .with_header("content_type", "application/json")
             .with_body(mock_response_body.to_string())
@@ -927,13 +932,13 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (_report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Submitted"
         });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+        let _cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
             .with_status(201)
             .with_header("content_type", "application/json")
             .with_body(mock_response_body.to_string())
@@ -972,7 +977,7 @@ mod tests {
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Submitted"
         });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+        let _cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
             .with_status(201)
             .with_header("content_type", "application/json")
             .with_body(mock_response_body.to_string())
@@ -1015,7 +1020,7 @@ mod tests {
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
           "status": "Submitted"
         });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+        let _cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
             .with_status(201)
             .with_header("content_type", "application/json")
             .with_body(mock_response_body.to_string())

@@ -1,0 +1,14 @@
+{
+    "test_array" : [
+        "test",
+        3,
+        None,
+        {
+            "test_bool" : True,
+        },
+    ],
+    "test_object" : {
+        "test_number" : 4,
+        "test_string" : "hello",
+    },
+}

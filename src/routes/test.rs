@@ -880,7 +880,7 @@ mod tests {
     async fn delete_failure_no_test() {
         let pool = get_test_db_pool();
 
-        let test = create_test_test(&pool.get().unwrap());
+        create_test_test(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 

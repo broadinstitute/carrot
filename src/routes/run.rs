@@ -1272,7 +1272,7 @@ mod tests {
     async fn delete_failure_no_run() {
         let pool = get_test_db_pool();
 
-        let run = create_test_run_with_failed_state(&pool.get().unwrap());
+        let _run = create_test_run_with_failed_state(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 

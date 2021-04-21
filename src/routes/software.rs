@@ -6,7 +6,7 @@
 use crate::db;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
 use crate::routes::error_body::ErrorBody;
-use crate::util::git_repo_exists;
+use crate::util::git_repos;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use uuid::Uuid;
@@ -140,7 +140,7 @@ async fn create(
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Verify the repository_url points to a valid git repo
-    match git_repo_exists(&new_software.repository_url).await {
+    match git_repos::git_repo_exists(&new_software.repository_url).await {
         Ok(val) => {
             // If we didn't find it, tell the user we couldn't find it
             if !val {

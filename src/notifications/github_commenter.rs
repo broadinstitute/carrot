@@ -11,7 +11,6 @@ use log::error;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fmt;
-use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum Error {
