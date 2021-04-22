@@ -53,7 +53,9 @@ impl fmt::Display for Error {
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
             Error::Request(e) => write!(f, "report_builder Error Request {}", e),
             Error::Autosize(e) => write!(f, "report_builder Error Autosize {}", e),
-            Error::PythonDictFormatter(e) => write!(f, "report_builder Error PythonDictFormatter {}", e),
+            Error::PythonDictFormatter(e) => {
+                write!(f, "report_builder Error PythonDictFormatter {}", e)
+            }
         }
     }
 }
@@ -107,6 +109,36 @@ impl From<python_dict_formatter::Error> for Error {
 }
 
 lazy_static! {
+    /// The metadata we'll use for a notebook so we can make sure it uses the correct python kernel
+    static ref DEFAULT_REPORT_METADATA: Value = json!({
+        "metadata": {
+            "language_info": {
+                "codemirror_mode": {
+                    "name": "ipython",
+                    "version": 3
+                },
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.8.5-final"
+            },
+            "orig_nbformat": 2,
+            "kernelspec": {
+                "name": "python3",
+                "display_name": "Python 3.8.5 64-bit",
+                "metadata": {
+                    "interpreter": {
+                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
+                    }
+                }
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 2
+    });
+
     /// A cell for displaying run metadata at the top of a report
     static ref RUN_METADATA_CELL: Value = json!({
         "cell_type": "code",
@@ -342,7 +374,11 @@ pub async fn create_run_report(
     // we'll need
     let control_block_values = get_control_block_values(&report_json)?;
     // Figure out how much disk space we need
-    let disk_space = get_disk_size_based_on_inputs_and_results(&run, control_block_values[1], control_block_values[0])?;
+    let disk_space = get_disk_size_based_on_inputs_and_results(
+        &run,
+        control_block_values[1],
+        control_block_values[0],
+    )?;
     // Build the input json we'll include in the cromwell request, with the docker and report
     // locations and any config attributes from the report config
     let input_json = create_input_json(
@@ -457,11 +493,10 @@ fn create_report_template(notebook: &Value, run: &RunWithResultData) -> Result<V
     }
     // Add the footer cell which contains a list of inputs and results for display
     cells.push(RUN_INPUTS_AND_RESULTS_CELL.to_owned());
-    // We'll copy the input notebook and replace its cells array with the one we just assembled
-    // Note: we can unwrap here because we already verified above that this is formatted as an
-    // object
-    let mut new_notebook_object: Map<String, Value> = notebook.as_object().unwrap().to_owned();
-    // Replace cells array with our new one
+    // We'll copy the default metadata object and give it the cells array we just assembled
+    let mut new_notebook_object: Map<String, Value> =
+        DEFAULT_REPORT_METADATA.as_object().unwrap().to_owned();
+    // Add our new cells array
     new_notebook_object.insert(String::from("cells"), Value::Array(cells));
     // Wrap it in a Value and return it
     Ok(Value::Object(new_notebook_object))
@@ -600,8 +635,7 @@ fn get_control_block_values(notebook: &Value) -> Result<Vec<bool>, Error> {
                 // control_variable
                 if line_string.contains("True") {
                     control_variable_values[index] = true;
-                }
-                else if line_string.contains("False") {
+                } else if line_string.contains("False") {
                     control_variable_values[index] = false;
                 }
             }
@@ -643,7 +677,8 @@ fn get_cells_array_from_notebook(notebook: &Value) -> Result<&Vec<Value>, Error>
 fn create_run_data_cell(run: &RunWithResultData) -> Result<Value, Error> {
     // Convert run into a python dict
     let run_as_json = json!(run);
-    let run_as_dict = python_dict_formatter::get_python_dict_string_from_json(&run_as_json.as_object().unwrap())?;
+    let run_as_dict =
+        python_dict_formatter::get_python_dict_string_from_json(&run_as_json.as_object().unwrap())?;
     // Add the python variable declaration and split into lines. We'll put the lines of code into a
     // vector so we can fill in the source field in the cell json with it (ipynb files expect code
     // to be in a json array of lines in the source field within a cell)
@@ -848,7 +883,11 @@ fn get_gs_uris_from_map(map: &Map<String, Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
-    use crate::manager::report_builder::{create_input_json, create_report_template, create_run_report, create_run_reports_for_completed_run, get_disk_size_based_on_inputs_and_results, Error, get_control_block_values};
+    use crate::manager::report_builder::{
+        create_input_json, create_report_template, create_run_report,
+        create_run_reports_for_completed_run, get_control_block_values,
+        get_disk_size_based_on_inputs_and_results, Error,
+    };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::result::{NewResult, ResultData};
@@ -1985,7 +2024,7 @@ mod tests {
             &read_to_string(
                 "testdata/manager/report_builder/report_notebook_with_control_block.ipynb",
             )
-                .unwrap(),
+            .unwrap(),
         )
         .unwrap();
 

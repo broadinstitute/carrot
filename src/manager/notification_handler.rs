@@ -855,16 +855,19 @@ mod tests {
             "test_post_run_report_complete_comment_if_from_github@",
         );
 
+        let expected_results = vec![
+            "| Report | URI |",
+            "| --- | --- |",
+            "| empty_notebook | gs://test_bucket/empty_report.ipynb |",
+            "| html_report | gs://test_bucket/report.html |",
+            "| populated_notebook | gs://test_bucket/filled_report.ipynb |",
+        ]
+        .join("\n");
         let request_body = json!({
             "body":
                 format!(
-                    "<details><summary>CARROT run report Kevin's Report finished for run Kevin's Run ({})</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
-                    test_run.run_id,
-                    json!({
-                        "populated_notebook":"https://storage.cloud.google.com/test_bucket/filled_report.ipynb",
-                        "empty_notebook":"https://storage.cloud.google.com/test_bucket/empty_report.ipynb",
-                        "html_report":"https://storage.cloud.google.com/test_bucket/report.html",
-                    })
+                    "CARROT run report Kevin's Report finished for run Kevin's Run ({})\n{}",
+                    new_run_report.run_id, expected_results
                 )
         });
 

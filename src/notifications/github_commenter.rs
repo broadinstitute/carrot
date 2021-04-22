@@ -7,17 +7,13 @@ use crate::models::run_report::RunReportData;
 use crate::requests::github_requests;
 use crate::storage::gcloud_storage;
 use actix_web::client::Client;
-use log::error;
 use serde_json::json;
-use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug)]
 pub enum Error {
     Json(serde_json::Error),
     Post(github_requests::Error),
-    /// Error related to the results of an entity being used in the comment (e.g. run, run_report)
-    Results(String),
     GCS(gcloud_storage::Error),
 }
 
@@ -28,7 +24,6 @@ impl fmt::Display for Error {
         match self {
             Error::Json(e) => write!(f, "GitHub Commenter Error Json {}", e),
             Error::Post(e) => write!(f, "GitHub Commenter Error Post {}", e),
-            Error::Results(e) => write!(f, "GitHub Commenter Error Results {}", e),
             Error::GCS(e) => write!(f, "GitHub Commenter Error GCS {}", e),
         }
     }
@@ -119,47 +114,41 @@ pub async fn post_run_report_finished_comment(
 ) -> Result<(), Error> {
     // Build a json of the report result file gs uris converted to the google authenticated urls
     let report_data = {
-        // We'll build a map containing each of the report results converted into an authenticated
-        // url
-        let mut report_results_map: HashMap<&str, String> = HashMap::new();
+        // We'll build a list of markdown rows containing each of the report results converted into
+        // an authenticated url, starting with the header
+        let mut report_results_table: Vec<String> = vec![
+            String::from("| Report | URI |"),
+            String::from("| --- | --- |"),
+        ];
         // Get results
-        let report_results = match &run_report.results {
-            Some(results) => results,
-            None => {
-                let err_msg = format!(
-                    "Tried to generated run_report finished comment for run_report with run_id {} and report_id {}, but it has a value of None for results.",
+        match &run_report.results {
+            Some(report_results) => {
+                // Loop through the results and convert them and format them for a markdown table (note: we
+                // can unwrap here because, if the results are not formatted as an object, something's real
+                // busted)
+                for (report_key, uri) in report_results.as_object().expect(&format!(
+                    "Results for run report with run_id {} and report_id {} not formatted as json object",
                     run_report.run_id, run_report.report_id
-                );
-                // If this doesn't have results, something is wrong, so return an error
-                error!("{}", err_msg);
-                return Err(Error::Results(err_msg));
+                )) {
+                    // Get the report_uri as a string (again, there's a problem that needs fixing if it's
+                    // not a string)
+                    let uri_string = uri.as_str().expect(&format!("Result uri for key {} for run report with run_id {} and report_id {} not formatted as string", report_key, run_report.run_id, run_report.report_id));
+                    // Format it as a markdown table row and add it to the list of rows
+                    report_results_table.push(format!("| {} | {} |", report_key, uri_string));
+                }
+                // Join the lines
+                report_results_table.join("\n")
             }
-        };
-        // Loop through the results and convert them (note: we can unwrap here because, if the
-        // results are not formatted as an object, something's real busted)
-        for (report_key, uri) in report_results.as_object().expect(&format!(
-            "Results for run report with run_id {} and report_id {} not formatted as json object",
-            run_report.run_id, run_report.report_id
-        )) {
-            // Get the report_uri as a string (again, there's a problem that needs fixing if it's
-            // not a string)
-            let uri_string = uri.as_str().expect(&format!("Result uri for key {} for run report with run_id {} and report_id {} not formatted as string", report_key, run_report.run_id, run_report.report_id));
-            // Convert it to an authenticated url
-            let authenticated_url =
-                gcloud_storage::convert_gs_uri_to_authenticated_url(uri_string)?;
-            // Add it to the map
-            report_results_map.insert(report_key, authenticated_url);
+            // If there are no results, then the report job probably did not succeed, so we'll post
+            // the full json instead
+            None => json!(run_report).to_string(),
         }
-
-        report_results_map
     };
+    // Format the results map as a markdown table
     // Build the comment body with some of the report metadata and the data in the details section
     let comment_body = format!(
-        "<details><summary>CARROT run report {} finished for run {} ({})</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
-        report_name,
-        run_name,
-        run_report.run_id,
-        json!(report_data)
+        "CARROT run report {} finished for run {} ({})\n{}",
+        report_name, run_name, run_report.run_id, report_data
     );
     Ok(github_requests::post_comment(client, owner, repo, issue_number, &comment_body).await?)
 }
@@ -316,16 +305,19 @@ mod tests {
             cromwell_job_id: Some(String::from("as9283-054asdf32893a-sdfawe9")),
         };
 
+        let expected_results = vec![
+            "| Report | URI |",
+            "| --- | --- |",
+            "| empty_notebook | gs://test_bucket/empty_report.ipynb |",
+            "| html_report | gs://test_bucket/report.html |",
+            "| populated_notebook | gs://test_bucket/filled_report.ipynb |",
+        ]
+        .join("\n");
         let request_body = json!({
             "body":
                 format!(
-                    "<details><summary>CARROT run report test_report finished for run test_run ({})</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
-                    test_run_report.run_id,
-                    json!({
-                        "populated_notebook":"https://storage.cloud.google.com/test_bucket/filled_report.ipynb",
-                        "empty_notebook":"https://storage.cloud.google.com/test_bucket/empty_report.ipynb",
-                        "html_report":"https://storage.cloud.google.com/test_bucket/report.html",
-                    })
+                    "CARROT run report test_report finished for run test_run ({})\n{}",
+                    test_run_report.run_id, expected_results
                 )
         });
 

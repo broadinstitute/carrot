@@ -177,6 +177,7 @@ pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<St
 }
 
 /// Builds the corresponding Authenticated URL from `uri` and returns it
+#[allow(dead_code)]
 pub fn convert_gs_uri_to_authenticated_url(uri: &str) -> Result<String, Error> {
     // Get the contents of the uri minus the "gs://" at the beginning
     let stripped_uri = match uri.get(5..) {
@@ -189,7 +190,13 @@ pub fn convert_gs_uri_to_authenticated_url(uri: &str) -> Result<String, Error> {
             )));
         }
     };
-    Ok(format!("https://storage.cloud.google.com/{}", stripped_uri))
+    // Percent encode the URI so it's in the proper format for a URL
+    let encoded_stripped_uri =
+        percent_encoding::utf8_percent_encode(&stripped_uri, GCLOUD_ENCODING_SET);
+    Ok(format!(
+        "https://storage.cloud.google.com/{}",
+        encoded_stripped_uri
+    ))
 }
 
 /// Extracts the bucket name and the object name from the full gs uri of a file.  Expects
@@ -236,11 +243,11 @@ mod tests {
 
     #[test]
     fn convert_gs_uri_to_authenticated_url_success() {
-        let test_result_uri = "gs://bucket_name/some/garbage/filename.txt";
+        let test_result_uri = "gs://bucket_name/some/garbage with space/filename.txt";
         let authenticated_url = convert_gs_uri_to_authenticated_url(test_result_uri).unwrap();
         assert_eq!(
             authenticated_url,
-            "https://storage.cloud.google.com/bucket_name/some/garbage/filename.txt"
+            "https://storage.cloud.google.com/bucket_name%2Fsome%2Fgarbage%20with%20space%2Ffilename.txt"
         );
     }
 

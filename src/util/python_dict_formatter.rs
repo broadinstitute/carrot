@@ -4,14 +4,14 @@
 //! (https://docs.serde.rs/serde_json/ser/struct.PrettyFormatter.html) which is meant for pretty
 //! printing a JSON
 
-use serde_json::{Map, Value, Number};
-use std::io::Write;
+use serde_json::{Map, Number, Value};
 use std::fmt;
+use std::io::Write;
 
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
-    FromUtf8(std::string::FromUtf8Error)
+    FromUtf8(std::string::FromUtf8Error),
 }
 
 impl std::error::Error for Error {}
@@ -54,14 +54,18 @@ pub fn get_python_dict_string_from_json(json_obj: &Map<String, Value>) -> Result
 /// Writes the formatted bytes for `json_val` for `buffer`, with `indent` indicating how far
 /// indented we should be.  This function basically exists to match against `json_val` and then call
 /// the correct formatting function based on that
-fn format_value(json_val: &Value, buffer: &mut Vec<u8>, indent: usize) -> Result<(), std::io::Error> {
+fn format_value(
+    json_val: &Value,
+    buffer: &mut Vec<u8>,
+    indent: usize,
+) -> Result<(), std::io::Error> {
     match json_val {
         Value::Null => format_null(buffer),
         Value::Bool(bool_val) => format_bool(bool_val, buffer),
         Value::Number(number_val) => format_number(number_val, buffer),
         Value::String(string_val) => format_string(string_val, buffer),
         Value::Array(json_array) => format_array(json_array, buffer, indent),
-        Value::Object(json_obj) => format_object(json_obj, buffer, indent)
+        Value::Object(json_obj) => format_object(json_obj, buffer, indent),
     }
 }
 
@@ -87,13 +91,11 @@ fn format_number(number_val: &Number, buffer: &mut Vec<u8>) -> Result<(), std::i
         let actual_number = number_val.as_i64().unwrap();
         let actual_number_as_bytes = actual_number.to_string().into_bytes();
         buffer.write_all(&actual_number_as_bytes)
-    }
-    else if number_val.is_u64() {
+    } else if number_val.is_u64() {
         let actual_number = number_val.as_u64().unwrap();
         let actual_number_as_bytes = actual_number.to_string().into_bytes();
         buffer.write_all(&actual_number_as_bytes)
-    }
-    else {
+    } else {
         let actual_number = number_val.as_f64().unwrap();
         let actual_number_as_bytes = actual_number.to_string().into_bytes();
         buffer.write_all(&actual_number_as_bytes)
@@ -108,7 +110,11 @@ fn format_string(string_val: &String, buffer: &mut Vec<u8>) -> Result<(), std::i
 }
 
 /// Writes `json_array` and its contents to `buffer`, with the array indented `indent` times
-fn format_array(json_array: &Vec<Value>, buffer: &mut Vec<u8>, indent: usize) -> Result<(), std::io::Error> {
+fn format_array(
+    json_array: &Vec<Value>,
+    buffer: &mut Vec<u8>,
+    indent: usize,
+) -> Result<(), std::io::Error> {
     // Open the array
     buffer.write_all(b"[\n")?;
     // Loop through the elements in the array and write each one
@@ -122,7 +128,11 @@ fn format_array(json_array: &Vec<Value>, buffer: &mut Vec<u8>, indent: usize) ->
     buffer.write_all(b"]")
 }
 
-fn format_object(json_obj: &Map<String, Value>, buffer: &mut Vec<u8>, indent: usize) -> Result<(), std::io::Error> {
+fn format_object(
+    json_obj: &Map<String, Value>,
+    buffer: &mut Vec<u8>,
+    indent: usize,
+) -> Result<(), std::io::Error> {
     // Open the object
     buffer.write_all(b"{\n")?;
     // Loop through elements in the object and write each one
@@ -169,7 +179,8 @@ mod tests {
             ]
         });
         // This is in a text file because getting the indentation right with a string literal is a pain
-        let expected_dict = read_to_string("testdata/util/python_dict_formatter/expected_dict.txt").unwrap();
+        let expected_dict =
+            read_to_string("testdata/util/python_dict_formatter/expected_dict.txt").unwrap();
 
         let test_dict = get_python_dict_string_from_json(test_json.as_object().unwrap()).unwrap();
 

@@ -793,7 +793,7 @@ async fn check_and_update_run_report_status(
             },
         };
         // Update
-        match RunReportData::update(
+        let updated_run_report: RunReportData = match RunReportData::update(
             conn,
             run_report.run_id,
             run_report.report_id,
@@ -805,7 +805,7 @@ async fn check_and_update_run_report_status(
                 run_report.run_id, run_report.report_id, e
             )))
             }
-            _ => {}
+            Ok(updated_run_report) => updated_run_report,
         };
 
         // If it ended, send notifications
@@ -813,7 +813,7 @@ async fn check_and_update_run_report_status(
             || status == ReportStatusEnum::Failed
             || status == ReportStatusEnum::Aborted
         {
-            send_notifications_for_run_report_completion(conn, client, &run_report).await?;
+            send_notifications_for_run_report_completion(conn, client, &updated_run_report).await?;
         }
     }
 
