@@ -177,6 +177,9 @@ pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<St
 }
 
 /// Builds the corresponding Authenticated URL from `uri` and returns it
+///
+/// This is function is currently not in use, but it's functionality will likely be necessary in
+/// the future, so it is included
 #[allow(dead_code)]
 pub fn convert_gs_uri_to_authenticated_url(uri: &str) -> Result<String, Error> {
     // Get the contents of the uri minus the "gs://" at the beginning

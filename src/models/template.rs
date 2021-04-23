@@ -274,6 +274,9 @@ impl TemplateData {
     }
 
     /// Retrieves the template for the run specified by `run_id`
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find_by_run(conn: &PgConnection, run_id: Uuid) -> Result<Self, diesel::result::Error> {
         let run_subquery = run::dsl::run

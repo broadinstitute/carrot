@@ -3,7 +3,7 @@ WORKDIR /usr/src/carrot
 COPY . .
 RUN cargo install --path .
 
-FROM debian:buster
+FROM debian:buster-20210408
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get -y --no-install-recommends install \

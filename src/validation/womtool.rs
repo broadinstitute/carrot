@@ -75,7 +75,6 @@ pub async fn wdl_is_valid(client: &Client, wdl_location: &str) -> Result<(), Err
 ///
 /// Returns Ok(()) if the WDL is valid, an Invalid error if the WDL is invalid, or a different error if
 /// there is some other issue running WOMTool
-#[allow(dead_code)]
 fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
     // Run womtool validate on the wdl
     let output = Command::new("sh")
@@ -103,6 +102,9 @@ fn womtool_validate(wdl_path: &Path) -> Result<(), Error> {
 ///
 /// Returns the WOMtool output if parsing the WDL inputs is successful, or an error if there is some
 /// issue running WOMtool
+///
+/// This is function is currently not in use, but it's functionality will likely be necessary in the
+/// future, so it is included
 #[allow(dead_code)]
 fn womtool_inputs(wdl_path: &Path) -> Result<Vec<u8>, Error> {
     // Run womtool validate on the wdl

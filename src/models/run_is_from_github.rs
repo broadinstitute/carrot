@@ -74,6 +74,9 @@ impl RunIsFromGithubData {
     /// Queries the DB using `conn` to retrieve run_is_from_githubs matching the crieria in `params`
     /// Returns a result containing either a vector of the retrieved run_is_from_githubs as
     /// RunIsFromGithubData instances or an error if the query fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find(
         conn: &PgConnection,

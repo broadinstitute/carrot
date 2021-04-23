@@ -74,7 +74,6 @@ impl RunSoftwareVersionData {
     /// `params`
     /// Returns a result containing either a vector of the retrieved run_software_version mappings as
     /// RunSoftwareVersionData instances or an error if the query fails for some reason
-    #[allow(dead_code)]
     pub fn find(
         conn: &PgConnection,
         params: RunSoftwareVersionQuery,

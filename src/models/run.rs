@@ -149,7 +149,6 @@ impl RunData {
     /// Queries the DB using `conn` to retrieve the first row with a run_id value of `id`
     /// Returns a result containing either the retrieved run as a RunData instance or an error if
     /// the query fails for some reason or if no run is found matching the criteria
-    #[allow(dead_code)]
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         run.filter(run_id.eq(id)).first::<Self>(conn)
     }

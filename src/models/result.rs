@@ -186,6 +186,9 @@ impl ResultData {
     /// a template_id equal to `id`
     /// Returns a result containing either a vector of the retrieved result records as ResultData
     /// instances or an error if the query fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find_for_template(
         conn: &PgConnection,

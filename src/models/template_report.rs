@@ -193,6 +193,9 @@ impl TemplateReportData {
     /// template id for the test specified by `query_test_id`
     /// Returns a result containing either the retrieved template_report mappings as a vector of
     /// TemplateReportData instances or an error if the query fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find_by_test(
         conn: &PgConnection,
@@ -215,6 +218,9 @@ impl TemplateReportData {
     /// Returns a result containing either the retrieved template_report mapping as a
     /// TemplateReportData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find_by_test_and_report(
         conn: &PgConnection,
