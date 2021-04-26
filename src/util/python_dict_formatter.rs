@@ -42,6 +42,7 @@ impl From<std::io::Error> for Error {
 /// The bytes we'll use for indenting
 const INDENT_BYTES: &[u8; 4] = b"    ";
 /// The maximum indent (we'll throw an error in the case we exceed this)
+/// NOTE: The serde_json json! macro by default doesn't allow more than 20 levels, so we reuse that limit here.
 const MAX_INDENT: usize = 19;
 
 /// Accepts the map representation of a json object (`json_obj`) and returns a string representing
