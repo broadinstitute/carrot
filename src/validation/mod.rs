@@ -1,2 +1,2 @@
 //! Contains modules for performing validation of various aspects of test configurations
-pub mod wdl_validator;
+pub mod womtool;

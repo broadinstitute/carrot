@@ -186,7 +186,7 @@ impl TemplateData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::parse_sort_string(&sort);
+            let sort = util::sort_string::parse_sort_string(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "template_id" => {
@@ -260,6 +260,36 @@ impl TemplateData {
 
         // Perform the query
         query.load::<Self>(conn)
+    }
+
+    /// Retrieves the template for the test specified by `test_id`
+    pub fn find_by_test(conn: &PgConnection, test_id: Uuid) -> Result<Self, diesel::result::Error> {
+        let test_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(test_id))
+            .limit(1)
+            .select(test::dsl::template_id);
+        template
+            .filter(template_id.eq(any(test_subquery)))
+            .first::<Self>(conn)
+    }
+
+    /// Retrieves the template for the run specified by `run_id`
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
+    #[allow(dead_code)]
+    pub fn find_by_run(conn: &PgConnection, run_id: Uuid) -> Result<Self, diesel::result::Error> {
+        let run_subquery = run::dsl::run
+            .filter(run::dsl::run_id.eq(run_id))
+            .limit(1)
+            .select(run::dsl::test_id);
+        let test_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(any(run_subquery)))
+            .limit(1)
+            .select(test::dsl::template_id);
+        template
+            .filter(template_id.eq(any(test_subquery)))
+            .first::<Self>(conn)
     }
 
     /// Inserts a new template into the DB
@@ -594,6 +624,33 @@ mod tests {
             nonexistent_template,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_by_test_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template = insert_test_template(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+
+        let found_template = TemplateData::find_by_test(&conn, test_test.test_id)
+            .expect("Failed to retrieve test template by test_id.");
+
+        assert_eq!(found_template, test_template);
+    }
+
+    #[test]
+    fn find_by_run_exists() {
+        let conn = get_test_db_connection();
+
+        let test_template = insert_test_template(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+
+        let found_template = TemplateData::find_by_run(&conn, test_run.run_id)
+            .expect("Failed to retrieve test template by run_id.");
+
+        assert_eq!(found_template, test_template);
     }
 
     #[test]
@@ -955,12 +1012,10 @@ mod tests {
 
         assert!(matches!(
             new_template,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -1034,14 +1089,10 @@ mod tests {
 
         assert!(matches!(
             updated_template,
-            Err(
-                UpdateError::DB(
-                    diesel::result::Error::DatabaseError(
-                        diesel::result::DatabaseErrorKind::UniqueViolation,
-                        _,
-                    ),
-                ),
-            )
+            Err(UpdateError::DB(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),),)
         ));
     }
 
@@ -1094,12 +1145,10 @@ mod tests {
 
         assert!(matches!(
             delete_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            ),)
         ));
     }
 

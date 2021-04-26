@@ -574,7 +574,6 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
     use serde_json::json;
-    use std::fs::read_to_string;
     use uuid::Uuid;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
@@ -816,7 +815,8 @@ mod tests {
             created_by: None,
         };
 
-        let template = TemplateData::create(&conn, new_template).expect("Failed to insert test");
+        let template =
+            TemplateData::create(&conn, new_template).expect("Failed to insert test template");
 
         let new_test = NewTest {
             name: String::from("Kevin's test test"),
@@ -1272,7 +1272,7 @@ mod tests {
     async fn delete_failure_no_run() {
         let pool = get_test_db_pool();
 
-        let run = create_test_run_with_failed_state(&pool.get().unwrap());
+        let _run = create_test_run_with_failed_state(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 

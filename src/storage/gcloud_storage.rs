@@ -1,7 +1,9 @@
 //! Defines functionality for interacting with the google cloud storage API
-use google_storage1::Storage;
-use std::fmt;
 use crate::config;
+use google_storage1::{Object, Storage};
+use percent_encoding::{AsciiSet, CONTROLS};
+use std::fmt;
+use std::fs::File;
 use std::io::Read;
 use std::sync::Mutex;
 
@@ -22,7 +24,7 @@ impl fmt::Display for Error {
         match self {
             Error::Parse(e) => write!(f, "GCloud Storage Error Parsing URI {}", e),
             Error::GCS(e) => write!(f, "GCloud Storage GCS Error {}", e),
-            Error::IO(e) => write!(f, "GCloud Storage IO Error {}", e)
+            Error::IO(e) => write!(f, "GCloud Storage IO Error {}", e),
         }
     }
 }
@@ -39,9 +41,32 @@ impl From<std::io::Error> for Error {
     }
 }
 
-lazy_static!{
+lazy_static! {
+    /// A mutex-controlled hub for interacting with GCS
     static ref STORAGE_HUB: Mutex<StorageHub> = Mutex::new(initialize_storage_hub());
 }
+
+/// A set of all the characters that need to be percent-encoded for the GCS JSON API
+const GCLOUD_ENCODING_SET: &AsciiSet = &CONTROLS
+    .add(b'!')
+    .add(b'#')
+    .add(b'$')
+    .add(b'&')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*')
+    .add(b'+')
+    .add(b',')
+    .add(b'/')
+    .add(b':')
+    .add(b';')
+    .add(b'=')
+    .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b']')
+    .add(b' ');
 
 /// Initialize the gcloud storage hub that will be used to process gcloud storage requests
 pub fn initialize() {
@@ -55,8 +80,8 @@ pub fn initialize() {
 /// config variable fails
 fn initialize_storage_hub() -> StorageHub {
     // Load GCloud SA key so we can use it for authentication
-    let client_secret =
-        yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE).expect(&format!(
+    let client_secret = yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE)
+        .expect(&format!(
             "Failed to load service account key from file at: {}",
             &*config::GCLOUD_SA_KEY_FILE
         ));
@@ -73,23 +98,22 @@ fn initialize_storage_hub() -> StorageHub {
     )
 }
 
-/// Retrieves the data the specified gs `address` as a String using `storage_hub` for processing the
-/// request
+/// Retrieves the media at the specified gs `address` as a String
 ///
 /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
 /// Storage JSON API, specifically to retrieve the file contents as a String
-pub fn retrieve_object_with_gs_uri(
-    address: &str
-) -> Result<String, Error> {
+pub fn retrieve_object_media_with_gs_uri(address: &str) -> Result<String, Error> {
     // Parse address to get bucket and object name
     let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
     // Percent encode the object name because the Google Cloud Storage JSON API, which the
     // google_storage1 crate uses, requires that (for some reason)
-    let object_name = percent_encoding::utf8_percent_encode(&object_name, percent_encoding::NON_ALPHANUMERIC).to_string();
+    let object_name =
+        percent_encoding::utf8_percent_encode(&object_name, GCLOUD_ENCODING_SET).to_string();
     // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
     let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
     // Request the data from its gcloud location
-    let (mut response, _) = borrowed_storage_hub.objects()
+    let (mut response, _) = borrowed_storage_hub
+        .objects()
         .get(&bucket_name, &object_name)
         .param("alt", "media") // So we actually just get the raw media we want
         .doit()?;
@@ -100,6 +124,83 @@ pub fn retrieve_object_with_gs_uri(
     Ok(response_body)
 }
 
+/// Retrieves the gcs object at the specified gs `address`
+///
+/// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
+/// Storage JSON API, specifically to retrieve the google storage object (the metadata, not the
+/// actual file)
+pub fn retrieve_object_with_gs_uri(address: &str) -> Result<Object, Error> {
+    // Parse address to get bucket and object name
+    let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
+    // Percent encode the object name because the Google Cloud Storage JSON API, which the
+    // google_storage1 crate uses, requires that (for some reason)
+    let object_name =
+        percent_encoding::utf8_percent_encode(&object_name, GCLOUD_ENCODING_SET).to_string();
+    // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
+    let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
+    // Request the object from its gcloud location
+    let (_, gcs_object) = borrowed_storage_hub
+        .objects()
+        .get(&bucket_name, &object_name)
+        .doit()?;
+    // Return the object
+    Ok(gcs_object)
+}
+
+/// Uploads `file` to the specified gs `address` with the name `name`
+///
+/// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
+/// Storage JSON API, specifically to retrieve the file contents as a String
+pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<String, Error> {
+    // Parse address to get bucket and object name
+    let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
+    // Append name to the end of object name to get the full name we'll use
+    let full_name = object_name + "/" + name;
+    // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
+    let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
+    // Make a default storage object because that's required by the gcloud storage library for some
+    // reason
+    let object = Object::default();
+    // Upload the data to the gcloud location
+    let result = borrowed_storage_hub
+        .objects()
+        .insert(object, &bucket_name)
+        .name(&full_name)
+        .param("uploadType", "multipart")
+        .upload(file, "application/octet-stream".parse().unwrap())?;
+    // Return the gs address of the object
+    Ok(format!(
+        "gs://{}/{}",
+        result.1.bucket.unwrap(),
+        result.1.name.unwrap()
+    ))
+}
+
+/// Builds the corresponding Authenticated URL from `uri` and returns it
+///
+/// This is function is currently not in use, but it's functionality will likely be necessary in
+/// the future, so it is included
+#[allow(dead_code)]
+pub fn convert_gs_uri_to_authenticated_url(uri: &str) -> Result<String, Error> {
+    // Get the contents of the uri minus the "gs://" at the beginning
+    let stripped_uri = match uri.get(5..) {
+        Some(stripped_uri) => stripped_uri,
+        None => {
+            // If there's nothing after where the "gs://" would be, return an error
+            return Err(Error::Parse(format!(
+                "Failed to parse input as gs uri: {}",
+                uri
+            )));
+        }
+    };
+    // Percent encode the URI so it's in the proper format for a URL
+    let encoded_stripped_uri =
+        percent_encoding::utf8_percent_encode(&stripped_uri, GCLOUD_ENCODING_SET);
+    Ok(format!(
+        "https://storage.cloud.google.com/{}",
+        encoded_stripped_uri
+    ))
+}
 
 /// Extracts the bucket name and the object name from the full gs uri of a file.  Expects
 /// `object_uri` in the format gs://bucketname/ob/ject/nam/e
@@ -122,14 +223,16 @@ fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Er
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::gcloud_storage::{parse_bucket_and_object_name, Error, retrieve_object_with_gs_uri};
+    use crate::storage::gcloud_storage::{
+        convert_gs_uri_to_authenticated_url, initialize_storage_hub, parse_bucket_and_object_name,
+        retrieve_object_with_gs_uri, Error,
+    };
     use crate::unit_test_util;
 
     #[test]
     fn parse_bucket_and_object_name_success() {
         let test_result_uri = "gs://bucket_name/some/garbage/filename.txt";
-        let (bucket_name, object_name) =
-            parse_bucket_and_object_name(test_result_uri).unwrap();
+        let (bucket_name, object_name) = parse_bucket_and_object_name(test_result_uri).unwrap();
         assert_eq!(bucket_name, "bucket_name");
         assert_eq!(object_name, "some/garbage/filename.txt");
     }
@@ -141,5 +244,20 @@ mod tests {
         assert!(matches!(failure, Err(Error::Parse(_))));
     }
 
-}
+    #[test]
+    fn convert_gs_uri_to_authenticated_url_success() {
+        let test_result_uri = "gs://bucket_name/some/garbage with space/filename.txt";
+        let authenticated_url = convert_gs_uri_to_authenticated_url(test_result_uri).unwrap();
+        assert_eq!(
+            authenticated_url,
+            "https://storage.cloud.google.com/bucket_name%2Fsome%2Fgarbage%20with%20space%2Ffilename.txt"
+        );
+    }
 
+    #[test]
+    fn convert_gs_uri_to_authenticated_url_failure() {
+        let test_result_uri = "";
+        let authenticated_url = convert_gs_uri_to_authenticated_url(test_result_uri);
+        assert!(matches!(authenticated_url, Err(Error::Parse(_))));
+    }
+}

@@ -59,6 +59,9 @@ impl RunResultData {
     /// Returns a result containing either the retrieved run_result mapping as a
     /// RunResultData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find_by_run_and_result(
         conn: &PgConnection,
@@ -77,6 +80,9 @@ impl RunResultData {
     /// `params`
     /// Returns a result containing either a vector of the retrieved run_result records as
     /// RunResultData instances or an error if the query fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find(
         conn: &PgConnection,
@@ -104,7 +110,7 @@ impl RunResultData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::parse_sort_string(&sort);
+            let sort = util::sort_string::parse_sort_string(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -158,6 +164,9 @@ impl RunResultData {
     /// `params`
     /// Returns a result containing either the new run_result record that was created or an
     /// error if the insert fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn create(
         conn: &PgConnection,
@@ -580,12 +589,10 @@ mod tests {
 
         assert!(matches!(
             new_run_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -626,12 +633,10 @@ mod tests {
 
         assert!(matches!(
             new_run_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 

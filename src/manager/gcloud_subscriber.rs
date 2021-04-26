@@ -261,7 +261,7 @@ fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, 
             if key.is_empty() {
                 request.test_input_key = None;
             }
-        },
+        }
         None => {}
     }
     match &request.eval_input_key {
@@ -269,7 +269,7 @@ fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, 
             if key.is_empty() {
                 request.eval_input_key = None;
             }
-        },
+        }
         None => {}
     }
 
@@ -283,7 +283,6 @@ mod tests {
     use crate::manager::gcloud_subscriber::{
         parse_github_request_from_message, start_run_from_message, ParseMessageError,
     };
-    use crate::manager::github_runner::GithubRunRequest;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::RunData;
     use crate::models::run_software_version::RunSoftwareVersionData;

@@ -6,8 +6,10 @@
 use crate::custom_sql_types::ResultTypeEnum;
 use crate::schema::result;
 use crate::schema::result::dsl::*;
+use crate::schema::template_result;
 use crate::util;
 use chrono::NaiveDateTime;
+use diesel::dsl::any;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -115,7 +117,7 @@ impl ResultData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::parse_sort_string(&sort);
+            let sort = util::sort_string::parse_sort_string(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "result_id" => {
@@ -175,6 +177,30 @@ impl ResultData {
 
         // Perform the query
         query.load::<Self>(conn)
+    }
+
+    /// Queries the DB for results for which there are template_result mappings between them and the
+    /// template with template_id equal to `id`
+    ///
+    /// Queries the DB using `conn` to retrieve result records that are mapped to the template with
+    /// a template_id equal to `id`
+    /// Returns a result containing either a vector of the retrieved result records as ResultData
+    /// instances or an error if the query fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
+    #[allow(dead_code)]
+    pub fn find_for_template(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<Vec<Self>, diesel::result::Error> {
+        let template_result_subquery = template_result::dsl::template_result
+            .filter(template_result::dsl::template_id.eq(id))
+            .select(template_result::dsl::result_id);
+
+        result
+            .filter(result_id.eq(any(template_result_subquery)))
+            .load::<Self>(conn)
     }
 
     /// Inserts a new result into the DB
@@ -512,6 +538,23 @@ mod tests {
     }
 
     #[test]
+    fn find_for_template_exists() {
+        let conn = get_test_db_connection();
+
+        let test_results = insert_test_results(&conn);
+        let test_template_result = insert_test_template_result_with_result_id(
+            &conn,
+            test_results.get(1).unwrap().result_id,
+        );
+
+        let found_results = ResultData::find_for_template(&conn, test_template_result.template_id)
+            .expect("Failed to retrieve test result by template_id.");
+
+        assert_eq!(found_results.len(), 1);
+        assert_eq!(found_results[0], test_results[1]);
+    }
+
+    #[test]
     fn create_success() {
         let conn = get_test_db_connection();
 
@@ -549,12 +592,10 @@ mod tests {
 
         assert!(matches!(
             new_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -594,12 +635,10 @@ mod tests {
 
         assert!(matches!(
             updated_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -632,12 +671,10 @@ mod tests {
 
         assert!(matches!(
             delete_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            ),)
         ));
     }
 }

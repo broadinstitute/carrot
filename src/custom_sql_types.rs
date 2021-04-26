@@ -76,7 +76,7 @@ pub static RUN_FAILURE_STATUSES: [RunStatusEnum; 6] = [
 
 /// Maps to the custom type `build_status_enum` in the DB
 ///
-/// Represents the enum used in the DB for storing the status of a run
+/// Represents the enum used in the DB for storing the status of a build
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 #[DieselType = "Build_status_enum"]
@@ -109,6 +109,45 @@ impl fmt::Display for BuildStatusEnum {
         }
     }
 }
+
+/// Maps to the custom type `report_status_enum` in the DB
+///
+/// Represents the enum used in the DB for storing the status of a report
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+#[DieselType = "Report_status_enum"]
+pub enum ReportStatusEnum {
+    Submitted,
+    Running,
+    Succeeded,
+    Failed,
+    Aborted,
+    Starting,
+    QueuedInCromwell,
+    WaitingForQueueSpace,
+    Expired,
+    Created,
+}
+
+impl fmt::Display for ReportStatusEnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ReportStatusEnum::Submitted => write!(f, "submitted"),
+            ReportStatusEnum::Running => write!(f, "running"),
+            ReportStatusEnum::Succeeded => write!(f, "succeeded"),
+            ReportStatusEnum::Failed => write!(f, "failed"),
+            ReportStatusEnum::Aborted => write!(f, "aborted"),
+            ReportStatusEnum::Starting => write!(f, "starting"),
+            ReportStatusEnum::QueuedInCromwell => write!(f, "queued_in_cromwell"),
+            ReportStatusEnum::WaitingForQueueSpace => write!(f, "waiting_for_queue_space"),
+            ReportStatusEnum::Expired => write!(f, "expired"),
+            ReportStatusEnum::Created => write!(f, "created"),
+        }
+    }
+}
+
+pub static REPORT_FAILURE_STATUSES: [ReportStatusEnum; 2] =
+    [ReportStatusEnum::Failed, ReportStatusEnum::Aborted];
 
 /// Maps to the custom type `result_type_enum` in the DB
 ///

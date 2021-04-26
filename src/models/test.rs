@@ -180,7 +180,7 @@ impl TestData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::parse_sort_string(&sort);
+            let sort = util::sort_string::parse_sort_string(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "template_id" => {
@@ -977,12 +977,10 @@ mod tests {
 
         assert!(matches!(
             new_test,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),)
         ));
     }
 
@@ -1060,14 +1058,10 @@ mod tests {
 
         assert!(matches!(
             updated_test,
-            Err(
-                UpdateError::DB(
-                    diesel::result::Error::DatabaseError(
-                        diesel::result::DatabaseErrorKind::UniqueViolation,
-                        _,
-                    ),
-                ),
-            )
+            Err(UpdateError::DB(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            ),),)
         ));
     }
 
@@ -1116,12 +1110,10 @@ mod tests {
 
         assert!(matches!(
             delete_result,
-            Err(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _,
-                ),
-            )
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _,
+            ),)
         ));
     }
 }

@@ -74,6 +74,9 @@ impl RunIsFromGithubData {
     /// Queries the DB using `conn` to retrieve run_is_from_githubs matching the crieria in `params`
     /// Returns a result containing either a vector of the retrieved run_is_from_githubs as
     /// RunIsFromGithubData instances or an error if the query fails for some reason
+    ///
+    /// This is function is currently not in use, but it's functionality will likely be necessary in
+    /// the future, so it is included
     #[allow(dead_code)]
     pub fn find(
         conn: &PgConnection,
@@ -107,7 +110,7 @@ impl RunIsFromGithubData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::parse_sort_string(&sort);
+            let sort = util::sort_string::parse_sort_string(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -676,15 +679,12 @@ mod tests {
         let test_run_is_from_github = insert_test_run_is_from_github(&conn);
 
         let delete_result =
-            RunIsFromGithubData::delete_by_run_id(&conn, test_run_is_from_github.run_id)
-                .unwrap();
+            RunIsFromGithubData::delete_by_run_id(&conn, test_run_is_from_github.run_id).unwrap();
 
         assert_eq!(delete_result, 1);
 
-        let test_run_is_from_github2 = RunIsFromGithubData::find_by_run_id(
-            &conn,
-            test_run_is_from_github.run_id
-        );
+        let test_run_is_from_github2 =
+            RunIsFromGithubData::find_by_run_id(&conn, test_run_is_from_github.run_id);
 
         assert!(matches!(
             test_run_is_from_github2,

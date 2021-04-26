@@ -279,7 +279,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
     .map_err(|e| {
         error!("{}", e);
         match e {
-            // If no template is found, return a 404
+            // Return a 403 if there's a foreign key violation
             BlockingError::Error(diesel::result::Error::DatabaseError(
                 diesel::result::DatabaseErrorKind::ForeignKeyViolation,
                 _,

@@ -327,13 +327,10 @@ mod tests {
     use crate::models::run::{NewRun, RunData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::unit_test_util::*;
-    use actix_web::client::Client;
     use actix_web::{http, test, App};
     use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::{json, Value};
-    use std::fs::read_to_string;
-    use std::str::from_utf8;
     use uuid::Uuid;
 
     fn create_test_test(conn: &PgConnection) -> TestData {
@@ -883,7 +880,7 @@ mod tests {
     async fn delete_failure_no_test() {
         let pool = get_test_db_pool();
 
-        let test = create_test_test(&pool.get().unwrap());
+        create_test_test(&pool.get().unwrap());
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 

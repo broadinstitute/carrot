@@ -192,7 +192,7 @@ async fn find(
 /// Panics if attempting to connect to the database results in an error
 async fn create(
     req: HttpRequest,
-    web::Json(new_test): web::Json<NewTemplateResultIncomplete>,
+    web::Json(new_template_result): web::Json<NewTemplateResultIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> impl Responder {
     // Pull id params from path
@@ -228,18 +228,18 @@ async fn create(
     };
 
     // Create a NewTemplateResult to pass to the create function
-    let new_test = NewTemplateResult {
+    let new_template_result = NewTemplateResult {
         template_id: id,
         result_id: result_id,
-        result_key: new_test.result_key,
-        created_by: new_test.created_by,
+        result_key: new_template_result.result_key,
+        created_by: new_template_result.created_by,
     };
 
     // Insert in new thread
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateResultData::create(&conn, new_test) {
+        match TemplateResultData::create(&conn, new_template_result) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
