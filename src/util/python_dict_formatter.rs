@@ -12,6 +12,7 @@ use std::io::Write;
 pub enum Error {
     IO(std::io::Error),
     FromUtf8(std::string::FromUtf8Error),
+    MaxDepthExceeded(String)
 }
 
 impl std::error::Error for Error {}
@@ -21,6 +22,7 @@ impl fmt::Display for Error {
         match self {
             Error::IO(e) => write!(f, "python_dict_formatter Error IO {}", e),
             Error::FromUtf8(e) => write!(f, "python_dict_formatter Error FromUtf8 {}", e),
+            Error::MaxDepthExceeded(e) => write!(f, "python_dict_formatter Error MaxDepthExceeded {}", e),
         }
     }
 }
@@ -39,6 +41,8 @@ impl From<std::io::Error> for Error {
 
 /// The bytes we'll use for indenting
 const INDENT_BYTES: &[u8; 4] = b"    ";
+/// The maximum indent (we'll throw an error in the case we exceed this)
+const MAX_INDENT: usize = 19;
 
 /// Accepts the map representation of a json object (`json_obj`) and returns a string representing
 /// the object formatted as a python dict
@@ -58,12 +62,12 @@ fn format_value(
     json_val: &Value,
     buffer: &mut Vec<u8>,
     indent: usize,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     match json_val {
-        Value::Null => format_null(buffer),
-        Value::Bool(bool_val) => format_bool(bool_val, buffer),
-        Value::Number(number_val) => format_number(number_val, buffer),
-        Value::String(string_val) => format_string(string_val, buffer),
+        Value::Null => Ok(format_null(buffer)?),
+        Value::Bool(bool_val) => Ok(format_bool(bool_val, buffer)?),
+        Value::Number(number_val) => Ok(format_number(number_val, buffer)?),
+        Value::String(string_val) => Ok(format_string(string_val, buffer)?),
         Value::Array(json_array) => format_array(json_array, buffer, indent),
         Value::Object(json_obj) => format_object(json_obj, buffer, indent),
     }
@@ -114,7 +118,11 @@ fn format_array(
     json_array: &Vec<Value>,
     buffer: &mut Vec<u8>,
     indent: usize,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
+    // If indent has exceeded the maximum, return an error
+    if indent > MAX_INDENT {
+        return Err(Error::MaxDepthExceeded(format!("Python dict conversion exceeded max depth of {}", MAX_INDENT)));
+    }
     // Open the array
     buffer.write_all(b"[\n")?;
     // Loop through the elements in the array and write each one
@@ -125,14 +133,18 @@ fn format_array(
     }
     // Close the array
     write_indent(buffer, indent)?;
-    buffer.write_all(b"]")
+    Ok(buffer.write_all(b"]")?)
 }
 
 fn format_object(
     json_obj: &Map<String, Value>,
     buffer: &mut Vec<u8>,
     indent: usize,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
+    // If indent has exceeded the maximum, return an error
+    if indent > MAX_INDENT {
+        return Err(Error::MaxDepthExceeded(format!("Python dict conversion exceeded max depth of {}", MAX_INDENT)));
+    }
     // Open the object
     buffer.write_all(b"{\n")?;
     // Loop through elements in the object and write each one
@@ -145,7 +157,7 @@ fn format_object(
     }
     // Close the object
     write_indent(buffer, indent)?;
-    buffer.write_all(b"}")
+    Ok(buffer.write_all(b"}")?)
 }
 
 /// Writes `INDENT_BYTES` to `buffer` `indent` times
@@ -185,5 +197,19 @@ mod tests {
         let test_dict = get_python_dict_string_from_json(test_json.as_object().unwrap()).unwrap();
 
         assert_eq!(expected_dict, test_dict);
+    }
+
+    #[test]
+    fn test_get_python_dict_string_from_json_failure_exceeded_max_depth() {
+        let test_json = json!({
+            "too deep array": [[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]
+        });
+        // This is in a text file because getting the indentation right with a string literal is a pain
+        let expected_dict =
+            read_to_string("testdata/util/python_dict_formatter/expected_dict.txt").unwrap();
+
+        let test_err = get_python_dict_string_from_json(test_json.as_object().unwrap()).unwrap_err();
+
+        assert!(matches!(test_err, Error::MaxDepthExceeded(_)));
     }
 }
