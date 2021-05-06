@@ -13,6 +13,7 @@ use crate::models::software_version::SoftwareVersionData;
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
 use crate::requests::cromwell_requests::CromwellRequestError;
+use crate::requests::test_resource_requests;
 use actix_web::client::Client;
 use chrono::Utc;
 use diesel::PgConnection;
@@ -53,6 +54,7 @@ pub enum Error {
     SoftwareNotFound(String),
     Build(software_builder::Error),
     MissingOutputKey(String),
+    ResourceRequest(test_resource_requests::Error),
 }
 
 impl std::error::Error for Error {}
@@ -73,6 +75,7 @@ impl fmt::Display for Error {
                 "Error missing output key {} in outputs from cromwell for test",
                 k
             ),
+            Error::ResourceRequest(e) => write!(f, "Error ResourceRequest: {}", e),
         }
     }
 }
@@ -95,6 +98,11 @@ impl From<std::io::Error> for Error {
 impl From<software_builder::Error> for Error {
     fn from(e: software_builder::Error) -> Error {
         Error::Build(e)
+    }
+}
+impl From<test_resource_requests::Error> for Error {
+    fn from(e: test_resource_requests::Error) -> Error {
+        Error::ResourceRequest(e)
     }
 }
 
@@ -317,18 +325,28 @@ pub async fn start_run_test_with_template_id(
     // Write json to temp file so it can be submitted to cromwell
     let json_file = util::get_temp_file(&json_to_submit.to_string())?;
 
+    // Download test wdl and write it to a file
+    let test_wdl_as_string =
+        test_resource_requests::get_resource_as_string(client, &template.test_wdl).await?;
+    let test_wdl_as_file = util::get_temp_file(&test_wdl_as_string)?;
+
     // Send job request to cromwell
-    let start_job_response =
-        match util::start_job_from_url(client, &template.test_wdl, &json_file.path()).await {
-            Ok(status) => status,
-            Err(e) => {
-                error!(
-                    "Encountered an error while attempting to start job in cromwell: {}",
-                    e
-                );
-                return Err(Error::Cromwell(e));
-            }
-        };
+    let start_job_response = match util::start_job_from_file(
+        client,
+        &test_wdl_as_file.path(),
+        &json_file.path(),
+    )
+    .await
+    {
+        Ok(status) => status,
+        Err(e) => {
+            error!(
+                "Encountered an error while attempting to start job in cromwell: {}",
+                e
+            );
+            return Err(Error::Cromwell(e));
+        }
+    };
 
     // Update run with job id and TestSubmitted status
     let run_update = RunChangeset {
@@ -391,18 +409,28 @@ pub async fn start_run_eval_with_template_id(
     // Write json to temp file so it can be submitted to cromwell
     let json_file = util::get_temp_file(&json_to_submit.to_string())?;
 
+    // Download eval wdl and write it to a file
+    let eval_wdl_as_string =
+        test_resource_requests::get_resource_as_string(client, &template.eval_wdl).await?;
+    let eval_wdl_as_file = util::get_temp_file(&eval_wdl_as_string)?;
+
     // Send job request to cromwell
-    let start_job_response =
-        match util::start_job_from_url(client, &template.eval_wdl, &json_file.path()).await {
-            Ok(status) => status,
-            Err(e) => {
-                error!(
-                    "Encountered an error while attempting to start job in cromwell: {}",
-                    e
-                );
-                return Err(Error::Cromwell(e));
-            }
-        };
+    let start_job_response = match util::start_job_from_file(
+        client,
+        &eval_wdl_as_file.path(),
+        &json_file.path(),
+    )
+    .await
+    {
+        Ok(status) => status,
+        Err(e) => {
+            error!(
+                "Encountered an error while attempting to start job in cromwell: {}",
+                e
+            );
+            return Err(Error::Cromwell(e));
+        }
+    };
 
     // Update run with job id and TestSubmitted status
     let run_update = RunChangeset {
@@ -838,6 +866,7 @@ mod tests {
     use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::json;
+    use std::fs::read_to_string;
     use uuid::Uuid;
 
     fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {
@@ -1031,7 +1060,15 @@ mod tests {
 
         let test_params = json!({"in_user_name":"Kevin"});
         let eval_params = json!({});
-
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/test_no_software_params")
+            .with_status(200)
+            .with_body(
+                read_to_string("testdata/manager/test_runner/test_wdl_no_software_params.wdl")
+                    .unwrap(),
+            )
+            .expect(1)
+            .create();
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1055,6 +1092,7 @@ mod tests {
         .await
         .unwrap();
 
+        wdl_mock.assert();
         cromwell_mock.assert();
 
         assert_eq!(test_run.test_id, test_test.test_id);
@@ -1091,7 +1129,6 @@ mod tests {
 
         let test_params = json!({"in_user_name":"Kevin", "in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
         let eval_params = json!({"in_user":"Jonn", "in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1183,7 +1220,15 @@ mod tests {
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
         let test_run = insert_test_run_with_test_id_and_status_building(&conn, test_test.test_id);
-
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/test_software_params")
+            .with_status(200)
+            .with_body(
+                read_to_string("testdata/manager/test_runner/test_wdl_software_params.wdl")
+                    .unwrap(),
+            )
+            .expect(1)
+            .create();
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "34958601-d114-4194-a7f7-9e41211ca2ce",
@@ -1197,6 +1242,7 @@ mod tests {
 
         let result = start_run_test(&conn, &client, &test_run).await.unwrap();
 
+        wdl_mock.assert();
         cromwell_mock.assert();
 
         assert_eq!(
@@ -1220,6 +1266,15 @@ mod tests {
             "test_test.UnimportantKey": "Who Cares?"
         });
 
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/eval_software_params")
+            .with_status(200)
+            .with_body(
+                read_to_string("testdata/manager/test_runner/eval_wdl_software_params.wdl")
+                    .unwrap(),
+            )
+            .expect(1)
+            .create();
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "34958601-d114-4194-a7f7-9e41211ca2ce",
@@ -1235,6 +1290,7 @@ mod tests {
             .await
             .unwrap();
 
+        wdl_mock.assert();
         cromwell_mock.assert();
 
         assert_eq!(

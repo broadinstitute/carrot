@@ -1490,6 +1490,12 @@ mod tests {
         );
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/eval.wdl")
+            .with_status(200)
+            .with_body(read_to_string("testdata/routes/run/eval_wdl.wdl").unwrap())
+            .expect(1)
+            .create();
         // Define mockito mapping for cromwell submit response
         let mock_response_body = json!({
           "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
@@ -1820,6 +1826,13 @@ mod tests {
             test_run.run_id,
             test_software_version.software_version_id,
         );
+
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/test.wdl")
+            .with_status(200)
+            .with_body(read_to_string("testdata/routes/run/test_wdl.wdl").unwrap())
+            .expect(1)
+            .create();
 
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
