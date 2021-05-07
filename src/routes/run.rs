@@ -454,6 +454,11 @@ async fn run_for_test(
                     title: "Server error".to_string(),
                     status: 500,
                     detail: format!("Error while attempting to retrieve key ({}) from cromwell outputs to fill as input to eval wdl", k),
+                },
+                test_runner::Error::ResourceRequest(e) => ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to retrieve WDL: {}", e)
                 }
             };
             HttpResponseBuilder::new(
@@ -574,6 +579,7 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
     use serde_json::json;
+    use std::fs::read_to_string;
     use uuid::Uuid;
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
@@ -1138,6 +1144,13 @@ mod tests {
             eval_input: Some(eval_input.clone()),
             created_by: None,
         };
+
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/test")
+            .with_status(200)
+            .with_body(read_to_string("testdata/routes/run/test_wdl.wdl").unwrap())
+            .expect(1)
+            .create();
 
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({

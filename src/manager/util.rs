@@ -44,37 +44,6 @@ pub async fn start_job_from_file(
     cromwell_requests::start_job(&client, cromwell_params).await
 }
 
-/// Sends a request to cromwell to start a job from a WDL URL
-///
-/// Sends a request to Cromwell specifying the WDL pointed to by `wdl_url` for the workflow and the
-/// json at `json_file_path` for the inputs.  Returns the response as a WorkflowIdAndType or an
-/// error if there is some issue starting the job
-pub async fn start_job_from_url(
-    client: &Client,
-    wdl_url: &str,
-    json_file_path: &Path,
-) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
-    // Build request parameters
-    let cromwell_params = cromwell_requests::StartJobParams {
-        labels: None,
-        workflow_dependencies: None,
-        workflow_inputs: Some(PathBuf::from(json_file_path)),
-        workflow_inputs_2: None,
-        workflow_inputs_3: None,
-        workflow_inputs_4: None,
-        workflow_inputs_5: None,
-        workflow_on_hold: None,
-        workflow_options: None,
-        workflow_root: None,
-        workflow_source: None,
-        workflow_type: Some(WorkflowTypeEnum::WDL),
-        workflow_type_version: None,
-        workflow_url: Some(String::from(wdl_url)),
-    };
-    // Submit request to start job
-    cromwell_requests::start_job(&client, cromwell_params).await
-}
-
 /// Creates a temporary file with `contents` and returns it
 ///
 /// Creates a NamedTempFile and writes `contents` to it.  Returns the file if successful.  Returns
