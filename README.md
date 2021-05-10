@@ -33,6 +33,8 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
 * CARROT uses [womtool](https://cromwell.readthedocs.io/en/develop/WOMtool/) for WDL validation.  If running outside of a docker container created using the included Dockerfile, it will be necessary to include the womtool jar on the same machine and set the `WOMTOOL_LOCATION` environment variable to its location.
 * Once Rust is installed, the project can be built using the `cargo build` command in the project directory.
     * Building for release can be done using `cargo build --release`
+* CARROT requires a [Cromwell](https://github.com/broadinstitute/cromwell) server to run tests
+    * Setting up a Cromwell server can be done by following the instructions [here](https://docs.google.com/document/d/1FlKe3XvjzE2-Yzi245THpC6X7D0opRufjh7Mt21bBhE/edit?usp=sharing)
 * A Dockerfile is provided in the project root directory that can be used to run CARROT in a Docker container
     * The image can be built by running `docker build .` from the project root.
     * For development purposes, the `docker-compose.yml` file can be used to run CARROT with a PostreSQL server and a Cromwell server in their own containers.  This can be done using `docker-compose up` within that directory.
