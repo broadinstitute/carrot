@@ -118,7 +118,7 @@ A **result** is an output type / class from a test or evaluation.  For example, 
 A CARROT **pipeline** defines a unit on which analyses can be performed.  This unit can be a piece of software or several pieces of software connected together to perform a task to be analyzed.
 
 
-##### Template
+#### <a name="carrot-terms-and-structure-template"/> **Template**
 
 Each CARROT pipeline can have one or more **template**s associated with it.  A template defines a repeatable test and evaluation to be performed on the associated pipeline.  This test and evaluation are defined in WDL files and do not have inputs associated with them - rather they define a specific method to test and evaluate the pipeline which can be performed for multiple inputs.  This allows the template to be run multiple times with multiple inputs, but with the same evaluation method.
 
