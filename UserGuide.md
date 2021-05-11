@@ -113,7 +113,7 @@ In CARROT, **software** represents a piece of software or software pipeline to t
 A **result** is an output type / class from a test or evaluation.  For example, this can be a bam file, a TSV file, a single value, an image, etc.  These result types are shared across all CARROT analyses, so when adding a new template, the result types for a particular analysis may already exist.  If not, they will need to be defined before adding a new template.
 
 
-##### Pipeline
+#### <a name="carrot-terms-and-structure-pipeline"/> **Pipeline**
 
 A CARROT **pipeline** defines a unit on which analyses can be performed.  This unit can be a piece of software or several pieces of software connected together to perform a task to be analyzed.
 
