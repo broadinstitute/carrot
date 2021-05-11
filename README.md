@@ -46,7 +46,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
     * Emails can be configured to be sent in the following ways:
         * Using the local machine's `sendmail` utility, or
         * Using an SMTP mail server (either running your own, or using an existing mail service like GMail).
-    * Setting this up requires the use of a few configuration variables, which are listed and explained in the `.env.example` file.
+    * Enabling this requires the use of a few configuration variables which are listed and explained in the `.env.example` file.
 * If you do not wish to utilize the email functionality, set the `EMAIL_MODE` environment variable to `None`.
 
 ### <a name="software_building">Dynamic Software Testing</a>
