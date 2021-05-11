@@ -29,7 +29,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
 * CARROT uses the [Diesel](http://diesel.rs/) crate for interfacing with the database.  For certain dev and build tasks, the Diesel CLI is required.
     * Instructions for installing the Diesel CLI can be found [here](http://diesel.rs/guides/getting-started/).
     * Once the Diesel CLI is installed and the PostgreSQL database is running, the Diesel CLI migration tool can be used to create all of the required tables and types in the database with the command `diesel migration run`
-        * Alternatively, these tables and types will all be created when running CARROT for the first time
+    * Alternatively, these tables and types will all be created when running CARROT for the first time
 * CARROT uses [womtool](https://cromwell.readthedocs.io/en/develop/WOMtool/) for WDL validation.  If running outside of a docker container created using the included Dockerfile, it will be necessary to include the womtool jar on the same machine and set the `WOMTOOL_LOCATION` environment variable to its location.
 * Once Rust is installed, the project can be built using the `cargo build` command in the project directory.
     * Building for release can be done using `cargo build --release`
