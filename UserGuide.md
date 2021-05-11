@@ -5,7 +5,7 @@
 ## Cromwell Automated Runner for Regression and Optimization Testing (CARROT) User Guide
 
 
-### _v0.2.2-beta_
+### _v0.3.0-gamma_
 
 
 ## **Table of Contents**
@@ -69,7 +69,7 @@ This document is only applicable to the following version of CARROT:
 
 
 ```
-v0.2.2-beta
+v0.3.0-gamma
 ```
 
 
