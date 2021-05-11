@@ -108,7 +108,7 @@ CARROT breaks down testing into several pieces that must be defined in the CARRO
 In CARROT, **software** represents a piece of software or software pipeline to test.  It is not strictly necessary to define a _software_ unit in order to define and run tests, but it is highly encouraged because of the benefits it affords.
 
 
-##### Result
+#### <a name="carrot-terms-and-structure-result"/> **Result**
 
 A **result** is an output type / class from a test or evaluation.  For example, this can be a bam file, a TSV file, a single value, an image, etc.  These result types are shared across all CARROT analyses, so when adding a new template, the result types for a particular analysis may already exist.  If not, they will need to be defined before adding a new template.
 
