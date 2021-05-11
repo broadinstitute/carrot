@@ -103,7 +103,7 @@ Because CARROT leverages WDL to describe tests, any software system can be teste
 CARROT breaks down testing into several pieces that must be defined in the CARROT database in order to perform analyses (names bolded below).
 
 
-##### Software
+#### <a name="carrot-terms-and-structure-software"/> **Software**
 
 In CARROT, **software** represents a piece of software or software pipeline to test.  It is not strictly necessary to define a _software_ unit in order to define and run tests, but it is highly encouraged because of the benefits it affords.
 
