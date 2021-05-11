@@ -614,4 +614,4 @@ Once the GitHub action processes the comment and sends the message, it will be p
 ## Notes
 
 <a name="footnote1"/> [1]:
-Image: © Disney’s The New Adventures of Winnie the Pooh S1E1 - “Pooh Oughta Be In Pictures” 
+Image: © The Disney Corporation.  The New Adventures of Winnie the Pooh S1E1 - “Pooh Oughta Be In Pictures” 
