@@ -27,7 +27,7 @@ use uuid::Uuid;
 lazy_static! {
     // Build regex for matching values specifying custom builds
     static ref IMAGE_BUILD_REGEX: Regex =
-        Regex::new(r"image_build:\w[^\|]*\|[0-9a-f]{40}").unwrap();
+        Regex::new(r"image_build:\w[^\|]*\|.*").unwrap();
 
     // Build regex for matching values specifying test outputs
     static ref TEST_OUTPUT_REGEX: Regex =
