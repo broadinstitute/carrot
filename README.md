@@ -11,6 +11,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
     * [GitHub Integration](#github_integration)
     * [Reporting](#reporting)
 * [Style](#style)
+* [Using CARROT](#using_carrot)
 
 ## <a name="requirements">Requirements</a>
 
@@ -77,3 +78,9 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
 When contributing to CARROT, you should do your best to adhere to the [Rust style guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md).
 
 To make adhering to the style guide easier, there is a Rust automatic formatting tool called [rustfmt](https://github.com/rust-lang/rustfmt). This tool can be installed with cargo using the command `rustup component add rustfmt` and should be run using `cargo fmt` before making a pull request.
+
+## <a name="using_carrot">Using CARROT</a>
+
+Once you have a CARROT server running, please see the [User Guide](UserGuide.md) for instructions on using CARROT.
+
+There is also an [example test repo](https://github.com/broadinstitute/carrot-example-test) available with instructions on how to create and run an example test on your CARROT server.
