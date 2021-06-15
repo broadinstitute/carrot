@@ -2,8 +2,16 @@
 //!
 //!
 
+use core::fmt;
+
+use actix_web::client::Client;
+use diesel::PgConnection;
+use log::{debug, error, warn};
+use serde_json::{json, Map, Value};
+use uuid::Uuid;
+
 use crate::config;
-use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
+use crate::custom_sql_types::{REPORT_FAILURE_STATUSES, ReportStatusEnum};
 use crate::manager::util;
 use crate::models::report::ReportData;
 use crate::models::run::{RunData, RunWithResultData};
@@ -13,13 +21,7 @@ use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::requests::cromwell_requests::CromwellRequestError;
 use crate::requests::test_resource_requests;
 use crate::storage::gcloud_storage;
-use crate::util::python_dict_formatter;
-use actix_web::client::Client;
-use core::fmt;
-use diesel::PgConnection;
-use log::{debug, error, warn};
-use serde_json::{json, Map, Value};
-use uuid::Uuid;
+use crate::util::{python_dict_formatter, temp_storage};
 
 /// Error type for possible errors returned by generating a run report
 #[derive(Debug)]
@@ -409,9 +411,9 @@ pub async fn create_run_report(
         &report.config,
     )?;
     // Write it to a file
-    let json_file = util::get_temp_file(&input_json.to_string())?;
+    let json_file = temp_storage::get_temp_file(&input_json.to_string())?;
     // Write the wdl to a file
-    let wdl_file = util::get_temp_file(generator_wdl)?;
+    let wdl_file = temp_storage::get_temp_file(generator_wdl)?;
     // Submit report generation job to cromwell
     let start_job_response =
         util::start_job_from_file(client, &wdl_file.path(), &json_file.path()).await?;
@@ -724,7 +726,7 @@ fn upload_report_template(
     run_name: &str,
 ) -> Result<String, Error> {
     // Write the json to a temporary file
-    let report_file = match util::get_temp_file(&report_json.to_string()) {
+    let report_file = match temp_storage::get_temp_file(&report_json.to_string()) {
         Ok(file) => file,
         Err(e) => {
             error!("Failed to create temp file for uploading report template");
@@ -903,11 +905,20 @@ fn get_gs_uris_from_map(map: &Map<String, Value>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::fs::read_to_string;
+
+    use actix_web::client::Client;
+    use chrono::{NaiveDateTime, Utc};
+    use diesel::PgConnection;
+    use serde_json::{json, Value};
+    use uuid::Uuid;
+
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
     use crate::manager::report_builder::{
         create_input_json, create_report_template, create_run_report,
-        create_run_reports_for_completed_run, get_control_block_values,
-        get_disk_size_based_on_inputs_and_results, Error, FILE_DOWNLOAD_CELL,
+        create_run_reports_for_completed_run, Error,
+        FILE_DOWNLOAD_CELL, get_control_block_values, get_disk_size_based_on_inputs_and_results,
         RUN_INPUTS_AND_RESULTS_CELL, RUN_METADATA_CELL,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
@@ -921,13 +932,6 @@ mod tests {
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_connection;
-    use actix_web::client::Client;
-    use chrono::{NaiveDateTime, Utc};
-    use diesel::PgConnection;
-    use serde_json::{json, Value};
-    use std::env;
-    use std::fs::read_to_string;
-    use uuid::Uuid;
 
     fn insert_test_run_with_results(
         conn: &PgConnection,

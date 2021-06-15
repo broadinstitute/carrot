@@ -3,7 +3,17 @@
 //! The processing of running a test, once it has been defined and a request has been made to the
 //! test run mapping, is divided into multiple steps defined here
 
+use std::collections::HashMap;
+use std::fmt;
 use crate::config;
+use actix_web::client::Client;
+use chrono::Utc;
+use diesel::PgConnection;
+use log::error;
+use regex::Regex;
+use serde_json::{json, Map, Value};
+use uuid::Uuid;
+
 use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::manager::{software_builder, util};
 use crate::models::run::{NewRun, RunChangeset, RunData, RunQuery};
@@ -15,15 +25,7 @@ use crate::models::template::TemplateData;
 use crate::models::test::TestData;
 use crate::requests::cromwell_requests::CromwellRequestError;
 use crate::requests::test_resource_requests;
-use actix_web::client::Client;
-use chrono::Utc;
-use diesel::PgConnection;
-use log::error;
-use regex::Regex;
-use serde_json::{json, Map, Value};
-use std::collections::HashMap;
-use std::fmt;
-use uuid::Uuid;
+use crate::util::temp_storage;
 
 lazy_static! {
     // Build regex for matching values specifying custom builds
@@ -327,12 +329,12 @@ pub async fn start_run_test_with_template_id(
     let json_to_submit = format_test_json_for_cromwell(&run.test_input)?;
 
     // Write json to temp file so it can be submitted to cromwell
-    let json_file = util::get_temp_file(&json_to_submit.to_string())?;
+    let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
 
     // Download test wdl and write it to a file
     let test_wdl_as_string =
         test_resource_requests::get_resource_as_string(client, &template.test_wdl).await?;
-    let test_wdl_as_file = util::get_temp_file(&test_wdl_as_string)?;
+    let test_wdl_as_file = temp_storage::get_temp_file(&test_wdl_as_string)?;
 
     // Send job request to cromwell
     let start_job_response = match util::start_job_from_file(
@@ -411,12 +413,12 @@ pub async fn start_run_eval_with_template_id(
     let json_to_submit = format_eval_json_for_cromwell(&run.eval_input, test_outputs)?;
 
     // Write json to temp file so it can be submitted to cromwell
-    let json_file = util::get_temp_file(&json_to_submit.to_string())?;
+    let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
 
     // Download eval wdl and write it to a file
     let eval_wdl_as_string =
         test_resource_requests::get_resource_as_string(client, &template.eval_wdl).await?;
-    let eval_wdl_as_file = util::get_temp_file(&eval_wdl_as_string)?;
+    let eval_wdl_as_file = temp_storage::get_temp_file(&eval_wdl_as_string)?;
 
     // Send job request to cromwell
     let start_job_response = match util::start_job_from_file(
@@ -850,11 +852,19 @@ fn create_run_in_db(
 
 #[cfg(test)]
 mod tests {
+    use std::fs::read_to_string;
+
+    use actix_web::client::Client;
+    use chrono::Utc;
+    use diesel::PgConnection;
+    use serde_json::json;
+    use uuid::Uuid;
+
     use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
     use crate::manager::test_runner::{
-        check_if_run_with_name_exists, create_run, create_run_in_db, format_eval_json_for_cromwell,
-        format_test_json_for_cromwell, get_or_create_run_software_version, run_finished_building,
-        start_run_eval, start_run_test, Error, RunBuildStatus,
+        check_if_run_with_name_exists, create_run, create_run_in_db, Error,
+        format_eval_json_for_cromwell, format_test_json_for_cromwell, get_or_create_run_software_version,
+        run_finished_building, RunBuildStatus, start_run_eval, start_run_test,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
@@ -867,12 +877,6 @@ mod tests {
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::get_test_db_connection;
-    use actix_web::client::Client;
-    use chrono::Utc;
-    use diesel::PgConnection;
-    use serde_json::json;
-    use std::fs::read_to_string;
-    use uuid::Uuid;
 
     fn insert_test_template_no_software_params(conn: &PgConnection) -> TemplateData {
         let new_pipeline = NewPipeline {

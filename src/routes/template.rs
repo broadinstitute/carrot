@@ -9,15 +9,14 @@ use crate::requests::test_resource_requests;
 use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::storage::gcloud_storage;
-use crate::util::temp_storage;
-use crate::util::wdl_storage;
+use crate::util::{ temp_storage, wdl_storage };
 use crate::validation::womtool;
 use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::{debug, error};
 use serde_json::json;
 use std::fmt;
-use std::path::{Path};
+use std::path::Path;
 use uuid::Uuid;
 use diesel::PgConnection;
 
@@ -190,8 +189,6 @@ async fn create(
             name: new_template.name,
             pipeline_id: new_template.pipeline_id,
             description: new_template.description,
-            // We can unwrap on these because, if we're making a non-unicode path for the WDLs,
-            // CARROT won't function properly anyway
             test_wdl: test_wdl_location,
             eval_wdl: eval_wdl_location,
             created_by: new_template.created_by,
@@ -596,7 +593,7 @@ async fn store_wdl(
     wdl_location: &str,
     wdl_type: WdlType,
 ) -> Result<String, HttpResponse> {
-    // Attempt to store the wdl locally
+    // Attempt to store the wdl
     match wdl_storage::store_wdl(client, conn, wdl_location, &format!("{}.wdl", wdl_type)).await {
         Ok(wdl_local_path) => Ok(wdl_local_path),
         Err(e) => {
@@ -1125,6 +1122,7 @@ mod tests {
     #[actix_rt::test]
     async fn create_failure_duplicate_name() {
         
+        init_wdl_temp_dir();
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
@@ -1267,7 +1265,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_bad_uuid() {
-        
+        init_wdl_temp_dir();
         let pool = get_test_db_pool();
 
         create_test_template(&pool.get().unwrap());

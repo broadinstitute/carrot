@@ -1,17 +1,14 @@
 //! Contains utility functions shared by multiple of the modules within the `manager` module
 
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::Duration;
+use actix_web::client::Client;
 use crate::config;
 use crate::requests::cromwell_requests;
 use crate::requests::cromwell_requests::{
     CromwellRequestError, WorkflowIdAndStatus, WorkflowTypeEnum,
 };
-use actix_web::client::Client;
-use log::error;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::time::Duration;
-use tempfile::NamedTempFile;
 
 /// Sends a request to cromwell to start a job from a WDL file
 ///
@@ -42,33 +39,6 @@ pub async fn start_job_from_file(
     };
     // Submit request to start job
     cromwell_requests::start_job(&client, cromwell_params).await
-}
-
-/// Creates a temporary file with `contents` and returns it
-///
-/// Creates a NamedTempFile and writes `contents` to it.  Returns the file if successful.  Returns
-/// an error if creating or writing to the file fails
-pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
-    match NamedTempFile::new() {
-        Ok(mut file) => {
-            if let Err(e) = write!(file, "{}", contents) {
-                error!(
-                    "Encountered error while attempting to write to temporary file: {}",
-                    e
-                );
-                Err(e)
-            } else {
-                Ok(file)
-            }
-        }
-        Err(e) => {
-            error!(
-                "Encountered error while attempting to create temporary file: {}",
-                e
-            );
-            Err(e)
-        }
-    }
 }
 
 /// Returns an image URL generated from `IMAGE_REGISTRY_HOST`, `software_name`, and `commit_hash`
@@ -107,11 +77,14 @@ pub fn check_for_terminate_message_with_timeout(
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::util::{get_temp_file, start_job_from_file};
+    use std::path::PathBuf;
+
     use actix_web::client::Client;
     use serde_json::json;
     use serde_json::Value;
-    use std::path::PathBuf;
+
+    use crate::manager::util::start_job_from_file;
+    use crate::util::temp_storage::get_temp_file;
 
     #[actix_rt::test]
     async fn test_start_job() {

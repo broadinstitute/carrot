@@ -2,11 +2,12 @@
 
 use crate::config;
 use crate::requests::test_resource_requests;
+use crate::storage::gcloud_storage;
 use actix_web::client::Client;
 use std::fmt;
 use std::fs;
 use std::io::prelude::*;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 use diesel::PgConnection;
 use crate::models::wdl_hash::{WdlHashData, WdlDataToHash};
@@ -15,7 +16,8 @@ use crate::models::wdl_hash::{WdlHashData, WdlDataToHash};
 pub enum Error {
     IO(std::io::Error),
     Request(test_resource_requests::Error),
-    DB(diesel::result::Error)
+    DB(diesel::result::Error),
+    GCS(gcloud_storage::Error)
 }
 
 impl fmt::Display for Error {
@@ -23,7 +25,8 @@ impl fmt::Display for Error {
         match self {
             Error::Request(e) => write!(f, "WDL Storage Error Request {}", e),
             Error::IO(e) => write!(f, "WDL Storage Error IO {}", e),
-            Error::DB(e) => write!(f, "WDL Storage Error DB {}", e)
+            Error::DB(e) => write!(f, "WDL Storage Error DB {}", e),
+	    Error::GCS(e) => write!(f, "WDL Storage Error GCS {}", e),
         }
     }
 }
@@ -45,6 +48,12 @@ impl From<diesel::result::Error> for Error {
         Error::DB(e)
     }
 }
+impl From<gcloud_storage::Error> for Error {
+    fn from(e: gcloud_storage::Error) -> Error {
+        Error::GCS(e)
+    }
+}
+
 
 /// Retrieves wdl (for the template with `template_id`) from `wdl_location`, stores it with file
 /// name `wdl_file_name`, and returns the path to its location
@@ -61,33 +70,51 @@ pub async fn store_wdl(
     if let Some(location) = check_for_existing_wdl(&wdl_string, conn)? {
         return Ok(location);
     }
-    // Get the directory path we'll write to
-    let dir_path: PathBuf = get_wdl_directory_path(Uuid::new_v4());
-    // Write to a file
-    let new_wdl_storage_location = write_wdl(&wdl_string, &dir_path, wdl_file_name)?;
-    // Get the path as a string
-    // Okay to unwrap here, because non-Utf8 paths are a problem for us anyway
-    let wdl_path_as_string: String = String::from(new_wdl_storage_location.to_str().unwrap_or_else(|| panic!("WDL location is non-utf8 path: {:?}", new_wdl_storage_location)));
+    // Store the wdl and get its new location
+    let stored_wdl_location: String = if *config::ENABLE_GCS_WDL_STORAGE {
+        // If storing WDLs in GCS is enabled, upload it
+        store_wdl_in_gcs(&wdl_string, wdl_file_name)?
+    }
+    else {
+        // Otherwise, store it locally
+        let wdl_path: PathBuf = store_wdl_locally(&wdl_string, wdl_file_name)?;
+        // Convert the path to a string
+        // We can panic on a failed string conversion here because carrot will break if the path can't
+        // be a string anyway
+        String::from(wdl_path.to_str().unwrap_or_else(|| panic!("Failed to convert local wdl file path {:?} to string", wdl_path)))
+    };
     // Write a hash record for it
     WdlHashData::create(conn, WdlDataToHash {
-        location: wdl_path_as_string.clone(),
+        location: stored_wdl_location.clone(),
         data: wdl_string
     })?;
 
-    Ok(wdl_path_as_string)
+    Ok(stored_wdl_location)
+}
+
+/// Uploads `wdl_string` as a file with `wdl_file_name` as the name in the GCS location specified
+/// by the [GCS_WDL_LOCATION]{crate::config::GCS_WDL_LOCATION} config variable
+fn store_wdl_in_gcs(
+    wdl_string: &str,
+    wdl_file_name: &str
+) -> Result<String, gcloud_storage::Error> {
+    // Upload the wdl to GCS (we'll put it in a folder named with a UUID so we don't overwrite
+    // anything
+    gcloud_storage::upload_text_to_gs_uri(wdl_string, &format!("{}/{}", &*config::GCS_WDL_LOCATION, Uuid::new_v4()), wdl_file_name)
 }
 
 /// Stores `wdl_string` as a file with `file_name` within `directory` and returns the path to its
 /// location.  If `directory` does not exist, it will be created
-fn write_wdl(
+fn store_wdl_locally(
     wdl_string: &str,
-    directory: &Path,
     file_name: &str,
 ) -> Result<PathBuf, std::io::Error> {
+    // Get the directory path we'll write to
+    let directory: PathBuf = get_wdl_directory_path(Uuid::new_v4());
     // Create the wdl directory and sub_dir if they don't already exist
-    fs::create_dir_all(directory)?;
+    fs::create_dir_all(&directory)?;
     // Create and write the file
-    let mut file_path: PathBuf = PathBuf::from(directory);
+    let mut file_path: PathBuf = PathBuf::from(&directory);
     file_path.push(file_name);
     let mut wdl_file: fs::File = fs::File::create(&file_path)?;
     wdl_file.write_all(wdl_string.as_bytes())?;
@@ -101,16 +128,22 @@ fn check_for_existing_wdl(wdl_string: &str, conn: &PgConnection) -> Result<Optio
     // Check if the wdl exists already
     let existing_wdl_hashes = WdlHashData::find_by_data_to_hash(conn, wdl_string)?;
 
-    // If we got a result back, return the location for the first record, otherwise return none
-    match existing_wdl_hashes.get(0) {
-        Some(wdl_hash_rec) => {
-            Ok(Some(wdl_hash_rec.location.to_owned()))
-        },
-        None => Ok(None)
+    // Loop through the results, and check if there is a result that matches the current scheme
+    // we're using for wdl storage (local or GCS).  Return it, if so.  Otherwise, return None
+    for wdl_hash in existing_wdl_hashes {
+        if wdl_hash.location.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            if *config::ENABLE_GCS_WDL_STORAGE {
+                return Ok(Some(wdl_hash.location.to_owned()))
+            }
+        } else if !*config::ENABLE_GCS_WDL_STORAGE {
+            return Ok(Some(wdl_hash.location.to_owned()))
+        }
     }
+    // If we didn't find a hash matching the current scheme for wdl storage, return None
+    Ok(None)
 }
 
-/// Assembles and returns a path to create to place WDLs for the template specified by `template_id`
+/// Assembles and returns a path to create to place WDLs with the unique identifier `unique_id`
 fn get_wdl_directory_path(unique_id: Uuid) -> PathBuf {
     [&*config::WDL_DIRECTORY, &unique_id.to_string()]
         .iter()

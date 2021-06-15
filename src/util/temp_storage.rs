@@ -30,3 +30,4 @@ pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
         }
     }
 }
+

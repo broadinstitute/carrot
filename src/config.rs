@@ -107,6 +107,20 @@ lazy_static! {
         Ok(val) => val,
         Err(_) => String::from("/carrot/wdl"),
     };
+    /// If true, WDLs will be stored in the GCS bucket specified by GCS_WDL_LOCATION
+    pub static ref ENABLE_GCS_WDL_STORAGE: bool = match env::var("CARROT_ENABLE_GCS_WDL_STORAGE") {
+        Ok(val) => {
+            if val == "true" {
+                true
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    };
+    /// The GCS location in which to store WDLs if ENABLE_GCS_WDL_STORAGE is true
+    pub static ref GCS_WDL_LOCATION: String = env::var("CARROT_GCS_WDL_LOCATION")
+        .expect("GCS_WDL_LOCATION environment variable not set");
 
     // GITHUB
     /// If true, enables triggering carrot test runs from github
@@ -233,6 +247,12 @@ pub fn initialize() {
 
     // WDL Storage
     lazy_static::initialize(&WDL_DIRECTORY);
+    lazy_static::initialize(&ENABLE_GCS_WDL_STORAGE);
+    // If we're storing our WDLs in a gcs bucket, make sure we initialize the variable for the
+    // bucket
+    if *ENABLE_GCS_WDL_STORAGE {
+        lazy_static::initialize(&GCS_WDL_LOCATION);
+    }
 
     // Emailer
     lazy_static::initialize(&EMAIL_MODE);

@@ -4,8 +4,9 @@ use google_storage1::{Object, Storage};
 use percent_encoding::{AsciiSet, CONTROLS};
 use std::fmt;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Cursor};
 use std::sync::Mutex;
+use hyper::client::Response;
 
 /// Prefix indicating a URI is a GS URI
 pub static GS_URI_PREFIX: &'static str = "gs://";
@@ -150,7 +151,8 @@ pub fn retrieve_object_with_gs_uri(address: &str) -> Result<Object, Error> {
     Ok(gcs_object)
 }
 
-/// Uploads `file` to the specified gs `address` with the name `name`
+/// Uploads `file` to the specified gs `address` with the name `name`. Returns the gs uri for the
+/// created GCS object
 ///
 /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
 /// Storage JSON API, specifically to retrieve the file contents as a String
@@ -171,6 +173,38 @@ pub fn upload_file_to_gs_uri(file: File, address: &str, name: &str) -> Result<St
         .name(&full_name)
         .param("uploadType", "multipart")
         .upload(file, "application/octet-stream".parse().unwrap())?;
+    // Return the gs address of the object
+    Ok(format!(
+        "gs://{}/{}",
+        result.1.bucket.unwrap(),
+        result.1.name.unwrap()
+    ))
+}
+
+/// Uploads `data` to the specified gs `address` with the name `name`. Returns the gs uri for the
+/// created GCS object
+///
+/// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
+/// Storage JSON API, specifically to retrieve the file contents as a String
+pub fn upload_text_to_gs_uri(data: &str, address: &str, name: &str) -> Result<String, Error> {
+    // Parse address to get bucket and object name
+    let (bucket_name, object_name): (String, String) = parse_bucket_and_object_name(address)?;
+    // Append name to the end of object name to get the full name we'll use
+    let full_name: String = object_name + "/" + name;
+    // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
+    let borrowed_storage_hub: &StorageHub = &*STORAGE_HUB.lock().unwrap();
+    // Make a cursor from data so it can be uploaded
+    let mut data_buf_reader: Cursor<&[u8]> = Cursor::new(data.as_bytes());
+    // Make a default storage object because that's required by the gcloud storage library for some
+    // reason
+    let object: Object = Object::default();
+    // Upload the data to the gcloud location
+    let result: (Response, Object) = borrowed_storage_hub
+        .objects()
+        .insert(object, &bucket_name)
+        .name(&full_name)
+        .param("uploadType", "multipart")
+        .upload(&mut data_buf_reader, "text/plain".parse().unwrap())?;
     // Return the gs address of the object
     Ok(format!(
         "gs://{}/{}",

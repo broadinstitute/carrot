@@ -1,5 +1,13 @@
 //! This module contains functions for managing software builds
 
+use std::fmt;
+use std::path::Path;
+
+use actix_web::client::Client;
+use diesel::PgConnection;
+use serde_json::json;
+use uuid::Uuid;
+
 use crate::config;
 use crate::custom_sql_types::BuildStatusEnum;
 use crate::manager::util;
@@ -10,12 +18,7 @@ use crate::models::software_version::{
     NewSoftwareVersion, SoftwareVersionData, SoftwareVersionQuery,
 };
 use crate::requests::cromwell_requests::CromwellRequestError;
-use actix_web::client::Client;
-use diesel::PgConnection;
-use serde_json::json;
-use std::fmt;
-use std::path::Path;
-use uuid::Uuid;
+use crate::util::temp_storage;
 
 #[derive(Debug)]
 pub enum Error {
@@ -183,7 +186,7 @@ pub async fn start_software_build(
     };
 
     // Put it in a temporary file to be sent with cromwell request
-    let wdl_file = util::get_temp_file(wdl_to_use)?;
+    let wdl_file = temp_storage::get_temp_file(wdl_to_use)?;
 
     // Create path to wdl that builds docker images
     let wdl_file_path: &Path = &wdl_file.path();
@@ -214,7 +217,7 @@ pub async fn start_software_build(
     };
 
     // Write json to temp file so it can be submitted to cromwell
-    let json_file = util::get_temp_file(&json_to_submit.to_string())?;
+    let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
 
     // Send job request to cromwell
     let start_job_response =
@@ -237,6 +240,10 @@ pub async fn start_software_build(
 
 #[cfg(test)]
 mod tests {
+    use actix_web::client::Client;
+    use diesel::PgConnection;
+    use serde_json::json;
+
     use crate::custom_sql_types::BuildStatusEnum;
     use crate::manager::software_builder::{
         get_or_create_software_build, get_or_create_software_version, start_software_build,
@@ -245,9 +252,6 @@ mod tests {
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
     use crate::unit_test_util::get_test_db_connection;
-    use actix_web::client::Client;
-    use diesel::PgConnection;
-    use serde_json::json;
 
     fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
         let new_software = NewSoftware {
