@@ -6,9 +6,15 @@ use diesel::pg::PgConnection;
 use diesel::Connection;
 use dotenv;
 use std::env;
+use std::io::Write;
 use std::sync::Once;
+use tempfile::{NamedTempFile, TempDir};
 
 embed_migrations!("migrations");
+
+lazy_static! {
+    pub static ref WDL_TEMP_DIR: TempDir = TempDir::new().unwrap();
+}
 
 // For creating DB schema only once before tests run
 static INIT: Once = Once::new();
@@ -57,7 +63,19 @@ pub fn get_test_db_pool() -> db::DbPool {
 }
 
 pub fn load_env_config() {
+    // Set up the WDL temp dir, since we can't load that from the test env file
+    init_wdl_temp_dir();
     // Load environment variables from env file
     dotenv::from_filename("testdata/test.env").ok();
     config::initialize();
+}
+
+pub fn get_temp_file(contents: &str) -> NamedTempFile {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    write!(temp_file, "{}", contents).unwrap();
+    temp_file
+}
+
+pub fn init_wdl_temp_dir() {
+    env::set_var("CARROT_WDL_DIRECTORY", &*WDL_TEMP_DIR.path().as_os_str());
 }

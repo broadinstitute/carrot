@@ -78,7 +78,7 @@ pub struct NewTemplate {
 ///
 /// Only name and description can be modified if the template has a non-failed run attached to it.
 /// test_wdl and eval_wdl can be modified as long as that is not the case
-#[derive(Deserialize, Serialize, AsChangeset)]
+#[derive(Deserialize, Serialize, AsChangeset, Clone)]
 #[table_name = "template"]
 pub struct TemplateChangeset {
     pub name: Option<String>,

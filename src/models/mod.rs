@@ -17,6 +17,7 @@ pub mod template;
 pub mod template_report;
 pub mod template_result;
 pub mod test;
+pub mod wdl_hash;
 
 // Utility modules only meant to be used within this module
 mod sql_functions;

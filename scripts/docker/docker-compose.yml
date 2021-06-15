@@ -22,6 +22,8 @@ services:
       - CARROT_ENABLE_CUSTOM_IMAGE_BUILDS=false
       - CARROT_ENABLE_PRIVATE_GITHUB_ACCESS=false
       - CARROT_ENABLE_REPORTING=false
+    volumes:
+      - carrot-wdls:/carrot/wdl
     depends_on:
       - db
       - cromwell
@@ -45,3 +47,5 @@ services:
 volumes:
   db-data:
   cromwell-data:
+  carrot-wdls:
+  

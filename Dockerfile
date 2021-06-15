@@ -16,6 +16,7 @@ RUN apt-get update && \
 RUN wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/54/womtool-54.jar
 
 ENV CARROT_WOMTOOL_LOCATION=/usr/local/bin/womtool/womtool-54.jar
+ENV CARROT_WDL_DIRECTORY=/carrot/wdl
 COPY --from=builder /usr/local/cargo/bin/carrot /usr/local/bin/carrot
 EXPOSE 80
 WORKDIR /carrot_root

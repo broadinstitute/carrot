@@ -226,6 +226,16 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    wdl_hash(location, hash) {
+        location -> Text,
+        hash -> Binary,
+        created_at -> Timestamptz,
+    }
+}
+
 joinable!(run -> run_id_with_results(run_id));
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
