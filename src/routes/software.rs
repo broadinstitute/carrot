@@ -3,8 +3,10 @@
 //! Contains functions for processing requests to create, update, and search software, along with
 //! their URI mappings
 
+use crate::config;
 use crate::db;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
+use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::util::git_repos;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
@@ -239,6 +241,17 @@ async fn update(
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
+    // Create mappings only if software building is enabled
+    if *config::ENABLE_CUSTOM_IMAGE_BUILDS {
+        init_routes_software_building_enabled(cfg);
+    } else {
+        init_routes_software_building_disabled(cfg);
+    }
+}
+
+/// Attaches the REST mappings in this file to a service config for if software building
+/// functionality is enabled
+fn init_routes_software_building_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/software/{id}")
             .route(web::get().to(find_by_id))
@@ -248,6 +261,18 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::resource("/software")
             .route(web::get().to(find))
             .route(web::post().to(create)),
+    );
+}
+
+/// Attaches a software building-disabled error message REST mapping to a service cfg
+fn init_routes_software_building_disabled(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::resource("/software")
+            .route(web::route().to(disabled_features::software_building_disabled_mapping)),
+    );
+    cfg.service(
+        web::resource("/software/{id}")
+            .route(web::route().to(disabled_features::software_building_disabled_mapping)),
     );
 }
 
@@ -278,7 +303,12 @@ mod tests {
 
         let software = create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/software/{}", software.software_id))
@@ -299,7 +329,12 @@ mod tests {
 
         create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/software/{}", Uuid::new_v4()))
@@ -322,7 +357,12 @@ mod tests {
 
         create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/software/123456789")
@@ -340,12 +380,45 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn find_by_id_failure_software_building_disabled() {
+        let pool = get_test_db_pool();
+
+        let software = create_test_software(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_disabled),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/software/{}", software.software_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Software building disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a software-related endpoint, but the software building feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn find_success() {
         let pool = get_test_db_pool();
 
         let software = create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/software?name=Kevin%27s%20Software")
@@ -368,7 +441,12 @@ mod tests {
 
         create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/software?name=Gibberish")
@@ -390,9 +468,43 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn find_failure_software_building_disabled() {
+        let pool = get_test_db_pool();
+
+        let software = create_test_software(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_disabled),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/software?name=Kevin%27s%20Software")
+            .to_request();
+        println!("{:?}", req);
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Software building disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a software-related endpoint, but the software building feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let new_software = NewSoftware {
             name: String::from("Kevin's test"),
@@ -434,7 +546,12 @@ mod tests {
 
         let software = create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let new_software = NewSoftware {
             name: software.name.clone(),
@@ -465,7 +582,12 @@ mod tests {
 
         let software = create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let new_software = NewSoftware {
             name: software.name.clone(),
@@ -495,12 +617,50 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn create_failure_software_building_disabled() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_disabled),
+        )
+        .await;
+
+        let new_software = NewSoftware {
+            name: String::from("Kevin's test"),
+            description: Some(String::from("Kevin's test description")),
+            repository_url: String::from("https://github.com/broadinstitute/gatk.git"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/software")
+            .set_json(&new_software)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Software building disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a software-related endpoint, but the software building feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn update_success() {
         let pool = get_test_db_pool();
 
         let software = create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -533,7 +693,12 @@ mod tests {
 
         create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -558,12 +723,17 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn update_failure() {
+    async fn update_failure_nonexistent_uuid() {
         let pool = get_test_db_pool();
 
         create_test_software(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_enabled),
+        )
+        .await;
 
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -584,5 +754,39 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
+    }
+
+    #[actix_rt::test]
+    async fn update_failure_software_building_disabled() {
+        let pool = get_test_db_pool();
+
+        let software = create_test_software(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_software_building_disabled),
+        )
+        .await;
+
+        let software_change = SoftwareChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/software/{}", software.software_id))
+            .set_json(&software_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Software building disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a software-related endpoint, but the software building feature is disabled for this CARROT server");
     }
 }

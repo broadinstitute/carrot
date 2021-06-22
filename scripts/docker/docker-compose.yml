@@ -10,14 +10,18 @@ services:
     ports:
       - "8080:80"
     environment:
-      - DATABASE_URL=postgres://test_framework_user:test@db:5432/test_framework_db
-      - DB_THREADS=4
+      - CARROT_DATABASE_URL=postgres://test_framework_user:test@db:5432/test_framework_db
+      - CARROT_DB_THREADS=4
       - RUST_LOG=carrot=info,actix=info
-      - HOST=0.0.0.0
-      - PORT=80
-      - CROMWELL_ADDRESS=http://cromwell:8000
-      - EMAIL_MODE=NONE
-      - IMAGE_REGISTRY_HOST=
+      - CARROT_HOST=0.0.0.0
+      - CARROT_PORT=80
+      - CARROT_CROMWELL_ADDRESS=http://cromwell:8000
+      - CARROT_EMAIL_MODE=NONE
+      - CARROT_ENABLE_GS_URIS_FOR_WDL=false
+      - CARROT_ENABLE_GITHUB_REQUESTS=false
+      - CARROT_ENABLE_CUSTOM_IMAGE_BUILDS=false
+      - CARROT_ENABLE_PRIVATE_GITHUB_ACCESS=false
+      - CARROT_ENABLE_REPORTING=false
     depends_on:
       - db
       - cromwell
@@ -30,9 +34,14 @@ services:
       - db-data:/var/lib/postgresql/data
 
   cromwell:
-    image: broadinstitute/cromwell:51
+    image: broadinstitute/cromwell:54
     environment:
       - CROMWELL_ARGS=server
+    ports:
+      - "8000:8000"
+    volumes:
+      - cromwell-data:/cromwell-executions
 
 volumes:
   db-data:
+  cromwell-data:

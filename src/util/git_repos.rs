@@ -12,8 +12,8 @@ pub async fn git_repo_exists(url: &str) -> Result<bool, std::io::Error> {
     let url_to_check = if *config::ENABLE_PRIVATE_GITHUB_ACCESS && url.contains("github.com") {
         format_github_url_with_creds(
             url,
-            &*config::PRIVATE_GITHUB_CLIENT_ID.as_ref().unwrap(),
-            &*config::PRIVATE_GITHUB_CLIENT_TOKEN.as_ref().unwrap(),
+            &*config::PRIVATE_GITHUB_CLIENT_ID,
+            &*config::PRIVATE_GITHUB_CLIENT_TOKEN,
         )
     } else {
         url.to_string()

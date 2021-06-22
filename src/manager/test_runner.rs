@@ -3,6 +3,7 @@
 //! The processing of running a test, once it has been defined and a request has been made to the
 //! test run mapping, is divided into multiple steps defined here
 
+use crate::config;
 use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
 use crate::manager::{software_builder, util};
 use crate::models::run::{NewRun, RunChangeset, RunData, RunQuery};
@@ -159,21 +160,30 @@ pub async fn create_run(
     // Write run to db
     let run = create_run_in_db(conn, test_id, run_name, test_json, eval_json, created_by)?;
 
-    // Find software version mappings associated with this run
-    let mut version_map = match process_software_version_mappings(conn, run.run_id, &run.test_input)
-    {
-        Ok(map) => map,
-        Err(e) => {
-            // Mark run as failed since it's been created and now we've encountered an error
-            update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-            return Err(e);
-        }
-    };
-    version_map.extend(process_software_version_mappings(
-        conn,
-        run.run_id,
-        &run.eval_input,
-    )?);
+    // Process software image build parameters in the run's input if software building is enabled
+    let mut version_map: HashMap<String, SoftwareVersionData> = HashMap::new();
+    if *config::ENABLE_CUSTOM_IMAGE_BUILDS {
+        version_map.extend(
+            match process_software_version_mappings(conn, run.run_id, &run.test_input) {
+                Ok(map) => map,
+                Err(e) => {
+                    // Mark run as failed since it's been created and now we've encountered an error
+                    update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
+                    return Err(e);
+                }
+            },
+        );
+        version_map.extend(
+            match process_software_version_mappings(conn, run.run_id, &run.eval_input) {
+                Ok(map) => map,
+                Err(e) => {
+                    // Mark run as failed since it's been created and now we've encountered an error
+                    update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
+                    return Err(e);
+                }
+            },
+        );
+    }
 
     // If there are keys that map to software versions, get builds
     if !version_map.is_empty() {
@@ -688,8 +698,9 @@ fn format_test_json_for_cromwell(inputs: &Value) -> Result<Value, Error> {
         // If this value is a string, check if it's specifying a custom docker image build and
         // format accordingly if so
         if let Some(val) = value.as_str() {
-            // If it's specifying a custom build, get the software version and add it to the version map
-            if IMAGE_BUILD_REGEX.is_match(val) {
+            // If it's specifying a custom build and custom image building is enabled, get the
+            // software version and add it to the version map
+            if *config::ENABLE_CUSTOM_IMAGE_BUILDS && IMAGE_BUILD_REGEX.is_match(val) {
                 // Pull software name and commit from value
                 let name_and_commit: Vec<&str> =
                     val.trim_start_matches("image_build:").split("|").collect();
@@ -1345,7 +1356,7 @@ mod tests {
 
     #[test]
     fn test_format_test_json_for_cromwell_success() {
-        std::env::set_var("IMAGE_REGISTRY_HOST", "https://example.com");
+        std::env::set_var("CARROT_IMAGE_REGISTRY_HOST", "https://example.com");
 
         let test_json = json!({"test_workflow.test":"1","test_workflow.image":"image_build:example_project|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 
@@ -1359,7 +1370,7 @@ mod tests {
 
     #[test]
     fn test_format_eval_json_for_cromwell_success() {
-        std::env::set_var("IMAGE_REGISTRY_HOST", "https://example.com");
+        std::env::set_var("CARROT_IMAGE_REGISTRY_HOST", "https://example.com");
 
         let test_json = json!({"eval_workflow.test":"test_output:test_workflow.test","eval_workflow.image":"image_build:example_project|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
         let test_output = json!({"test_workflow.test":"2"});

@@ -15,4 +15,5 @@ pub mod template_report;
 pub mod template_result;
 pub mod test;
 
+mod disabled_features;
 mod error_handling;

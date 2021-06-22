@@ -130,7 +130,7 @@ fn build_email(
 ) -> Result<Email, lettre_email::error::Error> {
     // Set up email to send
     let mut email = EmailBuilder::new()
-        .from((*config::EMAIL_FROM).clone().unwrap())
+        .from((*config::EMAIL_FROM).clone())
         .subject(subject)
         .text(message);
 
@@ -150,7 +150,7 @@ fn build_email(
 /// used as credentials for connecting to the mail server
 fn send_email_server_mode(email: Email) -> Result<(), SendEmailError> {
     // Start to set up client for connecting to email server
-    let mut mailer = SmtpClient::new_simple(&(*config::EMAIL_DOMAIN).clone().unwrap())
+    let mut mailer = SmtpClient::new_simple(&(*config::EMAIL_DOMAIN).clone())
         .expect("Failed to create smtp client for sending email");
 
     // If we have credentials, add those to the client setup

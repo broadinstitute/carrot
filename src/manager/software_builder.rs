@@ -451,7 +451,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_start_software_build() {
-        std::env::set_var("IMAGE_REGISTRY_HOST", "https://example.com");
+        std::env::set_var("CARROT_IMAGE_REGISTRY_HOST", "https://example.com");
 
         let conn = get_test_db_connection();
         let client = Client::default();

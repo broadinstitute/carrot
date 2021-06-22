@@ -3,6 +3,7 @@
 //! Provides functions for retrieving resources referenced in test configs, such as WDLs and test
 //! data
 
+use crate::config;
 use crate::storage::gcloud_storage;
 use actix_web::client::{Client, SendRequestError};
 use actix_web::error::PayloadError;
@@ -58,8 +59,9 @@ impl From<gcloud_storage::Error> for Error {
 ///
 /// Sends a get request to `address` and parses the response body as a String
 pub async fn get_resource_as_string(client: &Client, address: &str) -> Result<String, Error> {
-    // If the address is a gs address, retrieve the data using the gcloud storage api
-    if address.starts_with("gs://") {
+    // If the address is a gs address and retrieving from gs addresses is enabled, retrieve the data
+    // using the gcloud storage api
+    if *config::ENABLE_GS_URIS_FOR_WDL && address.starts_with("gs://") {
         Ok(gcloud_storage::retrieve_object_media_with_gs_uri(address)?)
     }
     // Otherwise, it's probably a normal location, so we'll retrieve it with a normal http get
