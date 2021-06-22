@@ -38,6 +38,7 @@ enum UpdateStatusError {
     Build(software_builder::Error),
     Run(test_runner::Error),
     Report(report_builder::Error),
+    Results(String),
 }
 
 impl fmt::Display for UpdateStatusError {
@@ -49,6 +50,7 @@ impl fmt::Display for UpdateStatusError {
             UpdateStatusError::Build(e) => write!(f, "UpdateStatusError Build {}", e),
             UpdateStatusError::Run(e) => write!(f, "UpdateStatusError Run {}", e),
             UpdateStatusError::Report(e) => write!(f, "UpdateStatusError Report {}", e),
+            UpdateStatusError::Results(e) => write!(f, "UpdateStatusError Results {}", e),
         }
     }
 }
@@ -323,7 +325,22 @@ async fn update_run_status_for_building(
         RunBuildStatus::Finished => {
             return match test_runner::start_run_test(conn, client, run).await {
                 Ok(_) => Ok(()),
-                Err(e) => Err(UpdateStatusError::Run(e)),
+                Err(e) => {
+                    // Mark as failed
+                    test_runner::update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
+                    // Send notifications
+                    #[cfg(not(test))] // Skip the email step when testing
+                    notification_handler::send_run_complete_emails(conn, run.run_id)?;
+                    // If triggering runs from GitHub is enabled, check if this run was triggered from a
+                    // a GitHub comment and reply if so
+                    if *config::ENABLE_GITHUB_REQUESTS {
+                        notification_handler::post_run_complete_comment_if_from_github(
+                            conn, client, run.run_id,
+                        )
+                        .await?;
+                    }
+                    Err(UpdateStatusError::Run(e))
+                }
             };
         }
         // If any of the builds failed, fail the run and send notifications
@@ -534,6 +551,14 @@ async fn update_run_status_for_evaluating(
                 send_notifications_for_run_completion(conn, client, run).await?;
                 return Err(e);
             }
+            // If the number of results we've filled doesn't match the number mapped to the
+            // template, that's a failure
+            if let Err(e) = check_result_counts(conn, run) {
+                test_runner::update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
+                // Send notifications that the run failed
+                send_notifications_for_run_completion(conn, client, run).await?;
+                return Err(e);
+            }
             // Start report generation
             debug!("Starting report generation for run with id: {}", run.run_id);
             report_builder::create_run_reports_for_completed_run(conn, client, run).await?;
@@ -548,6 +573,42 @@ async fn update_run_status_for_evaluating(
     }
 
     Ok(())
+}
+
+/// Checks whether the count of run_result records for `run` matches the number expected, based on
+/// the number of results mapped to its template.  Returns Ok(()) if so, or an error if not
+fn check_result_counts(conn: &PgConnection, run: &RunData) -> Result<(), UpdateStatusError> {
+    // Get count of template_result mappings for the template corresponding to this run
+    let template_result_count = match TemplateResultData::find_count_for_test(conn, run.test_id) {
+        Ok(template_results) => template_results,
+        Err(e) => {
+            return Err(UpdateStatusError::DB(format!(
+                "Failed to load count of template result mappings from DB with error: {}",
+                e
+            )));
+        }
+    };
+    // Get count of run_results we've inserted for this run
+    let run_result_count = match RunResultData::find_count_for_run(conn, run.run_id) {
+        Ok(run_results) => run_results,
+        Err(e) => {
+            return Err(UpdateStatusError::DB(format!(
+                "Failed to load count of run result mappings from DB with error: {}",
+                e
+            )));
+        }
+    };
+    // If they match, we're all good, but if not, we'll return an error
+    if template_result_count == run_result_count {
+        Ok(())
+    } else {
+        return Err(UpdateStatusError::Results(format!(
+            "Count of results logged for run {} ({}) does not match count of results mapped to its template ({})",
+            run.run_id,
+            run_result_count,
+            template_result_count
+        )));
+    }
 }
 
 /// Sends any necessary terminal status notifications for `run`, currently emails and github
@@ -1006,9 +1067,6 @@ fn fill_results(
     // Keep a running list of results to write to the DB
     let mut result_list: Vec<NewRunResult> = Vec::new();
 
-    // List of missing keys, in case there are any
-    let mut missing_keys_list: Vec<String> = Vec::new();
-
     // Loop through template_results, check for each of the keys in outputs, and add them to list to write
     for template_result in template_results {
         // Check outputs for this result
@@ -1022,7 +1080,6 @@ fn fill_results(
                             "Failed to parse output {} as string for run {}, had value: {}",
                             template_result.result_key, run.run_id, output
                         );
-                        missing_keys_list.push(template_result.result_key.clone());
                         continue;
                     }
                 };
@@ -1627,6 +1684,73 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn test_check_and_update_run_status_missing_result() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert test, run, result, and template_result we'll use for testing
+        let template = insert_test_template(&conn);
+        let template_id = template.template_id;
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
+        insert_test_results_mapped_to_template(&conn, template_id);
+        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
+            &conn,
+            test_test.test_id.clone(),
+        );
+        let test_run_is_from_github =
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
+        // Define and map a report to this template
+        let test_report = insert_test_report(&conn);
+        insert_test_template_report(&conn, template_id, test_report.report_id);
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Succeeded",
+          "outputs": {
+            "greeting_file_workflow.out_greeting": "Yo, Cool Person"
+          },
+          "end": "2020-12-31T11:11:11.0000Z"
+        });
+        let mock = mockito::mock(
+            "GET",
+            "/api/workflows/v1/12345612-d114-4194-a7f7-9e41211ca2ce/metadata",
+        )
+        .with_status(201)
+        .with_header("content_type", "application/json")
+        .with_body(mock_response_body.to_string())
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("includeKey".into(), "status".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "end".into()),
+            mockito::Matcher::UrlEncoded("includeKey".into(), "outputs".into()),
+        ]))
+        .create();
+        // Mock for cromwell for submitting report job
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .expect(0)
+            .create();
+        // Check and update status
+        let error = check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, super::UpdateStatusError::Results(_)));
+        mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::CarrotFailed);
+        let results = result_run.results.unwrap().as_object().unwrap().to_owned();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results.get("Greeting Text").unwrap(), "Yo, Cool Person");
+        // Make sure the report job wasn't started
+        cromwell_mock.assert();
+    }
+
+    #[actix_rt::test]
     async fn test_check_and_update_run_status_test_failed() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
@@ -1801,6 +1925,62 @@ mod tests {
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::BuildFailed);
+    }
+
+    #[actix_rt::test]
+    async fn test_check_and_update_run_status_builds_finished_but_wdl_retrieval_failed() {
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+        // Insert build, template, test, and run we'll use for testing
+        let test_template = insert_test_template(&conn);
+        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
+        let test_run = insert_test_run_with_test_id_and_status(
+            &conn,
+            test_test.test_id.clone(),
+            RunStatusEnum::Building,
+        );
+        let test_software_version = insert_test_software_version(&conn);
+        insert_test_software_build_for_version_with_status(
+            &conn,
+            test_software_version.software_version_id,
+            BuildStatusEnum::Succeeded,
+        );
+        map_run_to_version(
+            &conn,
+            test_run.run_id,
+            test_software_version.software_version_id,
+        );
+
+        // Define mockito mapping for wdl
+        let wdl_mock = mockito::mock("GET", "/test.wdl")
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        // Define mockito mapping for cromwell response
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .expect(0)
+            .create();
+
+        // Check and update status
+        let error = check_and_update_run_status(&test_run, &Client::default(), &conn)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            super::UpdateStatusError::Run(crate::manager::test_runner::Error::ResourceRequest(_))
+        ));
+        cromwell_mock.assert();
+        // Query for run to make sure data was filled properly
+        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        assert_eq!(result_run.status, RunStatusEnum::CarrotFailed);
     }
 
     #[actix_rt::test]

@@ -907,8 +907,8 @@ mod tests {
     use crate::manager::report_builder::{
         create_input_json, create_report_template, create_run_report,
         create_run_reports_for_completed_run, get_control_block_values,
-        get_disk_size_based_on_inputs_and_results, Error,
-        FILE_DOWNLOAD_CELL, RUN_METADATA_CELL, RUN_INPUTS_AND_RESULTS_CELL
+        get_disk_size_based_on_inputs_and_results, Error, FILE_DOWNLOAD_CELL,
+        RUN_INPUTS_AND_RESULTS_CELL, RUN_METADATA_CELL,
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};

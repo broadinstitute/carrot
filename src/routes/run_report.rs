@@ -6,7 +6,7 @@
 use crate::db;
 use crate::manager::report_builder;
 use crate::models::run_report::{RunReportData, RunReportQuery};
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::client::Client;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
@@ -432,9 +432,9 @@ mod tests {
     use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::Value;
+    use std::env;
     use std::fs::read_to_string;
     use uuid::Uuid;
-    use std::env;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {

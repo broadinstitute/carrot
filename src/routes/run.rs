@@ -7,7 +7,7 @@ use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultData};
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
