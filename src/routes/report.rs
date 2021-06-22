@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::models::report::{NewReport, ReportChangeset, ReportData, ReportQuery, UpdateError};
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde_json::json;
@@ -63,11 +63,7 @@ async fn find_by_id(
                 detail: "No report found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested report from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })?;
 
@@ -116,11 +112,7 @@ async fn find(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested report(s) from DB".to_string(),
-        })
+        default_500(&e)
     })?;
 
     Ok(res)
@@ -157,11 +149,7 @@ async fn create(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new report".to_string(),
-        })
+        default_500(&e)
     })?;
     Ok(res)
 }
@@ -219,13 +207,7 @@ async fn update(
                         detail: "Updating notebook or config is not allowed if there is a run_report tied to this report that is running or has succeeded".to_string(),
                     })
                 },
-                _ => {
-                    HttpResponse::InternalServerError().json(ErrorBody {
-                        title: "Server error".to_string(),
-                        status: 500,
-                        detail: "Error while attempting to update report".to_string(),
-                    })
-                }
+                _ => default_500(&e)
             }
         })?;
 
@@ -299,11 +281,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     detail: "Cannot delete a report if there is a template_report, run_report, or report_section mapped to it".to_string(),
                 }),
                 // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Error while attempting to delete requested report from DB".to_string(),
-                }),
+                _ => default_500(&e),
             }
         })
 }
@@ -617,10 +595,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(
-            error_body.detail,
-            "Error while attempting to insert new report"
-        );
     }
 
     #[actix_rt::test]
@@ -721,7 +695,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(error_body.detail, "Error while attempting to update report");
     }
 
     #[actix_rt::test]

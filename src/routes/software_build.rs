@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;
@@ -62,12 +62,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No software_build found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested software_build from DB"
-                    .to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -114,12 +109,7 @@ async fn find(
     .map_err(|e| {
         // For any errors, return a 500
         error!("{}", e);
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested software_build(s) from DB"
-                .to_string(),
-        })
+        default_500(&e)
     })
 }
 

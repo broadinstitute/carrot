@@ -7,7 +7,7 @@ use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultData};
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
@@ -107,11 +107,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No run found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested run from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -194,11 +190,7 @@ async fn find_for_test(
     .map_err(|e| {
         // If there is an error, return a 500
         error!("{}", e);
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested run(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -282,11 +274,7 @@ async fn find_for_template(
     .map_err(|e| {
         // If there is an error, return a 500
         error!("{}", e);
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested run(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -370,11 +358,7 @@ async fn find_for_pipeline(
     .map_err(|e| {
         // If there is an error, return a 500
         error!("{}", e);
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested run(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -535,11 +519,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                 })
             }
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to delete requested run from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }

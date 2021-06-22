@@ -7,7 +7,7 @@ use crate::db;
 use crate::models::template_result::{
     DeleteError, NewTemplateResult, TemplateResultData, TemplateResultQuery,
 };
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -97,12 +97,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No template_result mapping found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested template_result from DB"
-                    .to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -170,11 +165,7 @@ async fn find(
     .map_err(|e| {
         error!("{}", e);
         // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested mapping(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -253,11 +244,7 @@ async fn create(
     .map_err(|e| {
         error!("{}", e);
         // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new template result mapping".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -343,11 +330,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     detail: "Cannot delete a template_result mapping if the associated template has non-failed runs".to_string(),
                 }),
                 // For other errors, return a 500
-                _ => HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Error while attempting to delete requested template_result mapping from DB".to_string(),
-                }),
+                _ => default_500(&e),
             }
         })
 }

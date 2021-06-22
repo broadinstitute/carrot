@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::models::result::{NewResult, ResultChangeset, ResultData, ResultQuery};
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde_json::json;
@@ -63,11 +63,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No result found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested result from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -114,11 +110,7 @@ async fn find(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested result(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -153,11 +145,7 @@ async fn create(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new result".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -207,11 +195,7 @@ async fn update(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to update result".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -283,11 +267,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     .to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to delete requested result from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -555,10 +535,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(
-            error_body.detail,
-            "Error while attempting to insert new result"
-        );
     }
 
     #[actix_rt::test]
@@ -651,7 +627,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(error_body.detail, "Error while attempting to update result");
     }
 
     #[actix_rt::test]

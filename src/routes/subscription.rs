@@ -11,7 +11,7 @@ use crate::models::subscription::{
 };
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::{error::BlockingError, web, HttpResponse};
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
@@ -68,12 +68,7 @@ async fn find_by_id(
                 detail: "No subscription found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested subscription from DB"
-                    .to_string(),
-            }),
+            _ => default_500(&e),
         }
     })?;
 
@@ -126,11 +121,7 @@ async fn create(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new subscription".to_string(),
-        })
+        default_500(&e)
     })?;
     Ok(res)
 }
@@ -258,11 +249,7 @@ async fn delete(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new subscription".to_string(),
-        })
+        default_500(&e)
     })?;
     Ok(res)
 }
@@ -378,12 +365,7 @@ async fn find(
     .map_err(|e| {
         error!("{}", e);
         // If there is an error, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested subscription(s) from DB"
-                .to_string(),
-        })
+        default_500(&e)
     })?;
 
     Ok(res)
@@ -567,22 +549,7 @@ async fn verify_existence(
             }
             // For other errors, return a 500
             _ => {
-                let detail = match entity_type {
-                    EntityTypeEnum::Pipeline => {
-                        "Error attempting to verify existence of pipeline".to_string()
-                    }
-                    EntityTypeEnum::Template => {
-                        "Error attempting to verify existence of template".to_string()
-                    }
-                    EntityTypeEnum::Test => {
-                        "Error attempting to verify existence of test".to_string()
-                    }
-                };
-                HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail,
-                })
+                default_500(&e)
             }
         }
     })

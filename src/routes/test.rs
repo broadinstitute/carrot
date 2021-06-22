@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery, UpdateError};
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde_json::json;
@@ -64,11 +64,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No test found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested test from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -115,11 +111,7 @@ async fn find(
     .map_err(|e| {
         error!("{}", e);
         // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested test(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -154,11 +146,7 @@ async fn create(
     .map_err(|e| {
         error!("{}", e);
         // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new test".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -215,13 +203,7 @@ async fn update(
                     detail: "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded".to_string(),
                 })
             },
-            _ => {
-                HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Error while attempting to update test".to_string(),
-                })
-            }
+            _ => default_500(&e)
         }
     })
 }
@@ -292,11 +274,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                 detail: "Cannot delete a test if there are runs mapped to it".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to delete requested test from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -709,10 +687,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(
-            error_body.detail,
-            "Error while attempting to insert new test"
-        );
     }
 
     #[actix_rt::test]
@@ -848,7 +822,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(error_body.detail, "Error while attempting to update test");
     }
 
     #[actix_rt::test]
