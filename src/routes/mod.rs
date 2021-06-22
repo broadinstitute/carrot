@@ -15,4 +15,4 @@ pub mod template_report;
 pub mod template_result;
 pub mod test;
 
-mod error_body;
+mod error_handling;

@@ -6,7 +6,7 @@
 use crate::db;
 use crate::manager::report_builder;
 use crate::models::run_report::{RunReportData, RunReportQuery};
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use actix_web::client::Client;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
@@ -100,12 +100,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No run_report found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested run_report from DB"
-                    .to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -172,11 +167,7 @@ async fn find(
     .map_err(|e| {
         error!("{}", e);
         // For any errors, return a 500
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -403,11 +394,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
         error!("{}", e);
         match e {
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to delete requested run_report from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -447,6 +434,7 @@ mod tests {
     use serde_json::Value;
     use std::fs::read_to_string;
     use uuid::Uuid;
+    use std::env;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
@@ -754,6 +742,8 @@ mod tests {
         let pool = get_test_db_pool();
         let client = Client::default();
 
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
@@ -803,6 +793,8 @@ mod tests {
     async fn create_with_delete_failed_success() {
         let pool = get_test_db_pool();
         let client = Client::default();
+
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
@@ -858,6 +850,8 @@ mod tests {
         let pool = get_test_db_pool();
         let client = Client::default();
 
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
@@ -891,6 +885,8 @@ mod tests {
     async fn create_failure_no_run() {
         let pool = get_test_db_pool();
         let client = Client::default();
+
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, _run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
@@ -931,6 +927,8 @@ mod tests {
         let pool = get_test_db_pool();
         let client = Client::default();
 
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
+
         // Set up data in DB
         let (_report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
@@ -968,6 +966,8 @@ mod tests {
     async fn create_failure_already_exists() {
         let pool = get_test_db_pool();
         let client = Client::default();
+
+        env::set_var("REPORT_DOCKER_LOCATION", "example.com/test:test");
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());

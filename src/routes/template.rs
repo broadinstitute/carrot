@@ -7,7 +7,7 @@ use crate::db;
 use crate::models::template::{
     NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
 };
-use crate::routes::error_body::ErrorBody;
+use crate::routes::error_handling::{ ErrorBody, default_500 };
 use crate::validation::womtool;
 use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
@@ -67,11 +67,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
                 detail: "No template found with the specified ID".to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to retrieve requested template from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -118,11 +114,7 @@ async fn find(
     .map_err(|e| {
         // For any errors, return a 500
         error!("{}", e);
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to retrieve requested template(s) from DB".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -163,11 +155,7 @@ async fn create(
     .map_err(|e| {
         // For any errors, return a 500
         error!("{}", e);
-        HttpResponse::InternalServerError().json(ErrorBody {
-            title: "Server error".to_string(),
-            status: 500,
-            detail: "Error while attempting to insert new template".to_string(),
-        })
+        default_500(&e)
     })
 }
 
@@ -233,13 +221,7 @@ async fn update(
                     detail: "Updating test_wdl or eval_wdl is not allowed if there is a run tied to this template that is running or has succeeded".to_string(),
                 })
             },
-            _ => {
-                HttpResponse::InternalServerError().json(ErrorBody {
-                    title: "Server error".to_string(),
-                    status: 500,
-                    detail: "Error while attempting to update template".to_string(),
-                })
-            }
+            _ => default_500(&e)
         }
     })
 }
@@ -311,11 +293,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     .to_string(),
             }),
             // For other errors, return a 500
-            _ => HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to delete requested template from DB".to_string(),
-            }),
+            _ => default_500(&e),
         }
     })
 }
@@ -355,11 +333,7 @@ async fn validate_wdl(
         // If there is some error validating, return an appropriate message
         Err(e) => {
             error!("{}", e);
-            Err(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: format!("Error while attempting to validate the {} WDL", wdl_type),
-            }))
+            Err(default_500(&e))
         }
     }
 }
@@ -775,10 +749,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(
-            error_body.detail,
-            "Error while attempting to insert new template"
-        );
     }
 
     #[actix_rt::test]
@@ -991,10 +961,6 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(
-            error_body.detail,
-            "Error while attempting to update template"
-        );
     }
 
     #[actix_rt::test]
