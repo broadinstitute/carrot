@@ -10,7 +10,12 @@ RUN apt-get update \
     graphviz-dev \
     pkg-config \
     libz-dev
+
+RUN curl -sSL https://sdk.cloud.google.com | bash
+
 RUN echo "jovyan:jovyan" | chpasswd
+
+ENV PATH $PATH:/home/jovyan/google-cloud-sdk/bin
 
 USER jovyan
 RUN pip install --upgrade pip \
@@ -33,7 +38,6 @@ RUN pip install --upgrade pip \
     && pip install plotly==4.9.0 \
     && pip install pygraphviz \
     && pip install parasail \
-    && pip install pyabpoa \
     && pip install ipycytoscape
 
 RUN jupyter serverextension enable --py nbresuse --sys-prefix
