@@ -156,7 +156,6 @@ impl From<Utf8Error> for CromwellRequestError {
         CromwellRequestError::Utf8(e)
     }
 }
-
 impl From<serde_urlencoded::ser::Error> for CromwellRequestError {
     fn from(e: serde_urlencoded::ser::Error) -> CromwellRequestError {
         CromwellRequestError::Params(e)
@@ -279,16 +278,12 @@ pub async fn get_metadata(
 
     let query_data = assemble_query_data(params);
     // Make request
-    let request = match client
+    let request = client
         .get(format!(
             "{}/api/workflows/v1/{}/metadata",
             cromwell_address, job_id
         ))
-        .query(&query_data)
-    {
-        Ok(val) => val,
-        Err(e) => return Err(e.into()),
-    };
+        .query(&query_data)?;
 
     //Send request
     let response = request.send().await;

@@ -19,6 +19,7 @@ use serde_json::json;
 use std::fmt;
 use std::path::{Path};
 use uuid::Uuid;
+use actix_multipart::Multipart;
 use diesel::PgConnection;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
@@ -155,6 +156,88 @@ async fn find(
         default_500(&e)
     })
 }
+/*
+async fn create_from_multipart(
+    req: HttpRequest,
+    payload: Multipart,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
+) -> impl Responder {
+    let new_template: NewTemplate = NewTemplate {
+        name: "".to_string(),
+        pipeline_id: Default::default(),
+        description: None,
+        test_wdl: "".to_string(),
+        eval_wdl: "".to_string(),
+        created_by: None
+    };
+}
+
+/// Attempts to create a NewTemplate instance from the fields in `payload`.  Returns an error in the
+/// form of an HttpResponse if there are missing or unexpected fields, or some other error occurs
+async fn get_new_template_from_multipart(payload: Multipart) -> Result<NewTemplate, HttpResponse> {
+    // The fields we expect from the multipart payload
+    const EXPECTED_TEXT_FIELDS: [&'static str; 4] = ["name", "description", "pipeline_id", "created_by"];
+    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
+    // Get the data from the multipart payload
+    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(payload, &EXPECTED_TEXT_FIELDS.to_vec(), &EXPECTED_FILE_FIELDS.to_vec()).await?;
+    // Return an error response if any required fields are missing
+    if !text_data_map.contains_key("name")  {
+        return Err(HttpResponse::BadRequest().json(ErrorBody{
+            title: "Missing required field".to_string(),
+            status: 400,
+            detail: "Payload does not contain required field: name".to_string()
+        }))
+    }
+    if !text_data_map.contains_key("pipeline_id")  {
+        return Err(HttpResponse::BadRequest().json(ErrorBody{
+            title: "Missing required field".to_string(),
+            status: 400,
+            detail: "Payload does not contain required field: pipeline_id".to_string()
+        }))
+    }
+    if !file_data_map.contains_key("test_wdl") {
+        return Err(HttpResponse::BadRequest().json(ErrorBody{
+            title: "Missing required field".to_string(),
+            status: 400,
+            detail: "Payload does not contain required field: test_wdl".to_string()
+        }))
+    }
+    if !file_data_map.contains_key("eval_wdl") {
+        return Err(HttpResponse::BadRequest().json(ErrorBody{
+            title: "Missing required field".to_string(),
+            status: 400,
+            detail: "Payload does not contain required field: eval_wdl".to_string()
+        }))
+    }
+    // Convert pipeline_id to a UUID
+    let pipeline_id = {
+        let pipeline_id_str =  text_data_map.get("pipeline_id").expect("Failed to retrieve pipeline_id from text_data_map. This should not happen.");
+        match Uuid::parse_str(pipeline_id_str) {
+            Ok(pipeline_id) => pipeline_id,
+            Err(e) => {
+                error!("{}", e);
+                // If it doesn't parse successfully, return an error to the user
+                return Err(HttpResponse::BadRequest().json(ErrorBody {
+                    title: "ID formatted incorrectly".to_string(),
+                    status: 400,
+                    detail: "ID must be formatted as a Uuid".to_string(),
+                }));
+            }
+        }
+    };
+
+    // Put the data in a NewTemplate and return
+    Ok(NewTemplate{
+        // We can expect here because we checked above that text_data_map contains name
+        name: text_data_map.remove("name").expect("Failed to retrieve name from text_data_map. This should not happen."),
+        pipeline_id,
+        description: text_data_map.remove("description"),
+        notebook: notebook_json,
+        config: config_json,
+        created_by: text_data_map.remove("created_by")
+    })
+}*/
 
 /// Handles requests to /templates for creating templates
 ///

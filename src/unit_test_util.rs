@@ -5,10 +5,17 @@ use crate::db;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use dotenv;
-use std::env;
+use std::{env, thread};
 use std::io::Write;
 use std::sync::Once;
 use tempfile::{NamedTempFile, TempDir};
+use actix_web::{App, HttpServer, web};
+use actix_web::client::Client;
+use actix_web::dev::{Server, HttpServiceFactory};
+use actix_web::web::ServiceConfig;
+use std::ops::Deref;
+use futures::poll;
+use core::time;
 
 embed_migrations!("migrations");
 
@@ -18,6 +25,22 @@ lazy_static! {
 
 // For creating DB schema only once before tests run
 static INIT: Once = Once::new();
+
+// Smart pointer for server to make sure it's dropped properly when a test finishes
+pub struct TestServer(Server);
+impl Deref for TestServer {
+    type Target = Server;
+    fn deref(&self) -> &Server {
+        &self.0
+    }
+}
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        /*while matches!(poll!(self.0.stop(true)), core::task::Poll::Pending) {
+            thread::sleep(time::Duration::from_millis(10));
+        }*/
+    }
+}
 
 pub fn initialize_db_schema(conn: &PgConnection) {
     INIT.call_once(|| {
@@ -74,6 +97,28 @@ pub fn get_temp_file(contents: &str) -> NamedTempFile {
     let mut temp_file = NamedTempFile::new().unwrap();
     write!(temp_file, "{}", contents).unwrap();
     temp_file
+}
+
+// TODO: Delete this and related if it ends up not being needed/useful
+pub fn get_test_server(route: fn(&mut ServiceConfig)) -> (TestServer, String)
+where
+{
+    // Get the host and port
+    let host = env::var("HOST").expect("HOST environment variable not set");
+    let port = env::var("PORT").expect("PORT environment variable not set");
+
+    let address = format!("{}:{}", host, port);
+
+    let server = HttpServer::new(move || {
+        App::new()
+            .data(get_test_db_pool()) // Give app access to clone of DB pool so other threads can use it
+            .data(Client::default()) // Allow worker threads to get client for making REST calls
+            .service(web::scope("/api/test/").configure(route)) //Get route mappings for v1 api from app module
+    })
+    .bind(address.clone()).expect("Failed to set up test server")
+    .run();
+
+    (TestServer(server), address)
 }
 
 pub fn init_wdl_temp_dir() {
