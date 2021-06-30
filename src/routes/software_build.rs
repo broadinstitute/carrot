@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use uuid::Uuid;

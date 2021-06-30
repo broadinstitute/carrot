@@ -7,7 +7,7 @@ use crate::db;
 use crate::models::template_result::{
     DeleteError, NewTemplateResult, TemplateResultData, TemplateResultQuery,
 };
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
 use serde::{Deserialize, Serialize};

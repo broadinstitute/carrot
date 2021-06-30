@@ -5,7 +5,7 @@
 
 use crate::db;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::util::git_repos;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;

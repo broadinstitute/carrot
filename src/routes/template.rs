@@ -7,7 +7,7 @@ use crate::db;
 use crate::models::template::{
     NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
 };
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::validation::womtool;
 use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};

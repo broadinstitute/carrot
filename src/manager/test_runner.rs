@@ -295,13 +295,7 @@ pub async fn start_run_test(
     // Retrieve test for id or return error
     let test = get_test(&conn, run.test_id.clone())?;
 
-    match start_run_test_with_template_id(conn, client, run, test.template_id).await {
-        Ok(run) => Ok(run),
-        Err(e) => {
-            update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-            return Err(e);
-        }
-    }
+    start_run_test_with_template_id(conn, client, run, test.template_id).await
 }
 
 /// Starts a run by submitting the test wdl to cromwell

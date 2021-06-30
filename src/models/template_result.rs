@@ -125,6 +125,27 @@ impl TemplateResultData {
             .load::<Self>(conn)
     }
 
+    /// Queries the DB for the count of template_result relationships associated with the template
+    /// from which the test indicated by `test_id` was created
+    ///
+    /// Queries the DB using `conn` to retrieve the count of template_result mappings with a
+    /// `template_id` equal to the id for the template for the test record with `test_id`
+    /// Returns a result containing either a count of the template_result mappings or an error if
+    /// the query fails for some reason
+    pub fn find_count_for_test(
+        conn: &PgConnection,
+        test_id: Uuid,
+    ) -> Result<i64, diesel::result::Error> {
+        let template_subquery = test::dsl::test
+            .filter(test::dsl::test_id.eq(test_id))
+            .select(test::dsl::template_id);
+
+        template_result
+            .select(diesel::dsl::count_star())
+            .filter(template_id.eq_any(template_subquery))
+            .first(conn)
+    }
+
     /// Queries the DB for template_result mappings matching the specified query criteria
     ///
     /// Queries the DB using `conn` to retrieve template_result mappings matching the criteria in
@@ -435,6 +456,98 @@ mod tests {
         template_results
     }
 
+    fn insert_test_template_results_with_one_template(
+        conn: &PgConnection,
+    ) -> Vec<TemplateResultData> {
+        let mut template_results = Vec::new();
+
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 3"),
+            description: Some(String::from("Kevin made this pipeline for testing 3")),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: result.result_id,
+            result_key: String::from("TestKey"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result3"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: result.result_id,
+            result_key: String::from("TestKey2"),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result4"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin4@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: result.result_id,
+            result_key: String::from("TestKey3"),
+            created_by: None,
+        };
+
+        template_results.push(
+            TemplateResultData::create(conn, new_template_result)
+                .expect("Failed inserting test template_result"),
+        );
+
+        template_results
+    }
+
     fn insert_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
@@ -596,6 +709,24 @@ mod tests {
 
         assert_eq!(found_template_results.len(), 1);
         assert_eq!(found_template_results[0], test_template_result);
+    }
+
+    #[test]
+    fn find_count_for_test_success() {
+        let conn = get_test_db_connection();
+
+        insert_test_template_result(&conn);
+
+        let test_template_results = insert_test_template_results_with_one_template(&conn);
+
+        let test_test =
+            insert_test_test_with_template_id(&conn, test_template_results[0].template_id);
+
+        let found_template_results =
+            TemplateResultData::find_count_for_test(&conn, test_test.test_id)
+                .expect("Failed to retrieve test template_result count by test_id.");
+
+        assert_eq!(found_template_results, 3);
     }
 
     #[test]

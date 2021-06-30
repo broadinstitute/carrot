@@ -11,7 +11,7 @@ use crate::models::subscription::{
 };
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
-use crate::routes::error_handling::{ ErrorBody, default_500 };
+use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::{error::BlockingError, web, HttpResponse};
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
@@ -548,9 +548,7 @@ async fn verify_existence(
                 })
             }
             // For other errors, return a 500
-            _ => {
-                default_500(&e)
-            }
+            _ => default_500(&e),
         }
     })
 }

@@ -1,8 +1,8 @@
 //! Defines structs and functions for error handling functionality that is shared among routes
 //! modules
 
-use serde::{Deserialize, Serialize};
 use actix_web::HttpResponse;
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 /// Struct to use for returning error responses from REST endpoints
@@ -22,6 +22,9 @@ pub fn default_500(error_message: &impl Display) -> HttpResponse {
     HttpResponse::InternalServerError().json(ErrorBody {
         title: "Server error".to_string(),
         status: 500,
-        detail: format!("Encountered the following error while trying to process your request: {}", error_message),
+        detail: format!(
+            "Encountered the following error while trying to process your request: {}",
+            error_message
+        ),
     })
 }

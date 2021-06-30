@@ -74,6 +74,23 @@ impl RunResultData {
             .first::<Self>(conn)
     }
 
+    /// Queries the DB for the count of run_results associated with the run specified by
+    /// `query_run_id`
+    ///
+    /// Queries the DB using `conn` to retrieve the count of run_results with a
+    /// `run_id` equal to `query_run_id`
+    /// Returns a result containing either a count of the run_result records or an error if the
+    /// query fails for some reason
+    pub fn find_count_for_run(
+        conn: &PgConnection,
+        query_run_id: Uuid,
+    ) -> Result<i64, diesel::result::Error> {
+        run_result
+            .select(diesel::dsl::count_star())
+            .filter(run_id.eq(query_run_id))
+            .first(conn)
+    }
+
     /// Queries the DB for run_result records matching the specified query criteria
     ///
     /// Queries the DB using `conn` to retrieve run_result records matching the criteria in
@@ -383,6 +400,104 @@ mod tests {
             .expect("Failed to batch insert test run results")
     }
 
+    fn insert_test_run_results_with_one_run(conn: &PgConnection) -> Vec<RunResultData> {
+        let mut run_results = Vec::new();
+
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 3"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template3"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: String::from("testtest"),
+            eval_wdl: String::from("evaltest"),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test3"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing2")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            eval_input: serde_json::from_str("{}").unwrap(),
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        run_results.push(NewRunResult {
+            run_id: run.run_id,
+            result_id: result.result_id,
+            value: String::from("TestVal"),
+        });
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result3"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin3@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        run_results.push(NewRunResult {
+            run_id: run.run_id,
+            result_id: result.result_id,
+            value: String::from("TestVal2"),
+        });
+
+        let new_result = NewResult {
+            name: String::from("Kevin's Result4"),
+            result_type: ResultTypeEnum::Numeric,
+            description: Some(String::from("Kevin made this result for testing")),
+            created_by: Some(String::from("Kevin4@example.com")),
+        };
+
+        let result = ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        run_results.push(NewRunResult {
+            run_id: run.run_id,
+            result_id: result.result_id,
+            value: String::from("TestVal3"),
+        });
+
+        RunResultData::batch_create(conn, run_results)
+            .expect("Failed to batch insert test run results")
+    }
+
     #[test]
     fn find_by_run_and_result_exists() {
         let conn = get_test_db_connection();
@@ -410,6 +525,19 @@ mod tests {
             nonexistent_run_result,
             Err(diesel::result::Error::NotFound)
         ));
+    }
+
+    #[test]
+    fn find_count_for_run_success() {
+        let conn = get_test_db_connection();
+
+        insert_test_run_result(&conn);
+        let test_run_results = insert_test_run_results_with_one_run(&conn);
+
+        let count = RunResultData::find_count_for_run(&conn, test_run_results[0].run_id)
+            .expect("Failed to get count of run_results for run");
+
+        assert_eq!(count, 3);
     }
 
     #[test]
