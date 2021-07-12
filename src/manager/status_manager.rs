@@ -105,6 +105,62 @@ pub async fn manage(
         // Get the time we started this so we can sleep for a specified time between queries
         let query_time = Instant::now();
         debug!("Starting status check");
+        // Update report statuses if reporting is enabled
+        if *config::ENABLE_REPORTING {
+            // Query DB for unfinished run reports
+            let unfinished_run_reports = RunReportData::find_unfinished(&db_pool.get().unwrap());
+            match unfinished_run_reports {
+                // If we got them successfully, check and update their statuses
+                Ok(run_reports) => {
+                    // Reset the consecutive failures counter
+                    consecutive_failures = 0;
+                    debug!("Checking status of {} run_reports", run_reports.len());
+                    for run_report in run_reports {
+                        // Check for message from main thread to exit
+                        if let Some(_) = check_for_terminate_message(&channel_recv) {
+                            return Ok(());
+                        };
+                        // Check and update status
+                        debug!(
+                            "Checking status of run_report with run_id {} and report_id: {}",
+                            run_report.run_id, run_report.report_id
+                        );
+                        match check_and_update_run_report_status(
+                            &run_report,
+                            &client,
+                            &db_pool.get().unwrap(),
+                        )
+                        .await
+                        {
+                            Err(e) => {
+                                error!("Encountered error while trying to update status for run_report with run_id {} and report_id {} : {}", run_report.run_id, run_report.report_id, e);
+                            }
+                            Ok(_) => {
+                                debug!(
+                                    "Successfully checked/updated status for run_report with run_id {} and report_id {}",
+                                    run_report.run_id,
+                                    run_report.report_id
+                                );
+                            }
+                        }
+                    }
+                }
+                // If we failed, panic if there are too many failures
+                Err(e) => {
+                    consecutive_failures += 1;
+                    error!(
+                        "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
+                        consecutive_failures, e
+                    );
+                    if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
+                        error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+                        return Err(StatusManagerError {
+                            msg: String::from("Exceed allowed consecutive failures"),
+                        });
+                    }
+                }
+            }
+        }
         // Query DB for unfinished runs
         let unfinished_runs = RunData::find_unfinished(&db_pool.get().unwrap());
         match unfinished_runs {
@@ -142,106 +198,58 @@ pub async fn manage(
                 }
             }
         }
-
-        // Query DB for unfinished builds
-        let unfinished_builds = SoftwareBuildData::find_unfinished(&db_pool.get().unwrap());
-        match unfinished_builds {
-            // If we got them successfully, check and update their statuses
-            Ok(builds) => {
-                // Reset the consecutive failures counter
-                consecutive_failures = 0;
-                debug!("Checking status of {} builds", builds.len());
-                for build in builds {
-                    // Check for message from main thread to exit
-                    if let Some(_) = check_for_terminate_message(&channel_recv) {
-                        return Ok(());
-                    };
-                    // Check and update status
-                    debug!(
-                        "Checking status of build with id: {}",
-                        build.software_build_id
-                    );
-                    match check_and_update_build_status(&build, &client, &db_pool.get().unwrap())
+        // Update build statuses if software building is enabled
+        if *config::ENABLE_CUSTOM_IMAGE_BUILDS {
+            // Query DB for unfinished builds
+            let unfinished_builds = SoftwareBuildData::find_unfinished(&db_pool.get().unwrap());
+            match unfinished_builds {
+                // If we got them successfully, check and update their statuses
+                Ok(builds) => {
+                    // Reset the consecutive failures counter
+                    consecutive_failures = 0;
+                    debug!("Checking status of {} builds", builds.len());
+                    for build in builds {
+                        // Check for message from main thread to exit
+                        if let Some(_) = check_for_terminate_message(&channel_recv) {
+                            return Ok(());
+                        };
+                        // Check and update status
+                        debug!(
+                            "Checking status of build with id: {}",
+                            build.software_build_id
+                        );
+                        match check_and_update_build_status(
+                            &build,
+                            &client,
+                            &db_pool.get().unwrap(),
+                        )
                         .await
-                    {
-                        Err(e) => {
-                            error!("Encountered error while trying to update status for build with id {}: {}", build.software_build_id, e);
-                        }
-                        Ok(_) => {
-                            debug!(
-                                "Successfully checked/updated status for build with id {}",
-                                build.software_build_id
-                            );
+                        {
+                            Err(e) => {
+                                error!("Encountered error while trying to update status for build with id {}: {}", build.software_build_id, e);
+                            }
+                            Ok(_) => {
+                                debug!(
+                                    "Successfully checked/updated status for build with id {}",
+                                    build.software_build_id
+                                );
+                            }
                         }
                     }
                 }
-            }
-            // If we failed, panic if there are too many failures
-            Err(e) => {
-                consecutive_failures += 1;
-                error!(
-                    "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
-                    consecutive_failures, e
-                );
-                if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
-                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
-                    return Err(StatusManagerError {
-                        msg: String::from("Exceed allowed consecutive failures"),
-                    });
-                }
-            }
-        }
-
-        // Query DB for unfinished run reports
-        let unfinished_run_reports = RunReportData::find_unfinished(&db_pool.get().unwrap());
-        match unfinished_run_reports {
-            // If we got them successfully, check and update their statuses
-            Ok(run_reports) => {
-                // Reset the consecutive failures counter
-                consecutive_failures = 0;
-                debug!("Checking status of {} run_reports", run_reports.len());
-                for run_report in run_reports {
-                    // Check for message from main thread to exit
-                    if let Some(_) = check_for_terminate_message(&channel_recv) {
-                        return Ok(());
-                    };
-                    // Check and update status
-                    debug!(
-                        "Checking status of run_report with run_id {} and report_id: {}",
-                        run_report.run_id, run_report.report_id
+                // If we failed, panic if there are too many failures
+                Err(e) => {
+                    consecutive_failures += 1;
+                    error!(
+                        "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
+                        consecutive_failures, e
                     );
-                    match check_and_update_run_report_status(
-                        &run_report,
-                        &client,
-                        &db_pool.get().unwrap(),
-                    )
-                    .await
-                    {
-                        Err(e) => {
-                            error!("Encountered error while trying to update status for run_report with run_id {} and report_id {} : {}", run_report.run_id, run_report.report_id, e);
-                        }
-                        Ok(_) => {
-                            debug!(
-                                "Successfully checked/updated status for run_report with run_id {} and report_id {}",
-                                run_report.run_id,
-                                run_report.report_id
-                            );
-                        }
+                    if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
+                        error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+                        return Err(StatusManagerError {
+                            msg: String::from("Exceed allowed consecutive failures"),
+                        });
                     }
-                }
-            }
-            // If we failed, panic if there are too many failures
-            Err(e) => {
-                consecutive_failures += 1;
-                error!(
-                    "Failed to retrieve run/build/run_report statuses from the DB {} time(s), this time due to: {}",
-                    consecutive_failures, e
-                );
-                if consecutive_failures > *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES {
-                    error!("Consecutive failures ({}) exceed ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES ({}). Panicking", consecutive_failures, *config::ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
-                    return Err(StatusManagerError {
-                        msg: String::from("Exceed allowed consecutive failures"),
-                    });
                 }
             }
         }
@@ -352,6 +360,7 @@ async fn update_run_status_for_building(
             notification_handler::send_run_complete_emails(conn, run.run_id)?;
             // If triggering runs from GitHub is enabled, check if this run was triggered from a
             // a GitHub comment and reply if so
+            #[cfg(not(test))] // Skip the github step when testing
             if *config::ENABLE_GITHUB_REQUESTS {
                 notification_handler::post_run_complete_comment_if_from_github(
                     conn, client, run.run_id,
@@ -559,9 +568,11 @@ async fn update_run_status_for_evaluating(
                 send_notifications_for_run_completion(conn, client, run).await?;
                 return Err(e);
             }
-            // Start report generation
-            debug!("Starting report generation for run with id: {}", run.run_id);
-            report_builder::create_run_reports_for_completed_run(conn, client, run).await?;
+            // Start report generation if reporting is enabled
+            if *config::ENABLE_REPORTING {
+                debug!("Starting report generation for run with id: {}", run.run_id);
+                report_builder::create_run_reports_for_completed_run(conn, client, run).await?;
+            }
         }
         // If it ended, send notifications
         if status == RunStatusEnum::Succeeded
@@ -622,6 +633,7 @@ async fn send_notifications_for_run_completion(
     notification_handler::send_run_complete_emails(conn, run.run_id)?;
     // If triggering runs from GitHub is enabled, check if this run was triggered from a
     // a GitHub comment and reply if so
+    #[cfg(not(test))] // Skip the email step when testing
     if *config::ENABLE_GITHUB_REQUESTS {
         notification_handler::post_run_complete_comment_if_from_github(conn, client, run.run_id)
             .await?;
@@ -658,6 +670,7 @@ async fn send_notifications_for_run_report_completion(
     notification_handler::send_run_report_complete_emails(conn, run_report, &run, &report.name)?;
     // If triggering runs from GitHub is enabled, check if the run was triggered from a
     // a GitHub comment and reply if so
+    #[cfg(not(test))] // Skip the email step when testing
     if *config::ENABLE_GITHUB_REQUESTS {
         notification_handler::post_run_report_complete_comment_if_from_github(
             conn,
@@ -1128,7 +1141,7 @@ mod tests {
     use crate::models::template_report::{NewTemplateReport, TemplateReportData};
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
-    use crate::unit_test_util::get_test_db_pool;
+    use crate::unit_test_util::{get_test_db_pool, load_env_config};
     use actix_web::client::Client;
     use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
@@ -1603,6 +1616,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_succeeded() {
+        load_env_config();
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test, run, result, and template_result we'll use for testing
@@ -1752,6 +1766,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_status_test_failed() {
+        load_env_config();
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert test and run we'll use for testing
@@ -2256,6 +2271,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_check_and_update_run_report_status_succeeded() {
+        load_env_config();
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         // Insert run_report we'll use for testing

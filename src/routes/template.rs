@@ -7,7 +7,9 @@ use crate::db;
 use crate::models::template::{
     NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
 };
+use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::storage::gcloud_storage;
 use crate::validation::womtool;
 use actix_web::client::Client;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
@@ -133,6 +135,11 @@ async fn create(
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
 ) -> impl Responder {
+    // If either WDL is a gs uri, make sure those are allowed
+    if new_template.test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) || new_template.eval_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        is_gs_uris_for_wdls_enabled()?;
+    }
+
     // Start by validating the WDLs
     validate_wdl(&client, &new_template.test_wdl, "test", &new_template.name).await?;
     validate_wdl(&client, &new_template.eval_wdl, "eval", &new_template.name).await?;

@@ -45,8 +45,13 @@ fn main() {
 
     // Initialize configuration variables
     config::initialize();
-    // Initialize the google storage hub for interacting with google cloud storage
-    storage::gcloud_storage::initialize();
+    // Initialize the google storage hub for interacting with google cloud storage if enabled
+    if *config::ENABLE_GS_URIS_FOR_WDL
+        || *config::ENABLE_GITHUB_REQUESTS
+        || *config::ENABLE_REPORTING
+    {
+        storage::gcloud_storage::initialize();
+    }
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));

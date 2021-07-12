@@ -292,7 +292,7 @@ mod tests {
     use crate::models::subscription::{NewSubscription, SubscriptionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
-    use crate::unit_test_util::get_test_db_connection;
+    use crate::unit_test_util::{get_test_db_connection, load_env_config};
     use actix_web::client::Client;
     use diesel::PgConnection;
     use google_pubsub1::{PubsubMessage, ReceivedMessage};
@@ -396,11 +396,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_start_run_from_message() {
-        // Set environment variables so they don't break the test
-        std::env::set_var("EMAIL_MODE", "SENDMAIL");
-        std::env::set_var("EMAIL_FROM", "kevin@example.com");
-        std::env::set_var("GITHUB_CLIENT_ID", "user");
-        std::env::set_var("GITHUB_CLIENT_TOKEN", "aaaaaaaaaaaaaaaaaaaaaa");
+        load_env_config();
 
         let conn = get_test_db_connection();
         let client = Client::default();

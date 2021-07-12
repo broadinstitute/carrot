@@ -7,6 +7,9 @@ use std::fs::File;
 use std::io::Read;
 use std::sync::Mutex;
 
+/// Prefix indicating a URI is a GS URI
+pub static GS_URI_PREFIX: &'static str = "gs://";
+
 /// Shorthand type for google_storage1::Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>
 pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
 

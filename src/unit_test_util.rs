@@ -1,5 +1,6 @@
 //! Contains utility functions required by unit tests within the models module
 
+use crate::config;
 use crate::db;
 use diesel::pg::PgConnection;
 use diesel::Connection;
@@ -25,7 +26,7 @@ pub fn get_test_db_connection() -> PgConnection {
     // Load environment config so we can get DB connection string
     load_env_config();
     // Get the DB url
-    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
+    let db_url = String::from(&*config::DATABASE_URL);
     // Connect
     let conn = PgConnection::establish(&db_url).expect("Failed to connect to database");
     // Initialize schema if necessary
@@ -41,7 +42,7 @@ pub fn get_test_db_pool() -> db::DbPool {
     // Load environment config so we can get DB connection string
     load_env_config();
     // Get the DB url
-    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
+    let db_url = String::from(&*config::DATABASE_URL);
     // Connect
     let conn = db::get_pool(&db_url, 1);
     // Initialize schema if necessary
@@ -57,5 +58,6 @@ pub fn get_test_db_pool() -> db::DbPool {
 
 pub fn load_env_config() {
     // Load environment variables from env file
-    dotenv::from_filename(".env").ok();
+    dotenv::from_filename("testdata/test.env").ok();
+    config::initialize();
 }

@@ -3,8 +3,10 @@
 //! Contains functions for processing requests to create, update, and search reports, along with
 //! their URI mappings
 
+use crate::config;
 use crate::db;
 use crate::models::report::{NewReport, ReportChangeset, ReportData, ReportQuery, UpdateError};
+use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use log::error;
@@ -291,6 +293,17 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
+    // Only map routes to reporting functions if reporting is enabled
+    if *config::ENABLE_REPORTING {
+        init_routes_reporting_enabled(cfg);
+    } else {
+        init_routes_reporting_disabled(cfg);
+    }
+}
+
+/// Attaches the REST mappings in this file to a service config for if reporting functionality is
+/// enabled
+fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/reports/{id}")
             .route(web::get().to(find_by_id))
@@ -301,6 +314,18 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::resource("/reports")
             .route(web::get().to(find))
             .route(web::post().to(create)),
+    );
+}
+
+/// Attaches a reporting-disabled error message REST mapping to a service cfg
+fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::resource("/reports")
+            .route(web::route().to(disabled_features::reporting_disabled_mapping)),
+    );
+    cfg.service(
+        web::resource("/reports/{id}")
+            .route(web::route().to(disabled_features::reporting_disabled_mapping)),
     );
 }
 
@@ -414,7 +439,12 @@ mod tests {
 
         let report = insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/reports/{}", report.report_id))
@@ -435,7 +465,12 @@ mod tests {
 
         insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/reports/{}", Uuid::new_v4()))
@@ -458,7 +493,12 @@ mod tests {
 
         insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/reports/123456789")
@@ -476,12 +516,45 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn find_by_id_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+
+        let report = insert_test_report(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_disabled),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/reports/{}", report.report_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn find_success() {
         let pool = get_test_db_pool();
 
         let report = insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/reports?name=Kevin%27s%20Report")
@@ -499,12 +572,46 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn find_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+
+        let report = insert_test_report(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_disabled),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/reports?name=Kevin%27s%20Report")
+            .to_request();
+        println!("{:?}", req);
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn find_failure_not_found() {
         let pool = get_test_db_pool();
 
         insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/reports?name=Gibberish")
@@ -527,7 +634,12 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let new_report = NewReport {
             name: String::from("Kevin's test"),
@@ -566,12 +678,51 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn create_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_disabled),
+        )
+        .await;
+
+        let new_report = NewReport {
+            name: String::from("Kevin's test"),
+            description: Some(String::from("Kevin's test description")),
+            notebook: json!({"cells":[{"test": "test"}]}),
+            config: Some(json!({"cpu": "2"})),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/reports")
+            .set_json(&new_report)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn create_failure() {
         let pool = get_test_db_pool();
 
         let report = insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let new_report = NewReport {
             name: report.name.clone(),
@@ -603,7 +754,12 @@ mod tests {
 
         let report = insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let report_change = ReportChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -635,12 +791,53 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn update_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+
+        let report = insert_test_report(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_disabled),
+        )
+        .await;
+
+        let report_change = ReportChangeset {
+            name: Some(String::from("Kevin's test change")),
+            description: Some(String::from("Kevin's test description2")),
+            notebook: Some(json!({"cells":[{"test": "test"}]})),
+            config: Some(json!({"cpu": "2"})),
+        };
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/reports/{}", report.report_id))
+            .set_json(&report_change)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn update_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
         insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let report_change = ReportChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -672,7 +869,12 @@ mod tests {
 
         insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let report_change = ReportChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -703,7 +905,12 @@ mod tests {
 
         let report = insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::delete()
             .uri(&format!("/reports/{}", report.report_id))
@@ -723,12 +930,45 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn delete_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+
+        let report = insert_test_report(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_disabled),
+        )
+        .await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/reports/{}", report.report_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
     async fn delete_failure_no_report() {
         let pool = get_test_db_pool();
 
         let report = insert_test_report(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::delete()
             .uri(&format!("/reports/{}", Uuid::new_v4()))
@@ -751,7 +991,12 @@ mod tests {
 
         let test_run_report = insert_test_run_report_non_failed(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::delete()
             .uri(&format!("/reports/{}", test_run_report.report_id))
@@ -775,7 +1020,12 @@ mod tests {
     async fn delete_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
 
         let req = test::TestRequest::delete()
             .uri("/reports/123456789")

@@ -14,16 +14,14 @@ addons:
 cache: cargo
 env:
   global:
-    - DATABASE_URL="postgres://test_framework_user:test@localhost:5432/test_framework_db"
     - PGPORT=5432
     - RUST_TEST_THREADS=1
-    - WOMTOOL_LOCATION=/usr/local/bin/womtool/womtool-54.jar
 before_install:
   - sudo apt-get -y install openjdk-11-jre
   - sudo apt-get -y install wget
   - sudo mkdir /usr/local/bin/womtool
   - sudo wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/54/womtool-54.jar
 before_script:
-  - sudo -u postgres psql -c 'create database test_framework_db;'
+  - sudo -u postgres psql -c 'create database test_framework_db_test;'
   - sudo -u postgres psql -c "create user test_framework_user with password 'test' superuser;"
-  - sudo -u postgres psql -c 'create extension if not exists "uuid-ossp";' test_framework_db
+  - sudo -u postgres psql -c 'create extension if not exists "uuid-ossp";' test_framework_db_test
