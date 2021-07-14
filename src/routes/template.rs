@@ -4,13 +4,12 @@
 //! their URI mappings
 
 use crate::db;
-use crate::models::template::{
-    NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
-};
+use crate::models::template::{NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError};
 use crate::requests::test_resource_requests;
 use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::storage::gcloud_storage;
+use crate::util::temp_storage;
 use crate::util::wdl_storage;
 use crate::validation::womtool;
 use actix_web::client::Client;
@@ -18,12 +17,13 @@ use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder}
 use log::{debug, error};
 use serde_json::json;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use uuid::Uuid;
 use diesel::PgConnection;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
 /// where the only difference is whether we're using the test or eval wdl
+#[derive(Copy, Clone)]
 enum WdlType {
     Test,
     Eval,
@@ -180,10 +180,8 @@ async fn create(
     let conn = pool.get().expect("Failed to get DB connection from pool");
 
     // Store and validate the WDLs
-    let test_wdl_location = store_wdl(&client, &conn, &new_template.test_wdl, WdlType::Test).await?;
-    let eval_wdl_location = store_wdl(&client, &conn,&new_template.eval_wdl, WdlType::Eval).await?;
-    validate_wdl(&test_wdl_location, WdlType::Test, &new_template.name).await?;
-    validate_wdl(&eval_wdl_location, WdlType::Eval, &new_template.name).await?;
+    let test_wdl_location = validate_and_store_wdl(&client, &conn, &new_template.test_wdl, WdlType::Test, &new_template.name).await?;
+    let eval_wdl_location = validate_and_store_wdl(&client, &conn, &new_template.eval_wdl, WdlType::Eval, &new_template.name).await?;
 
     // Insert in new thread
     web::block(move || {
@@ -194,8 +192,8 @@ async fn create(
             description: new_template.description,
             // We can unwrap on these because, if we're making a non-unicode path for the WDLs,
             // CARROT won't function properly anyway
-            test_wdl: String::from(test_wdl_location.to_str().unwrap()),
-            eval_wdl: String::from(eval_wdl_location.to_str().unwrap()),
+            test_wdl: test_wdl_location,
+            eval_wdl: eval_wdl_location,
             created_by: new_template.created_by,
         };
 
@@ -262,20 +260,12 @@ async fn update(
 
     // If the user wants to update either of the WDLs, store and validate them
     if let Some(test_wdl) = &template_changes.test_wdl {
-        let test_wdl_location = store_wdl(&client, &conn, test_wdl, WdlType::Test).await?;
-        validate_wdl(&test_wdl_location, WdlType::Test, &id_param).await?;
-        // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
-        // CARROT won't work properly anyway
-        processed_template_changes.test_wdl =
-            Some(String::from(test_wdl_location.to_str().unwrap()));
+        let test_wdl_location = validate_and_store_wdl(&client, &conn, test_wdl, WdlType::Test, &id_param).await?;
+        processed_template_changes.test_wdl = Some(test_wdl_location);
     }
     if let Some(eval_wdl) = &template_changes.eval_wdl {
-        let eval_wdl_location = store_wdl(&client, &conn, eval_wdl, WdlType::Eval).await?;
-        validate_wdl(&eval_wdl_location, WdlType::Eval, &id_param).await?;
-        // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
-        // CARROT won't work properly anyway
-        processed_template_changes.eval_wdl =
-            Some(String::from(eval_wdl_location.to_str().unwrap()));
+        let eval_wdl_location = validate_and_store_wdl(&client, &conn, eval_wdl, WdlType::Eval, &id_param).await?;
+        processed_template_changes.eval_wdl = Some(eval_wdl_location);
     }
 
     //Update in new thread
@@ -383,9 +373,9 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
     })
 }
 
-/// Handles GET requests to /templates/{id}/test.wdl for retrieving test wdl by template_id
+/// Handles GET requests to /templates/{id}/test_wdl for retrieving test wdl by template_id
 ///
-/// This function is called by Actix-Web when a get request is made to the /templates/{id}/test.wdl
+/// This function is called by Actix-Web when a get request is made to the /templates/{id}/test_wdl
 /// mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
 /// look up the specified template, retrieves the test_wdl from where it is located, and returns it
@@ -400,9 +390,9 @@ async fn download_test_wdl(
     download_wdl(id_param, pool, client, WdlType::Test).await
 }
 
-/// Handles GET requests to /templates/{id}/eval.wdl for retrieving eval wdl by template_id
+/// Handles GET requests to /templates/{id}/eval_wdl for retrieving eval wdl by template_id
 ///
-/// This function is called by Actix-Web when a get request is made to the /templates/{id}/eval.wdl
+/// This function is called by Actix-Web when a get request is made to the /templates/{id}/eval_wdl
 /// mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
 /// look up the specified template, retrieves the eval_wdl from where it is located, and returns it
@@ -499,6 +489,59 @@ async fn download_wdl(
     }
 }
 
+/// Convenience function for downloading the wdl at `wdl_location`, validating it, storing it, and
+/// returning its stored location. `wdl_type` refers to whether the wdl is a test or eval wdl.
+/// `identifier` should be an identifier for the entity to which the wdl belongs (e.g. the
+/// template's name or id)
+async fn validate_and_store_wdl(
+    client: &Client,
+    conn: &PgConnection,
+    wdl_location: &str,
+    wdl_type: WdlType,
+    identifier: &str
+) -> Result<String, HttpResponse> {
+    // Get the wdl and stick it in a temp file first so we can validate it
+    let wdl_string: String = match test_resource_requests::get_resource_as_string(client, wdl_location).await {
+        Ok(wdl_string) => wdl_string,
+        // If we failed to get it, return an error response
+        Err(e) => {
+            debug!("Encountered error trying to retrieve at {}: {}", wdl_location, e);
+            return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to retrieve WDL".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to retrieve WDL at {} resulted in error: {}",
+                    wdl_location, e
+                ),
+            }))
+        }
+    };
+    let wdl_temp_file = match temp_storage::get_temp_file(&wdl_string) {
+        Ok(wdl_temp_file) => wdl_temp_file,
+        Err(e) => {
+            debug!(
+                "Encountered error trying to temporarily store wdl from {} for validation: {}",
+                wdl_location, e
+            );
+            return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to validate WDL".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to temporarily store WDL from {} resulted in error: {}",
+                    wdl_location, e
+                ),
+            }))
+        }
+    };
+    // Validate the wdl
+    validate_wdl(wdl_temp_file.path(), wdl_type, identifier).await?;
+    // Store it
+    // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
+    // CARROT won't work properly anyway
+    store_wdl(client, conn, wdl_temp_file.path().to_str().unwrap_or_else(|| panic!("Failed to get wdl temp file path {:?} as str", wdl_temp_file.path())), wdl_type).await
+
+}
+
 /// Validates the specified WDL and returns either the unit type if it's valid or an appropriate
 /// http response if it's invalid or there is some error
 ///
@@ -552,7 +595,7 @@ async fn store_wdl(
     conn: &PgConnection,
     wdl_location: &str,
     wdl_type: WdlType,
-) -> Result<PathBuf, HttpResponse> {
+) -> Result<String, HttpResponse> {
     // Attempt to store the wdl locally
     match wdl_storage::store_wdl(client, conn, wdl_location, &format!("{}.wdl", wdl_type)).await {
         Ok(wdl_local_path) => Ok(wdl_local_path),
@@ -584,7 +627,8 @@ fn fill_uris_for_wdl_location(req: &HttpRequest, template: &mut TemplateData) {
 }
 
 /// Returns a URI that the user can use to retrieve the wdl at wdl_location.  For gs: and
-/// http/https: locations, it just returns the location.  If
+/// http/https: locations, it just returns the location.  For local file locations, returns a REST
+/// URI for accessing it
 fn get_uri_for_wdl_location(
     req: &HttpRequest,
     wdl_location: &str,
@@ -601,7 +645,7 @@ fn get_uri_for_wdl_location(
     }
     // Otherwise, we assume it's a file, so we build the REST mapping the user can use to access it
     format!(
-        "{}/api/v1/templates/{}/{}.wdl",
+        "{}/api/v1/templates/{}/{}_wdl",
         req.connection_info().host(),
         template_id,
         wdl_type
@@ -619,8 +663,8 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route(web::put().to(update))
             .route(web::delete().to(delete_by_id)),
     );
-    cfg.service(web::resource("/templates/{id}/test.wdl").route(web::get().to(download_test_wdl)));
-    cfg.service(web::resource("/templates/{id}/eval.wdl").route(web::get().to(download_eval_wdl)));
+    cfg.service(web::resource("/templates/{id}/test_wdl").route(web::get().to(download_test_wdl)));
+    cfg.service(web::resource("/templates/{id}/eval_wdl").route(web::get().to(download_eval_wdl)));
     cfg.service(
         web::resource("/templates")
             .route(web::get().to(find))
@@ -884,7 +928,7 @@ mod tests {
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval.wdl",
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -974,7 +1018,7 @@ mod tests {
         assert_eq!(
             test_templates[0].eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval.wdl",
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
                 test_templates[0].template_id
             )
         );
@@ -1059,14 +1103,14 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test.wdl",
+                "localhost:8080/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval.wdl",
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -1215,7 +1259,7 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test.wdl",
+                "localhost:8080/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
@@ -1509,7 +1553,7 @@ mod tests {
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/test.wdl", template.template_id))
+            .uri(&format!("/templates/{}/test_wdl", template.template_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1544,7 +1588,7 @@ mod tests {
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/test.wdl", template.template_id))
+            .uri(&format!("/templates/{}/test_wdl", template.template_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1567,7 +1611,7 @@ mod tests {
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/test.wdl", Uuid::new_v4()))
+            .uri(&format!("/templates/{}/test_wdl", Uuid::new_v4()))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1602,7 +1646,7 @@ mod tests {
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/eval.wdl", template.template_id))
+            .uri(&format!("/templates/{}/eval_wdl", template.template_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1636,7 +1680,7 @@ mod tests {
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/eval.wdl", template.template_id))
+            .uri(&format!("/templates/{}/eval_wdl", template.template_id))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1659,7 +1703,7 @@ mod tests {
             test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/templates/{}/eval.wdl", Uuid::new_v4()))
+            .uri(&format!("/templates/{}/eval_wdl", Uuid::new_v4()))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
