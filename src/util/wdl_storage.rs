@@ -9,7 +9,7 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use diesel::PgConnection;
-use crate::models::wdl_hash::{WdlHashData, NewWdlHash};
+use crate::models::wdl_hash::{WdlHashData, WdlDataToHash};
 
 #[derive(Debug)]
 pub enum Error {
@@ -69,9 +69,9 @@ pub async fn store_wdl(
     // Okay to unwrap here, because non-Utf8 paths are a problem for us anyway
     let wdl_path_as_string: String = String::from(new_wdl_storage_location.to_str().unwrap_or_else(|| panic!("WDL location is non-utf8 path: {:?}", new_wdl_storage_location)));
     // Write a hash record for it
-    WdlHashData::create(conn, NewWdlHash{
+    WdlHashData::create(conn, WdlDataToHash {
         location: wdl_path_as_string.clone(),
-        data_to_hash: wdl_string
+        data: wdl_string
     })?;
 
     Ok(wdl_path_as_string)

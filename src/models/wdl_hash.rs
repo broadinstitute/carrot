@@ -24,11 +24,11 @@ pub struct WdlHashData {
 ///
 /// location and data_to_hash are required fields, and created_at is populated automatically by the
 /// DB
-/// Before insertion, `data_to_hash` is hashed using SHA-512 and the hash is what is actually
+/// Before insertion, `data` is hashed using SHA-512 and the hash is what is actually
 /// inserted into the DB
-pub struct NewWdlHash {
+pub struct WdlDataToHash {
     pub location: String,
-    pub data_to_hash: String,
+    pub data: String,
 }
 
 /// The data we'll actually insert when creating a new WDL_HASH record
@@ -36,7 +36,7 @@ pub struct NewWdlHash {
 /// NewWdlHash is converted into this by hashing `data_to_hash` before insertion
 #[derive(Deserialize, Serialize, Insertable)]
 #[table_name = "wdl_hash"]
-struct ActualNewWdlHash {
+struct NewWdlHash {
     pub location: String,
     pub hash: Vec<u8>
 }
@@ -70,14 +70,14 @@ impl WdlHashData {
     /// error if the insert fails for some reason
     pub fn create(
         conn: &PgConnection,
-        params: NewWdlHash,
+        params: WdlDataToHash,
     ) -> Result<Self, diesel::result::Error> {
         // Hash data_to_hash
         let mut hasher: Sha512 = Sha512::new();
-        hasher.update(&params.data_to_hash);
+        hasher.update(&params.data);
         let result: Vec<u8> = hasher.finalize().to_vec();
         // Build the record we'll actually insert
-        let new_wdl_hash = ActualNewWdlHash {
+        let new_wdl_hash = NewWdlHash {
             location: params.location,
             hash: result
         };
@@ -96,9 +96,9 @@ mod tests {
     use crate::unit_test_util::get_test_db_connection;
 
     fn insert_test_wdl_hash(conn: &PgConnection) -> WdlHashData {
-        let new_wdl_hash = NewWdlHash {
+        let new_wdl_hash = WdlDataToHash {
             location: String::from("/test/path/to/wdl.wdl"),
-            data_to_hash: String::from("Test data to hash"),
+            data: String::from("Test data to hash"),
         };
 
         WdlHashData::create(conn, new_wdl_hash)
@@ -108,17 +108,17 @@ mod tests {
     fn insert_test_wdl_hashes(conn: &PgConnection) -> Vec<WdlHashData> {
         let mut test_wdl_hashes: Vec<WdlHashData> = Vec::new();
 
-        let new_wdl_hash = NewWdlHash {
+        let new_wdl_hash = WdlDataToHash {
             location: String::from("/test/path/to/wdl.wdl"),
-            data_to_hash: String::from("Different test data to hash"),
+            data: String::from("Different test data to hash"),
         };
 
         test_wdl_hashes.push(WdlHashData::create(conn, new_wdl_hash)
             .expect("Failed inserting test wdl_hash"));
 
-        let new_wdl_hash = NewWdlHash {
+        let new_wdl_hash = WdlDataToHash {
             location: String::from("/different/path/to/wdl.wdl"),
-            data_to_hash: String::from("Different test data to hash"),
+            data: String::from("Different test data to hash"),
         };
 
         test_wdl_hashes.push(WdlHashData::create(conn, new_wdl_hash)
@@ -179,9 +179,9 @@ mod tests {
 
         let test_wdl_hash = insert_test_wdl_hash(&conn);
 
-        let copy_wdl_hash = NewWdlHash {
+        let copy_wdl_hash = WdlDataToHash {
             location: test_wdl_hash.location,
-            data_to_hash: String::from("Test data to hash"),
+            data: String::from("Test data to hash"),
         };
 
         let new_wdl_hash = WdlHashData::create(&conn, copy_wdl_hash);
