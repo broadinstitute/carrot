@@ -8,6 +8,7 @@ use crate::storage::gcloud_storage;
 use actix_web::client::{Client, SendRequestError};
 use actix_web::error::PayloadError;
 use std::fmt;
+use std::fs::read_to_string;
 use std::str::Utf8Error;
 
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub enum Error {
     Utf8(Utf8Error),
     Failed(String),
     GS(gcloud_storage::Error),
+    IO(std::io::Error),
 }
 
 impl fmt::Display for Error {
@@ -27,6 +29,7 @@ impl fmt::Display for Error {
             Error::Utf8(e) => write!(f, "ProcessRequestError Utf8 {}", e),
             Error::Failed(msg) => write!(f, "ProcessRequestError Failed {}", msg),
             Error::GS(e) => write!(f, "ProcessRequestError GS {}", e),
+            Error::IO(e) => write!(f, "ProcessRequestError IO {}", e),
         }
     }
 }
@@ -54,6 +57,11 @@ impl From<gcloud_storage::Error> for Error {
         Error::GS(e)
     }
 }
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Error {
+        Error::IO(e)
+    }
+}
 
 /// Returns body of resource at `address` as a String
 ///
@@ -64,13 +72,18 @@ pub async fn get_resource_as_string(client: &Client, address: &str) -> Result<St
     if *config::ENABLE_GS_URIS_FOR_WDL && address.starts_with(gcloud_storage::GS_URI_PREFIX) {
         Ok(gcloud_storage::retrieve_object_media_with_gs_uri(address)?)
     }
-    // Otherwise, it's probably a normal location, so we'll retrieve it with a normal http get
+    // If it's an http/https url, make an http request
+    else if address.starts_with("http://") || address.starts_with("https://") {
+        get_resource_from_http_url(client, address).await
+    }
+    // Otherwise, we'll assume it's a local file
     else {
-        get_resource_from_normal_uri(client, address).await
+        Ok(read_to_string(address)?)
     }
 }
 
-async fn get_resource_from_normal_uri(client: &Client, address: &str) -> Result<String, Error> {
+/// Attempts to retrieve and return the resource at `address`
+async fn get_resource_from_http_url(client: &Client, address: &str) -> Result<String, Error> {
     let request = client.get(format!("{}", address));
 
     // Make the request
@@ -94,11 +107,12 @@ async fn get_resource_from_normal_uri(client: &Client, address: &str) -> Result<
 #[cfg(test)]
 mod tests {
 
-    use crate::requests::test_resource_requests::get_resource_as_string;
+    use crate::requests::test_resource_requests::{get_resource_as_string, Error};
     use actix_web::client::Client;
+    use std::fs::read_to_string;
 
     #[actix_rt::test]
-    async fn test_get_resource() {
+    async fn test_get_resource_http_success() {
         // Get client
         let client = Client::default();
 
@@ -116,5 +130,66 @@ mod tests {
         mock.assert();
 
         assert_eq!(response.unwrap(), String::from("Test"));
+    }
+
+    #[actix_rt::test]
+    async fn test_get_resource_http_failure_no_file() {
+        // Get client
+        let client = Client::default();
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("GET", "/test_get_resource_http_failure_no_file")
+            .with_status(404)
+            .create();
+
+        let response = get_resource_as_string(
+            &client,
+            &format!(
+                "{}/test_get_resource_http_failure_no_file",
+                mockito::server_url()
+            ),
+        )
+        .await;
+
+        mock.assert();
+
+        assert!(matches!(response.unwrap_err(), Error::Failed(_)));
+    }
+
+    #[actix_rt::test]
+    async fn test_get_resource_local_success() {
+        // Get client
+        let client = Client::default();
+
+        // Load the test file
+        let test_file_contents =
+            read_to_string("testdata/requests/test_resource_requests/test_workflow.wdl").unwrap();
+
+        // Get the contents of the file
+        let response = get_resource_as_string(
+            &client,
+            "testdata/requests/test_resource_requests/test_workflow.wdl",
+        )
+        .await
+        .unwrap();
+
+        // Make sure they match
+        assert_eq!(test_file_contents, response);
+    }
+
+    #[actix_rt::test]
+    async fn test_get_resource_local_failure_not_found() {
+        // Get client
+        let client = Client::default();
+
+        // Get the contents of the file
+        let response = get_resource_as_string(
+            &client,
+            "testdata/requests/test_resource_requests/not_a_real.wdl",
+        )
+        .await;
+
+        // Make sure they match
+        assert!(matches!(response, Err(Error::IO(_))));
     }
 }

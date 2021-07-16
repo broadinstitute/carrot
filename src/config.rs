@@ -101,6 +101,13 @@ lazy_static! {
     pub static ref GCLOUD_SA_KEY_FILE: String =
         env::var("CARROT_GCLOUD_SA_KEY_FILE").expect("CARROT_GCLOUD_SA_KEY_FILE environment variable not set");
 
+    // WDL Storage
+    /// Local directory in which to store WDLs.  Defaults to /carrot/wdl
+    pub static ref WDL_DIRECTORY: String = match env::var("CARROT_WDL_DIRECTORY") {
+        Ok(val) => val,
+        Err(_) => String::from("/carrot/wdl"),
+    };
+
     // GITHUB
     /// If true, enables triggering carrot test runs from github
     pub static ref ENABLE_GITHUB_REQUESTS: bool = match env::var("CARROT_ENABLE_GITHUB_REQUESTS") {
@@ -223,6 +230,9 @@ pub fn initialize() {
     // Status-checking config
     lazy_static::initialize(&STATUS_CHECK_WAIT_TIME_IN_SECS);
     lazy_static::initialize(&ALLOWED_CONSECUTIVE_STATUS_CHECK_FAILURES);
+
+    // WDL Storage
+    lazy_static::initialize(&WDL_DIRECTORY);
 
     // Emailer
     lazy_static::initialize(&EMAIL_MODE);

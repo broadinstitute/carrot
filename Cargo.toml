@@ -62,6 +62,8 @@ base64 = "*"
 google-storage1 = "*"
 # For url encoding (necessary for interacting with the Google Cloud Storage API)
 percent-encoding = "2.1.0"
+# For hashing wdl contents
+sha2 = "0.9"
 
 [dev-dependencies]
 # For generating random values in test data

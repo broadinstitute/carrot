@@ -3,3 +3,5 @@
 pub mod git_repos;
 pub mod python_dict_formatter;
 pub mod sort_string;
+pub mod temp_storage;
+pub mod wdl_storage;
