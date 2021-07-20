@@ -236,6 +236,18 @@ async fn update(
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
 ) -> impl Responder {
+    // If either WDL is a gs uri, make sure those are allowed
+    if let Some(test_wdl) = &template_changes.test_wdl {
+        if test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled()?;
+        }
+    }
+    if let Some(eval_wdl) = &template_changes.eval_wdl {
+        if eval_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled()?;
+        }
+    }
+
     //Parse ID into Uuid
     let id = match Uuid::parse_str(&*id_param) {
         Ok(id) => id,
