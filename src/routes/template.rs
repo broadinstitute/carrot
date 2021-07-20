@@ -4,23 +4,28 @@
 //! their URI mappings
 
 use crate::db;
-use crate::models::template::{NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError};
+use crate::models::template::{
+    NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
+};
 use crate::requests::test_resource_requests;
 use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::routes::multipart_handling;
 use crate::storage::gcloud_storage;
 use crate::util::temp_storage;
 use crate::util::wdl_storage;
 use crate::validation::womtool;
+use actix_multipart::Multipart;
 use actix_web::client::Client;
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, guard, web, HttpRequest, HttpResponse, Responder};
+use diesel::PgConnection;
 use log::{debug, error};
 use serde_json::json;
 use std::fmt;
-use std::path::{Path};
+use std::path::Path;
 use uuid::Uuid;
-use actix_multipart::Multipart;
-use diesel::PgConnection;
+use tempfile::NamedTempFile;
+use std::fs::File;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
 /// where the only difference is whether we're using the test or eval wdl
@@ -156,88 +161,97 @@ async fn find(
         default_500(&e)
     })
 }
-/*
+
+/// Handles requests to /templates with content-type multipart/form-data for creating templates
+///
+/// Wrapper for [`create`] for handling multipart requests. This function is called by Actix-Web
+/// when a post request is made to the /templates mapping with the content-type header set to
+/// multipart/form-data
+/// It deserializes the request body to a NewTemplate, connects to the db via a connection from
+/// `pool`, creates a template with the specified parameters, and returns the created template, or
+/// an error message if creating the template fails for some reason
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
+/// poisoned
 async fn create_from_multipart(
     req: HttpRequest,
     payload: Multipart,
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
-) -> impl Responder {
-    let new_template: NewTemplate = NewTemplate {
-        name: "".to_string(),
-        pipeline_id: Default::default(),
-        description: None,
-        test_wdl: "".to_string(),
-        eval_wdl: "".to_string(),
-        created_by: None
-    };
+) -> Result<HttpResponse, actix_web::Error> {
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+    // Process the payload
+    let new_template: NewTemplate =
+        get_new_template_from_multipart(payload, &client, &conn).await?;
+    // Create the template
+    create(req, new_template, pool).await
 }
 
-/// Attempts to create a NewTemplate instance from the fields in `payload`.  Returns an error in the
-/// form of an HttpResponse if there are missing or unexpected fields, or some other error occurs
-async fn get_new_template_from_multipart(payload: Multipart) -> Result<NewTemplate, HttpResponse> {
-    // The fields we expect from the multipart payload
-    const EXPECTED_TEXT_FIELDS: [&'static str; 4] = ["name", "description", "pipeline_id", "created_by"];
-    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
-    // Get the data from the multipart payload
-    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(payload, &EXPECTED_TEXT_FIELDS.to_vec(), &EXPECTED_FILE_FIELDS.to_vec()).await?;
-    // Return an error response if any required fields are missing
-    if !text_data_map.contains_key("name")  {
-        return Err(HttpResponse::BadRequest().json(ErrorBody{
-            title: "Missing required field".to_string(),
-            status: 400,
-            detail: "Payload does not contain required field: name".to_string()
-        }))
+/// Handles requests to /templates with content-type application/json for creating templates
+///
+/// Wrapper for [`create`] for handling json requests. This function is called by Actix-Web when a
+/// post request is made to the /templates mapping with the content-type header set to
+/// application/json
+/// It deserializes the request body to a NewTemplate, connects to the db via a connection from
+/// `pool`, creates a template with the specified parameters, and returns the created template, or
+/// an error message if creating the template fails for some reason
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
+/// poisoned
+async fn create_from_json(
+    req: HttpRequest,
+    web::Json(new_template): web::Json<NewTemplate>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
+) -> Result<HttpResponse, actix_web::Error> {
+    // If either WDL is a gs uri, make sure those are allowed
+    if new_template
+        .test_wdl
+        .starts_with(gcloud_storage::GS_URI_PREFIX)
+        || new_template
+            .eval_wdl
+            .starts_with(gcloud_storage::GS_URI_PREFIX)
+    {
+        is_gs_uris_for_wdls_enabled()?;
     }
-    if !text_data_map.contains_key("pipeline_id")  {
-        return Err(HttpResponse::BadRequest().json(ErrorBody{
-            title: "Missing required field".to_string(),
-            status: 400,
-            detail: "Payload does not contain required field: pipeline_id".to_string()
-        }))
-    }
-    if !file_data_map.contains_key("test_wdl") {
-        return Err(HttpResponse::BadRequest().json(ErrorBody{
-            title: "Missing required field".to_string(),
-            status: 400,
-            detail: "Payload does not contain required field: test_wdl".to_string()
-        }))
-    }
-    if !file_data_map.contains_key("eval_wdl") {
-        return Err(HttpResponse::BadRequest().json(ErrorBody{
-            title: "Missing required field".to_string(),
-            status: 400,
-            detail: "Payload does not contain required field: eval_wdl".to_string()
-        }))
-    }
-    // Convert pipeline_id to a UUID
-    let pipeline_id = {
-        let pipeline_id_str =  text_data_map.get("pipeline_id").expect("Failed to retrieve pipeline_id from text_data_map. This should not happen.");
-        match Uuid::parse_str(pipeline_id_str) {
-            Ok(pipeline_id) => pipeline_id,
-            Err(e) => {
-                error!("{}", e);
-                // If it doesn't parse successfully, return an error to the user
-                return Err(HttpResponse::BadRequest().json(ErrorBody {
-                    title: "ID formatted incorrectly".to_string(),
-                    status: 400,
-                    detail: "ID must be formatted as a Uuid".to_string(),
-                }));
-            }
-        }
+
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    // Store and validate the WDLs
+    let test_wdl_temp_file = get_wdl_as_temp_file(&client, &new_template.test_wdl).await?;
+    let test_wdl_location = validate_and_store_wdl(
+        &client,
+        &conn,
+        &test_wdl_temp_file,
+        WdlType::Test,
+        &new_template.name,
+    )
+    .await?;
+    let eval_wdl_temp_file = get_wdl_as_temp_file(&client, &new_template.eval_wdl).await?;
+    let eval_wdl_location = validate_and_store_wdl(
+        &client,
+        &conn,
+        &eval_wdl_temp_file,
+        WdlType::Eval,
+        &new_template.name,
+    )
+    .await?;
+
+    // Create a new NewTemplate with the new locations of the WDLs
+    let new_new_template = NewTemplate {
+        name: new_template.name,
+        pipeline_id: new_template.pipeline_id,
+        description: new_template.description,
+        test_wdl: test_wdl_location,
+        eval_wdl: eval_wdl_location,
+        created_by: new_template.created_by,
     };
 
-    // Put the data in a NewTemplate and return
-    Ok(NewTemplate{
-        // We can expect here because we checked above that text_data_map contains name
-        name: text_data_map.remove("name").expect("Failed to retrieve name from text_data_map. This should not happen."),
-        pipeline_id,
-        description: text_data_map.remove("description"),
-        notebook: notebook_json,
-        config: config_json,
-        created_by: text_data_map.remove("created_by")
-    })
-}*/
+    // Create the template
+    create(req, new_new_template, pool).await
+}
 
 /// Handles requests to /templates for creating templates
 ///
@@ -251,39 +265,15 @@ async fn get_new_template_from_multipart(payload: Multipart) -> Result<NewTempla
 /// poisoned
 async fn create(
     req: HttpRequest,
-    web::Json(new_template): web::Json<NewTemplate>,
+    new_template: NewTemplate,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
-) -> impl Responder {
-    // If either WDL is a gs uri, make sure those are allowed
-    if new_template.test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) || new_template.eval_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
-        is_gs_uris_for_wdls_enabled()?;
-    }
-
-    let conn = pool.get().expect("Failed to get DB connection from pool");
-
-    // Store and validate the WDLs
-    let test_wdl_location = validate_and_store_wdl(&client, &conn, &new_template.test_wdl, WdlType::Test, &new_template.name).await?;
-    let eval_wdl_location = validate_and_store_wdl(&client, &conn, &new_template.eval_wdl, WdlType::Eval, &new_template.name).await?;
-
+) -> Result<HttpResponse, actix_web::Error> {
     // Insert in new thread
-    web::block(move || {
-        // Create a new NewTemplate with the new locations of the WDLs
-        let new_new_template = NewTemplate {
-            name: new_template.name,
-            pipeline_id: new_template.pipeline_id,
-            description: new_template.description,
-            // We can unwrap on these because, if we're making a non-unicode path for the WDLs,
-            // CARROT won't function properly anyway
-            test_wdl: test_wdl_location,
-            eval_wdl: eval_wdl_location,
-            created_by: new_template.created_by,
-        };
-
-        //let conn = pool.get().expect("Failed to get DB connection from pool");
+    let res = web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
 
         // Create template
-        match TemplateData::create(&conn, new_new_template) {
+        match TemplateData::create(&conn, new_template) {
             Ok(template) => Ok(template),
             Err(e) => {
                 error!("{}", e);
@@ -303,7 +293,75 @@ async fn create(
         // For any errors, return a 500
         error!("{:?}", e);
         default_500(&e)
-    })
+    })?;
+
+    Ok(res)
+}
+
+/// Handles requests to /templates/{id} with content-type application/json for updating templates
+///
+/// Wrapper for [`update`] for handling json requests. This function is called by Actix-Web when a
+/// put request is made to the /templates/{id} mapping with the content-type header set to
+/// application/json
+/// It deserializes the request body to a NewTemplate, connects to the db via a connection from
+/// `pool`, creates a template with the specified parameters, and returns the created template, or
+/// an error message if creating the template fails for some reason
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
+/// poisoned
+async fn update_from_json(
+    req: HttpRequest,
+    id_param: web::Path<String>,
+    web::Json(template_changes): web::Json<TemplateChangeset>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
+) -> Result<HttpResponse, actix_web::Error> {
+    // If either WDL is a gs uri, make sure those are allowed
+    if new_template
+        .test_wdl
+        .starts_with(gcloud_storage::GS_URI_PREFIX)
+        || new_template
+        .eval_wdl
+        .starts_with(gcloud_storage::GS_URI_PREFIX)
+    {
+        is_gs_uris_for_wdls_enabled()?;
+    }
+
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    // Store and validate the WDLs
+    let test_wdl_temp_file = get_wdl_as_temp_file(&client, &new_template.test_wdl).await?;
+    let test_wdl_location = validate_and_store_wdl(
+        &client,
+        &conn,
+        &test_wdl_temp_file,
+        WdlType::Test,
+        &new_template.name,
+    )
+        .await?;
+    let eval_wdl_temp_file = get_wdl_as_temp_file(&client, &new_template.eval_wdl).await?;
+    let eval_wdl_location = validate_and_store_wdl(
+        &client,
+        &conn,
+        &eval_wdl_temp_file,
+        WdlType::Eval,
+        &new_template.name,
+    )
+        .await?;
+
+    // Create a new NewTemplate with the new locations of the WDLs
+    let new_new_template = NewTemplate {
+        name: new_template.name,
+        pipeline_id: new_template.pipeline_id,
+        description: new_template.description,
+        test_wdl: test_wdl_location,
+        eval_wdl: eval_wdl_location,
+        created_by: new_template.created_by,
+    };
+
+    // Create the template
+    create(req, new_new_template, pool).await
 }
 
 /// Handles requests to /templates/{id} for updating a template
@@ -318,7 +376,7 @@ async fn create(
 async fn update(
     req: HttpRequest,
     id_param: web::Path<String>,
-    web::Json(template_changes): web::Json<TemplateChangeset>,
+    template_changes: TemplateChangeset,
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
 ) -> impl Responder {
@@ -343,11 +401,15 @@ async fn update(
 
     // If the user wants to update either of the WDLs, store and validate them
     if let Some(test_wdl) = &template_changes.test_wdl {
-        let test_wdl_location = validate_and_store_wdl(&client, &conn, test_wdl, WdlType::Test, &id_param).await?;
+        let test_wdl_temp_file = get_wdl_as_temp_file(&client, test_wdl).await?;
+        let test_wdl_location =
+            validate_and_store_wdl(&client, &conn, &test_wdl_temp_file, WdlType::Test, &id_param).await?;
         processed_template_changes.test_wdl = Some(test_wdl_location);
     }
     if let Some(eval_wdl) = &template_changes.eval_wdl {
-        let eval_wdl_location = validate_and_store_wdl(&client, &conn, eval_wdl, WdlType::Eval, &id_param).await?;
+        let eval_wdl_temp_file = get_wdl_as_temp_file(&client, eval_wdl).await?;
+        let eval_wdl_location =
+            validate_and_store_wdl(&client, &conn, &eval_wdl_temp_file, WdlType::Eval, &id_param).await?;
         processed_template_changes.eval_wdl = Some(eval_wdl_location);
     }
 
@@ -572,35 +634,141 @@ async fn download_wdl(
     }
 }
 
-/// Convenience function for downloading the wdl at `wdl_location`, validating it, storing it, and
-/// returning its stored location. `wdl_type` refers to whether the wdl is a test or eval wdl.
-/// `identifier` should be an identifier for the entity to which the wdl belongs (e.g. the
-/// template's name or id)
+/// Attempts to create a NewTemplate instance from the fields in `payload`.  Returns an error in the
+/// form of an HttpResponse if there are missing or unexpected fields, or some other error occurs
+async fn get_new_template_from_multipart(
+    payload: Multipart,
+    client: &Client,
+    conn: &PgConnection,
+) -> Result<NewTemplate, HttpResponse> {
+    // The fields we expect from the multipart payload
+    const EXPECTED_TEXT_FIELDS: [&'static str; 4] =
+        ["name", "description", "pipeline_id", "created_by"];
+    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
+    // The fields that are required from the multipart payload
+    const REQUIRED_TEXT_FIELDS: [&'static str; 2] = ["name", "pipeline_id"];
+    const REQUIRED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
+    // Get the data from the multipart payload
+    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(
+        payload,
+        &EXPECTED_TEXT_FIELDS.to_vec(),
+        &EXPECTED_FILE_FIELDS.to_vec(),
+        &REQUIRED_TEXT_FIELDS.to_vec(),
+        &REQUIRED_FILE_FIELDS.to_vec(),
+    )
+    .await?;
+    // Convert pipeline_id to a UUID
+    let pipeline_id = {
+        let pipeline_id_str = text_data_map
+            .get("pipeline_id")
+            .expect("Failed to retrieve pipeline_id from text_data_map. This should not happen.");
+        match Uuid::parse_str(pipeline_id_str) {
+            Ok(pipeline_id) => pipeline_id,
+            Err(e) => {
+                error!("{}", e);
+                // If it doesn't parse successfully, return an error to the user
+                return Err(HttpResponse::BadRequest().json(ErrorBody {
+                    title: "ID formatted incorrectly".to_string(),
+                    status: 400,
+                    detail: "ID must be formatted as a Uuid".to_string(),
+                }));
+            }
+        }
+    };
+    // Store and validate the wdls
+    let name = text_data_map
+        .remove("name")
+        .expect("Failed to retrieve name from text_data_map.  This should not happen.");
+    let test_wdl = file_data_map
+        .remove("test_wdl")
+        .expect("Failed to retrieve test_wdl from file_data_map. This should not happen.");
+    let eval_wdl = file_data_map
+        .remove("eval_wdl")
+        .expect("Failed to retrieve eval_wdl from file_data_map. This should not happen.");
+    let test_wdl_location = validate_and_store_wdl(
+        client,
+        &conn,
+        &test_wdl,
+        WdlType::Test,
+        &name,
+    )
+    .await?;
+    let eval_wdl_location = validate_and_store_wdl(
+        client,
+        &conn,
+        &eval_wdl,
+        WdlType::Eval,
+        &name,
+    )
+    .await?;
+
+    // Put the data in a NewTemplate and return
+    Ok(NewTemplate {
+        // We can expect here because we checked above that text_data_map contains name
+        name,
+        pipeline_id,
+        description: text_data_map.remove("description"),
+        test_wdl: test_wdl_location,
+        eval_wdl: eval_wdl_location,
+        created_by: text_data_map.remove("created_by"),
+    })
+}
+
+/// Convenience function for validating `wdl_file`, storing it, and returning its stored location.
+/// `wdl_type` refers to whether the wdl is a test or eval wdl. `identifier` should be an identifier
+/// for the entity to which the wdl belongs (e.g. the template's name or id)
 async fn validate_and_store_wdl(
     client: &Client,
     conn: &PgConnection,
-    wdl_location: &str,
+    wdl_file: &NamedTempFile,
     wdl_type: WdlType,
-    identifier: &str
+    identifier: &str,
 ) -> Result<String, HttpResponse> {
-    // Get the wdl and stick it in a temp file first so we can validate it
-    let wdl_string: String = match test_resource_requests::get_resource_as_string(client, wdl_location).await {
-        Ok(wdl_string) => wdl_string,
-        // If we failed to get it, return an error response
-        Err(e) => {
-            debug!("Encountered error trying to retrieve at {}: {}", wdl_location, e);
-            return Err(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Failed to retrieve WDL".to_string(),
-                status: 500,
-                detail: format!(
-                    "Attempt to retrieve WDL at {} resulted in error: {}",
+    // Validate the wdl
+    validate_wdl(wdl_file.path(), wdl_type, identifier).await?;
+    // Store it
+    // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
+    // CARROT won't work properly anyway
+    store_wdl(
+        client,
+        conn,
+        wdl_file.path().to_str().unwrap_or_else(|| {
+            panic!(
+                "Failed to get wdl temp file path {:?} as str",
+                wdl_file.path()
+            )
+        }),
+        wdl_type,
+    )
+    .await
+}
+
+/// Retrieves the WDL at `wdl_location`, writes it to a temporary file, and returns that temporary
+/// file.  If any part of this fails, returns an appropriate error message as an HttpResponse
+async fn get_wdl_as_temp_file(client: &Client, wdl_location: &str) -> Result<NamedTempFile, HttpResponse> {
+    // Retrieve the wdl from wherever it's stored
+    let wdl_string: String =
+        match test_resource_requests::get_resource_as_string(client, wdl_location).await {
+            Ok(wdl_string) => wdl_string,
+            // If we failed to get it, return an error response
+            Err(e) => {
+                debug!(
+                    "Encountered error trying to retrieve at {}: {}",
                     wdl_location, e
-                ),
-            }))
-        }
-    };
-    let wdl_temp_file = match temp_storage::get_temp_file(&wdl_string) {
-        Ok(wdl_temp_file) => wdl_temp_file,
+                );
+                return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Failed to retrieve WDL".to_string(),
+                    status: 500,
+                    detail: format!(
+                        "Attempt to retrieve WDL at {} resulted in error: {}",
+                        wdl_location, e
+                    ),
+                }));
+            }
+        };
+    // Put it in a temp file
+    match temp_storage::get_temp_file(&wdl_string) {
+        Ok(wdl_temp_file) => Ok(wdl_temp_file),
         Err(e) => {
             debug!(
                 "Encountered error trying to temporarily store wdl from {} for validation: {}",
@@ -613,16 +781,9 @@ async fn validate_and_store_wdl(
                     "Attempt to temporarily store WDL from {} resulted in error: {}",
                     wdl_location, e
                 ),
-            }))
+            }));
         }
-    };
-    // Validate the wdl
-    validate_wdl(wdl_temp_file.path(), wdl_type, identifier).await?;
-    // Store it
-    // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
-    // CARROT won't work properly anyway
-    store_wdl(client, conn, wdl_temp_file.path().to_str().unwrap_or_else(|| panic!("Failed to get wdl temp file path {:?} as str", wdl_temp_file.path())), wdl_type).await
-
+    }
 }
 
 /// Validates the specified WDL and returns either the unit type if it's valid or an appropriate
@@ -659,7 +820,7 @@ async fn validate_wdl(
                             wdl_type, msg
                         ),
                     })
-                },
+                }
                 _ => {
                     error!("{:?}", e);
                     default_500(&e)
@@ -751,7 +912,18 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/templates")
             .route(web::get().to(find))
-            .route(web::post().to(create)),
+            .route(
+                web::route()
+                    .guard(guard::Post())
+                    .guard(guard::Header("Content-Type", "application/json"))
+                    .to(create_from_json),
+            )
+            .route(
+                web::route()
+                    .guard(guard::Post())
+                    .guard(guard::Header("Content-Type", "multipart/form-data"))
+                    .to(create_from_multipart),
+            ),
     );
 }
 
@@ -1137,7 +1309,7 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         load_env_config();
-        
+
         let client = Client::default();
         let pool = get_test_db_pool();
 
@@ -1168,10 +1340,13 @@ mod tests {
         valid_wdl_mock.assert();
         different_valid_wdl_mock.assert();
 
-        assert_eq!(resp.status(), http::StatusCode::OK);
+        //assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
+        assert_eq!(error_body.detail, "random nonsense");
+        /*
         let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
 
         // Verify that what's returned is the template we expect
@@ -1202,12 +1377,12 @@ mod tests {
                 .created_by
                 .expect("Created template missing created_by"),
             new_template.created_by.unwrap()
-        );
+        );*/
+
     }
 
     #[actix_rt::test]
     async fn create_failure_duplicate_name() {
-        
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
@@ -1245,11 +1420,11 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
+        assert_eq!(error_body.detail, "random nonsense");
     }
 
     #[actix_rt::test]
     async fn create_failure_invalid_wdl() {
-        
         load_env_config();
         let pool = get_test_db_pool();
 
@@ -1296,7 +1471,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_success() {
-        
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
@@ -1350,7 +1524,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_bad_uuid() {
-        
         let pool = get_test_db_pool();
 
         create_test_template(&pool.get().unwrap());
@@ -1389,7 +1562,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_prohibited_params() {
-        
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());
@@ -1435,7 +1607,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_nonexistent_template() {
-        
         let pool = get_test_db_pool();
 
         create_test_template(&pool.get().unwrap());
@@ -1473,7 +1644,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_invalid_wdl() {
-        
         let pool = get_test_db_pool();
 
         let template = create_test_template(&pool.get().unwrap());

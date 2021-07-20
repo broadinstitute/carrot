@@ -71,7 +71,7 @@ sha2 = "0.9"
 # For generating random values in test data
 rand = "0.7.3"
 # For testing functions that make http requests
-mockito = "0.25.2"
+mockito = "0.30"
 # For parsing test emails
 mailparse = "0.13.0"
 serde_bytes = "0.11"

@@ -8,22 +8,22 @@ use crate::db;
 use crate::models::report::{NewReport, ReportChangeset, ReportData, ReportQuery, UpdateError};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::routes::multipart_handling;
 use actix_multipart::Multipart;
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder, guard};
 use actix_web::web::{BufMut, BytesMut};
-use futures::{ StreamExt, TryStreamExt };
+use actix_web::{error::BlockingError, guard, web, HttpRequest, HttpResponse, Responder};
+use futures::{StreamExt, TryStreamExt};
+use hyper::net::HttpsStream::Http;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use uuid::Uuid;
-use tempfile::NamedTempFile;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Write, BufReader, Read};
+use std::fs::{read_to_string, File};
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::fs::{File, read_to_string};
-use crate::routes::multipart_handling;
-use hyper::net::HttpsStream::Http;
+use tempfile::NamedTempFile;
+use uuid::Uuid;
 
 /// Handles requests to /reports/{id} for retrieving report info by report_id
 ///
@@ -145,10 +145,10 @@ async fn find(
 /// Panics if attempting to connect to the database results in an error
 async fn create_from_json(
     web::Json(new_report): web::Json<NewReport>,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Create the record
-    create(new_report, pool)
+    create(new_report, pool).await
 }
 
 /// Handles requests to /reports with content-type multipart/form-data for creating reports
@@ -164,17 +164,17 @@ async fn create_from_json(
 /// Panics if attempting to connect to the database results in an error
 async fn create_from_multipart(
     payload: Multipart,
-    pool: web::Data<db::DbPool>
+    pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Process the payload
     let new_report: NewReport = get_new_report_from_multipart(payload).await?;
     // Create the record
-    create(new_report, pool)
+    create(new_report, pool).await
 }
 
 /// Creates a report from `new_report`
 ///
-/// It connects to the db via a connection from `pool`, creates a report with the specified
+/// Connects to the db via a connection from `pool`, creates a report with the specified
 /// parameters, and returns the created report, or an error message if creating the report fails for
 /// some reason
 ///
@@ -184,7 +184,6 @@ async fn create(
     new_report: NewReport,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-
     // Insert in new thread
     let res = web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -208,18 +207,59 @@ async fn create(
     Ok(res)
 }
 
-/// Handles requests to /reports/{id} for updating a report
+/// Handles requests to /reports/{id} with content-type application/json for updating reports
 ///
-/// This function is called by Actix-Web when a put request is made to the /reports/{id} mapping
+/// Wrapper for [`update`] for handling json requests. This function is called by Actix-Web when a
+/// put request is made to the /reports/{id} mapping with the content-type header set to
+/// application/json
 /// It deserializes the request body to a ReportChangeset, connects to the db via a connection
 /// from `pool`, updates the specified report, and returns the updated report or an error
 /// message if some error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn update(
+async fn update_from_json(
+    id: web::Path<String>,
+    web::Json(report_changes): web::Json<ReportChangeset>,
+    pool: web::Data<db::DbPool>,
+) -> Result<HttpResponse, actix_web::Error> {
+    // Update the record
+    update(id, report_changes, pool).await
+}
+
+/// Handles requests to /reports with content-type multipart/form-data for updating reports
+///
+/// Wrapper for [`update`] for handling multipart requests. This function is called by Actix-Web
+/// when a put request is made to the /reports/{id} mapping with the content-type header set to
+/// multipart/form-data
+/// It deserializes the request body to a NewReport, connects to the db via a connection from
+/// It deserializes the request body to a ReportChangeset, connects to the db via a connection
+/// from `pool`, updates the specified report, and returns the updated report or an error
+/// message if some error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn update_from_multipart(
     id: web::Path<String>,
     payload: Multipart,
+    pool: web::Data<db::DbPool>,
+) -> Result<HttpResponse, actix_web::Error> {
+    // Process the payload
+    let report_changes: ReportChangeset = get_report_changeset_from_multipart(payload).await?;
+    // Update the record
+    update(id, report_changes, pool).await
+}
+
+/// Handles requests to /reports/{id} for updating a report
+///
+/// Connects to the db via a connection from `pool`, updates the specified report, and returns the
+/// updated report or an error message if some error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn update(
+    id: web::Path<String>,
+    report_changes: ReportChangeset,
     pool: web::Data<db::DbPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Parse ID into Uuid
@@ -235,9 +275,6 @@ async fn update(
             }));
         }
     };
-
-    // Process the payload
-    let report_changes: ReportChangeset = get_report_changeset_from_multipart(payload).await?;
 
     // Update in new thread
     let res = web::block(move || {
@@ -346,76 +383,77 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 /// Attempts to create a NewReport instance from the fields in `payload`.  Returns an error in the
 /// form of an HttpResponse if there are missing or unexpected fields, or some other error occurs
 async fn get_new_report_from_multipart(payload: Multipart) -> Result<NewReport, HttpResponse> {
-    // The fields we expect from the multipart payload
+    // The fields we expect from the multipart payload (including optional ones)
     const EXPECTED_TEXT_FIELDS: [&'static str; 3] = ["name", "description", "created_by"];
     const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["notebook", "config"];
+    // The fields that are required from the multipart payload
+    const REQUIRED_TEXT_FIELDS: [&'static str; 1] = ["name"];
+    const REQUIRED_FILE_FIELDS: [&'static str; 1] = ["notebook"];
     // Get the data from the multipart payload
-    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(payload, &EXPECTED_TEXT_FIELDS.to_vec(), &EXPECTED_FILE_FIELDS.to_vec()).await?;
-    // Return an error response if any required fields are missing
-    if !text_data_map.contains_key("name")  {
-        return Err(HttpResponse::BadRequest().json(ErrorBody{
-            title: "Missing required field".to_string(),
-            status: 400,
-            detail: "Payload does not contain required field: name".to_string()
-        }))
-    }
-    else if !file_data_map.contains_key("notebook") {
-        return Err(HttpResponse::BadRequest().json(ErrorBody{
-            title: "Missing required field".to_string(),
-            status: 400,
-            detail: "Payload does not contain required field: notebook".to_string()
-        }))
-    }
+    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(
+        payload,
+        &EXPECTED_TEXT_FIELDS.to_vec(),
+        &EXPECTED_FILE_FIELDS.to_vec(),
+        &REQUIRED_TEXT_FIELDS.to_vec(),
+        &REQUIRED_FILE_FIELDS.to_vec(),
+    )
+    .await?;
     // Convert the files into json so we can store them in the DB
     let notebook_json: Value = {
         // Get the file from our data map
-        let notebook_file = file_data_map.get("notebook")
+        let notebook_file = file_data_map
+            .get("notebook")
             // We can expect here because we checked above that the file_data_map has a notebook val
             .expect("Failed to retrieve notebook from file_data_map. This should not happen.");
         // Parse it as json
         read_file_to_json(notebook_file.path())?
     };
     let config_json: Option<Value> = match file_data_map.remove("config") {
-        Some(config_file) => {
-            Some(read_file_to_json(config_file.path())?)
-        },
-        None => None
+        Some(config_file) => Some(read_file_to_json(config_file.path())?),
+        None => None,
     };
     // Put the data in a NewReport and return
-    Ok(NewReport{
+    Ok(NewReport {
         // We can expect here because we checked above that text_data_map contains name
-        name: text_data_map.remove("name").expect("Failed to retrieve name from text_data_map. This should not happen."),
+        name: text_data_map
+            .remove("name")
+            .expect("Failed to retrieve name from text_data_map. This should not happen."),
         description: text_data_map.remove("description"),
         notebook: notebook_json,
         config: config_json,
-        created_by: text_data_map.remove("created_by")
+        created_by: text_data_map.remove("created_by"),
     })
 }
 
 /// Attempts to create a ReportChangeset instance from the fields in `payload`.  Returns an error in
 /// the form of an HttpResponse if there are missing or unexpected fields, or some other error
 /// occurs
-async fn get_report_changeset_from_multipart(payload: Multipart) -> Result<ReportChangeset, HttpResponse> {
+async fn get_report_changeset_from_multipart(
+    payload: Multipart,
+) -> Result<ReportChangeset, HttpResponse> {
     // The fields we expect from the multipart payload
     const EXPECTED_TEXT_FIELDS: [&'static str; 2] = ["name", "description"];
     const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["notebook", "config"];
     // Get the data from the multipart payload
-    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(payload, &EXPECTED_TEXT_FIELDS.to_vec(), &EXPECTED_FILE_FIELDS.to_vec()).await?;
+    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(
+        payload,
+        &EXPECTED_TEXT_FIELDS.to_vec(),
+        &EXPECTED_FILE_FIELDS.to_vec(),
+        &[].to_vec(),
+        &[].to_vec(),
+    )
+    .await?;
     // Convert the files into json so we can store them in the DB
     let notebook_json: Option<Value> = match file_data_map.remove("notebook") {
-        Some(notebook_file) => {
-            Some(read_file_to_json(notebook_file.path())?)
-        },
-        None => None
+        Some(notebook_file) => Some(read_file_to_json(notebook_file.path())?),
+        None => None,
     };
     let config_json: Option<Value> = match file_data_map.remove("config") {
-        Some(config_file) => {
-            Some(read_file_to_json(config_file.path())?)
-        },
-        None => None
+        Some(config_file) => Some(read_file_to_json(config_file.path())?),
+        None => None,
     };
     // Put the data in a NewReport and return
-    Ok(ReportChangeset{
+    Ok(ReportChangeset {
         name: text_data_map.remove("name"),
         description: text_data_map.remove("description"),
         notebook: notebook_json,
@@ -426,24 +464,30 @@ async fn get_report_changeset_from_multipart(payload: Multipart) -> Result<Repor
 // Attempts to read `json_file` and parse to a json Value
 fn read_file_to_json(json_file_path: &Path) -> Result<Value, HttpResponse> {
     // Read the file contents to a string
-    let json_string =  match read_to_string(json_file_path) {
+    let json_string = match read_to_string(json_file_path) {
         Ok(json_string) => json_string,
         Err(e) => {
-            return Err(HttpResponse::BadRequest().json(ErrorBody{
+            return Err(HttpResponse::BadRequest().json(ErrorBody {
                 title: "Failed to parse notebook as Json".to_string(),
                 status: 400,
-                detail: format!("Encountered the following error when trying to parse notebook as Json: {}", e)
+                detail: format!(
+                    "Encountered the following error when trying to parse notebook as Json: {}",
+                    e
+                ),
             }));
         }
     };
     // Parse string as json
     match serde_json::from_str(&json_string) {
         Ok(file_as_json) => Ok(file_as_json),
-        Err(e) => Err(HttpResponse::BadRequest().json(ErrorBody{
+        Err(e) => Err(HttpResponse::BadRequest().json(ErrorBody {
             title: "Failed to parse notebook as Json".to_string(),
             status: 400,
-            detail: format!("Encountered the following error when trying to parse notebook as Json: {}", e)
-        }))
+            detail: format!(
+                "Encountered the following error when trying to parse notebook as Json: {}",
+                e
+            ),
+        })),
     }
 }
 
@@ -466,17 +510,38 @@ fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/reports/{id}")
             .route(web::get().to(find_by_id))
-            .route(web::put().to(update))
+            .route(
+                web::route()
+                    .guard(guard::Put())
+                    .guard(guard::Header("Content-Type", "application/json"))
+                    .to(update_from_json),
+            )
+            .route(
+                web::route()
+                    .guard(guard::Put())
+                    .guard(guard::Header("Content-Type", "multipart/form-data"))
+                    .to(update_from_multipart),
+            )
             .route(web::delete().to(delete_by_id)),
     );
     cfg.service(
         web::resource("/reports")
             .route(web::get().to(find))
-            .route(web::route().guard(guard::Post()).guard(guard::Header("Content-Type", "application/json")).to(create_from_json))
-	    .route(web::route().guard(guard::Post()).guard(guard::Header("Content-Type", "multipart/form-data")).to(create_from_multipart)),
+            .route(
+                web::route()
+                    .guard(guard::Post())
+                    .guard(guard::Header("Content-Type", "application/json"))
+                    .to(create_from_json),
+            )
+            .route(
+                web::route()
+                    .guard(guard::Post())
+                    .guard(guard::Header("Content-Type", "multipart/form-data"))
+                    .to(create_from_multipart),
+            ),
     );
 }
-            
+
 /// Attaches a reporting-disabled error message REST mapping to a service cfg
 fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -500,18 +565,18 @@ mod tests {
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
+    use actix_multipart_rfc7578::client::multipart;
+    use actix_web::client::Client;
+    use actix_web::dev::Server;
+    use actix_web::web::Bytes;
     use actix_web::{http, test, App, HttpServer};
     use chrono::Utc;
     use diesel::PgConnection;
-    use serde_json::Value;
-    use uuid::Uuid;
-    use actix_multipart_rfc7578::client::multipart;
-    use std::fs::read_to_string;
-    use actix_web::web::Bytes;
-    use actix_web::dev::Server;
-    use actix_web::client::Client;
-    use std::env;
     use futures::{poll, stream::Stream};
+    use serde_json::Value;
+    use std::env;
+    use std::fs::read_to_string;
+    use uuid::Uuid;
 
     fn insert_test_report(conn: &PgConnection) -> ReportData {
         let new_report = NewReport {
@@ -796,6 +861,123 @@ mod tests {
             error_body.detail,
             "No reports found with the specified parameters"
         );
+    }
+
+    #[actix_rt::test]
+    async fn create_success() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
+
+        let new_report = NewReport {
+            name: String::from("Kevin's test"),
+            description: Some(String::from("Kevin's test description")),
+            notebook: json!({"cells":[{"test": "test"}]}),
+            config: Some(json!({"cpu": "2"})),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/reports")
+            .set_json(&new_report)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_report: ReportData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_report.name, new_report.name);
+        assert_eq!(
+            test_report
+                .description
+                .expect("Created report missing description"),
+            new_report.description.unwrap()
+        );
+        assert_eq!(
+            test_report
+                .created_by
+                .expect("Created report missing created_by"),
+            new_report.created_by.unwrap()
+        );
+        assert_eq!(test_report.notebook, new_report.notebook);
+        assert_eq!(test_report.config, new_report.config);
+    }
+
+    #[actix_rt::test]
+    async fn create_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_disabled),
+        )
+        .await;
+
+        let new_report = NewReport {
+            name: String::from("Kevin's test"),
+            description: Some(String::from("Kevin's test description")),
+            notebook: json!({"cells":[{"test": "test"}]}),
+            config: Some(json!({"cpu": "2"})),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/reports")
+            .set_json(&new_report)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
+    async fn create_failure() {
+        let pool = get_test_db_pool();
+
+        let report = insert_test_report(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
+
+        let new_report = NewReport {
+            name: report.name.clone(),
+            notebook: json!({"cells":[{"test": "test"}]}),
+            config: Some(json!({"cpu": "2"})),
+            description: Some(String::from("Kevin's test description")),
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/reports")
+            .set_json(&new_report)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Server error");
+        assert_eq!(error_body.status, 500);
     }
     /* TODO: Figure out what to do with these
     #[actix_rt::test]

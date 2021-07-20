@@ -1,21 +1,21 @@
 //! Defines functionality for storing and accessing WDL files
 
 use crate::config;
+use crate::models::wdl_hash::{WdlDataToHash, WdlHashData};
 use crate::requests::test_resource_requests;
 use actix_web::client::Client;
+use diesel::PgConnection;
 use std::fmt;
 use std::fs;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use diesel::PgConnection;
-use crate::models::wdl_hash::{WdlHashData, WdlDataToHash};
 
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
     Request(test_resource_requests::Error),
-    DB(diesel::result::Error)
+    DB(diesel::result::Error),
 }
 
 impl fmt::Display for Error {
@@ -23,7 +23,7 @@ impl fmt::Display for Error {
         match self {
             Error::Request(e) => write!(f, "WDL Storage Error Request {}", e),
             Error::IO(e) => write!(f, "WDL Storage Error IO {}", e),
-            Error::DB(e) => write!(f, "WDL Storage Error DB {}", e)
+            Error::DB(e) => write!(f, "WDL Storage Error DB {}", e),
         }
     }
 }
@@ -67,12 +67,21 @@ pub async fn store_wdl(
     let new_wdl_storage_location = write_wdl(&wdl_string, &dir_path, wdl_file_name)?;
     // Get the path as a string
     // Okay to unwrap here, because non-Utf8 paths are a problem for us anyway
-    let wdl_path_as_string: String = String::from(new_wdl_storage_location.to_str().unwrap_or_else(|| panic!("WDL location is non-utf8 path: {:?}", new_wdl_storage_location)));
+    let wdl_path_as_string: String =
+        String::from(new_wdl_storage_location.to_str().unwrap_or_else(|| {
+            panic!(
+                "WDL location is non-utf8 path: {:?}",
+                new_wdl_storage_location
+            )
+        }));
     // Write a hash record for it
-    WdlHashData::create(conn, WdlDataToHash {
-        location: wdl_path_as_string.clone(),
-        data: wdl_string
-    })?;
+    WdlHashData::create(
+        conn,
+        WdlDataToHash {
+            location: wdl_path_as_string.clone(),
+            data: wdl_string,
+        },
+    )?;
 
     Ok(wdl_path_as_string)
 }
@@ -97,16 +106,17 @@ fn write_wdl(
 
 /// Hashes wdl_string and checks if a record of it already exists.  If so, returns the existing
 /// wdl's location.  If not, returns None
-fn check_for_existing_wdl(wdl_string: &str, conn: &PgConnection) -> Result<Option<String>, diesel::result::Error> {
+fn check_for_existing_wdl(
+    wdl_string: &str,
+    conn: &PgConnection,
+) -> Result<Option<String>, diesel::result::Error> {
     // Check if the wdl exists already
     let existing_wdl_hashes = WdlHashData::find_by_data_to_hash(conn, wdl_string)?;
 
     // If we got a result back, return the location for the first record, otherwise return none
     match existing_wdl_hashes.get(0) {
-        Some(wdl_hash_rec) => {
-            Ok(Some(wdl_hash_rec.location.to_owned()))
-        },
-        None => Ok(None)
+        Some(wdl_hash_rec) => Ok(Some(wdl_hash_rec.location.to_owned())),
+        None => Ok(None),
     }
 }
 
@@ -122,12 +132,12 @@ mod tests {
     use crate::unit_test_util;
     use crate::util::wdl_storage::{store_wdl, Error};
     use actix_web::client::Client;
+    use diesel::PgConnection;
     use mockito::Mock;
     use std::fs::read_to_string;
     use std::path::PathBuf;
     use tempfile::{tempdir, TempDir};
     use uuid::Uuid;
-    use diesel::PgConnection;
 
     #[actix_rt::test]
     async fn store_wdl_success() {
@@ -145,7 +155,9 @@ mod tests {
             .create();
         let wdl_location: String = format!("{}/store_wdl_success", mockito::server_url());
 
-        let wdl_path: String = store_wdl(&client, &conn, &wdl_location, "test.wdl").await.unwrap();
+        let wdl_path: String = store_wdl(&client, &conn, &wdl_location, "test.wdl")
+            .await
+            .unwrap();
 
         // Verify that we wrote it correctly
         let wdl_string = read_to_string(&wdl_path).unwrap();
@@ -166,13 +178,18 @@ mod tests {
             .with_header("content_type", "text/plain")
             .with_body("Body of test wdl")
             .create();
-        let wdl_location: String = format!("{}/store_wdl_success_already_exists", mockito::server_url());
+        let wdl_location: String =
+            format!("{}/store_wdl_success_already_exists", mockito::server_url());
 
         // Write the wdl once
-        let existent_wdl_path: String = store_wdl(&client, &conn, &wdl_location, "test.wdl").await.unwrap();
+        let existent_wdl_path: String = store_wdl(&client, &conn, &wdl_location, "test.wdl")
+            .await
+            .unwrap();
 
         // Now write it again so we can see if it writes to the same place
-        let wdl_path: String = store_wdl(&client, &conn, &wdl_location, "test.wdl").await.unwrap();
+        let wdl_path: String = store_wdl(&client, &conn, &wdl_location, "test.wdl")
+            .await
+            .unwrap();
 
         // Verify that we wrote it correctly
         let wdl_string = read_to_string(&wdl_path).unwrap();

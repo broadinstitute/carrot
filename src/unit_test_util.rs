@@ -2,20 +2,20 @@
 
 use crate::config;
 use crate::db;
+use actix_web::client::Client;
+use actix_web::dev::{HttpServiceFactory, Server};
+use actix_web::web::ServiceConfig;
+use actix_web::{web, App, HttpServer};
+use core::time;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use dotenv;
-use std::{env, thread};
-use std::io::Write;
-use std::sync::Once;
-use tempfile::{NamedTempFile, TempDir};
-use actix_web::{App, HttpServer, web};
-use actix_web::client::Client;
-use actix_web::dev::{Server, HttpServiceFactory};
-use actix_web::web::ServiceConfig;
-use std::ops::Deref;
 use futures::poll;
-use core::time;
+use std::io::Write;
+use std::ops::Deref;
+use std::sync::Once;
+use std::{env, thread};
+use tempfile::{NamedTempFile, TempDir};
 
 embed_migrations!("migrations");
 
@@ -115,7 +115,8 @@ where
             .data(Client::default()) // Allow worker threads to get client for making REST calls
             .service(web::scope("/api/test/").configure(route)) //Get route mappings for v1 api from app module
     })
-    .bind(address.clone()).expect("Failed to set up test server")
+    .bind(address.clone())
+    .expect("Failed to set up test server")
     .run();
 
     (TestServer(server), address)

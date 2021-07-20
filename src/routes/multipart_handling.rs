@@ -1,15 +1,15 @@
 //! Defines functionality for processing multipart data received by API routes defined within the
 //! routes submodules
 
+use crate::routes::error_handling::ErrorBody;
 use actix_multipart::Multipart;
-use std::fmt;
-use tempfile::NamedTempFile;
-use std::collections::HashMap;
-use futures::{TryStreamExt, StreamExt};
-use actix_web::web::{BytesMut, BufMut};
-use std::io::Write;
+use actix_web::web::{BufMut, BytesMut};
 use actix_web::HttpResponse;
-use crate::routes::error_body::ErrorBody;
+use futures::{StreamExt, TryStreamExt};
+use std::collections::HashMap;
+use std::fmt;
+use std::io::Write;
+use tempfile::NamedTempFile;
 
 #[derive(Debug)]
 pub enum Error {
@@ -20,17 +20,26 @@ pub enum Error {
     /// Indicates the presence of an unexpected field
     UnexpectedField(String),
     /// Failure to retrieve necessary information (such as content disposition or name) from a field
-    FieldFormat(String)
+    FieldFormat(String),
+    /// Indicates the absence of a required field
+    MissingField(String),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Multipart(e) => write!(f, "Multipart Handling Error Multipart {}", e),
-            Error::ParseAsString(s, e) => write!(f, "Multipart Handling Error ParseAsString data: {}, error: {}", s, e),
+            Error::ParseAsString(s, e) => write!(
+                f,
+                "Multipart Handling Error ParseAsString data: {}, error: {}",
+                s, e
+            ),
             Error::IO(e) => write!(f, "Multipart Handling Error IO {}", e),
-            Error::UnexpectedField(s) => write!(f, "Multipart Handling Error Unexpected Field {}", s),
+            Error::UnexpectedField(s) => {
+                write!(f, "Multipart Handling Error Unexpected Field {}", s)
+            }
             Error::FieldFormat(s) => write!(f, "Multipart Handling Error Field Format {}", s),
+            Error::MissingField(s) => write!(f, "Multipart Handling Error Missing Field {}", s),
         }
     }
 }
@@ -74,6 +83,13 @@ impl From<Error> for HttpResponse {
                     status: 400,
                     detail: format!("Encountered the following error attempting to parse multipart field: {}", s)
                 }
+            ),
+            Error::MissingField(s) => HttpResponse::BadRequest().json(
+                ErrorBody{
+                    title: "Missing required field".to_string(),
+                    status: 400,
+                    detail: format!("Payload does not contain required field: {}", s)
+                }
             )
         }
     }
@@ -101,8 +117,13 @@ impl From<std::io::Error> for Error {
 /// 2. Parsing any of the fields fails,
 /// 3. Writing the data for a file field to a temporary file fails, or
 /// 4. A field is encountered that is not present in either of the expected field lists
-pub async fn extract_data_from_multipart(mut payload: Multipart, expected_text_fields: &Vec<&str>, expected_file_fields: &Vec<&str>) -> Result<(HashMap<String, String>, HashMap<String, NamedTempFile>), Error> {
-    //let mut payload = payload;
+pub async fn extract_data_from_multipart(
+    mut payload: Multipart,
+    expected_text_fields: &Vec<&str>,
+    expected_file_fields: &Vec<&str>,
+    required_text_fields: &Vec<&str>,
+    required_file_fields: &Vec<&str>,
+) -> Result<(HashMap<String, String>, HashMap<String, NamedTempFile>), Error> {
     // Build maps of the fields we process to return
     let mut string_map: HashMap<String, String> = HashMap::new();
     let mut file_map: HashMap<String, NamedTempFile> = HashMap::new();
@@ -112,14 +133,20 @@ pub async fn extract_data_from_multipart(mut payload: Multipart, expected_text_f
         let content_disposition = match field.content_disposition() {
             Some(val) => val,
             None => {
-                return Err(Error::FieldFormat(format!("Failed to parse content disposition for field {:?}", field)));
+                return Err(Error::FieldFormat(format!(
+                    "Failed to parse content disposition for field {:?}",
+                    field
+                )));
             }
         };
         // Get the name of the field
         let field_name = match content_disposition.get_name() {
             Some(val) => val,
             None => {
-                return Err(Error::FieldFormat(format!("Failed to parse name from content disposition {:?}", content_disposition)));
+                return Err(Error::FieldFormat(format!(
+                    "Failed to parse name from content disposition {:?}",
+                    content_disposition
+                )));
             }
         };
         // Determine what to do with the data based on the name
@@ -132,14 +159,14 @@ pub async fn extract_data_from_multipart(mut payload: Multipart, expected_text_f
                 data_buffer.put(data?);
             }
             // Convert our buffer to a string and assign it
-            let data_string = match std::str::from_utf8(&data_buffer){
+            let data_string = match std::str::from_utf8(&data_buffer) {
                 Ok(data_string) => data_string,
                 Err(e) => {
                     return Err(Error::ParseAsString(format!("{:?}", data_buffer), e));
                 }
             };
             // Put it in our data map so we can stick it in the report struct at the end
-            string_map.insert(String::from(field_name),String::from(data_string));
+            string_map.insert(String::from(field_name), String::from(data_string));
         }
         // If it's an expected file field, write it to a temp file
         else if expected_file_fields.contains(&field_name) {
@@ -150,20 +177,51 @@ pub async fn extract_data_from_multipart(mut payload: Multipart, expected_text_f
                     Ok(data) => {
                         // Write the data to our file
                         data_file.write_all(&data)?;
-                    },
+                    }
                     Err(e) => {
                         return Err(Error::Multipart(e));
                     }
                 }
             }
             // Put it in our data map so we can stick it in the report struct at the end
-            file_map.insert(String::from(field_name),data_file);
+            file_map.insert(String::from(field_name), data_file);
         }
         // If it's not an expected field, return an error
-        else{
+        else {
             // Return an error if there's a field we don't expect
             return Err(Error::UnexpectedField(String::from(field_name)));
         }
     }
+    // Verify we have found all the required fields
+    check_for_required_fields(
+        required_text_fields,
+        required_file_fields,
+        &string_map,
+        &file_map,
+    )?;
+
     Ok((string_map, file_map))
+}
+
+/// Returns () if `string_map` contains all the keys in `required_text_fields` and `file_map`
+/// contains all the keys in `required_file_fields`.  Otherwise, returns an error
+fn check_for_required_fields(
+    required_text_fields: &Vec<&str>,
+    required_file_fields: &Vec<&str>,
+    string_map: &HashMap<String, String>,
+    file_map: &HashMap<String, NamedTempFile>,
+) -> Result<(), Error> {
+    // Loop through both lists of required fields and return an error if any are found to not be
+    // present in the maps we expect to find them in
+    for field in required_text_fields {
+        if !string_map.contains_key(*field) {
+            return Err(Error::MissingField(String::from(*field)));
+        }
+    }
+    for field in required_file_fields {
+        if !file_map.contains_key(*field) {
+            return Err(Error::MissingField(String::from(*field)));
+        }
+    }
+    Ok(())
 }
