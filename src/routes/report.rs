@@ -10,19 +10,12 @@ use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::multipart_handling;
 use actix_multipart::Multipart;
-use actix_web::web::{BufMut, BytesMut};
 use actix_web::{error::BlockingError, guard, web, HttpRequest, HttpResponse, Responder};
 use futures::{StreamExt, TryStreamExt};
-use hyper::net::HttpsStream::Http;
-use log::{debug, error};
-use serde::{Deserialize, Serialize};
+use log::error;
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::fs;
-use std::fs::{read_to_string, File};
-use std::io::{BufReader, Read, Write};
-use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
+use std::fs::read_to_string;
+use std::path::Path;
 use uuid::Uuid;
 
 /// Handles requests to /reports/{id} for retrieving report info by report_id
@@ -510,6 +503,7 @@ fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/reports/{id}")
             .route(web::get().to(find_by_id))
+            // Multiple mappings for put based on content-type
             .route(
                 web::route()
                     .guard(guard::Put())
@@ -519,7 +513,7 @@ fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
             .route(
                 web::route()
                     .guard(guard::Put())
-                    .guard(guard::Header("Content-Type", "multipart/form-data"))
+                    .guard(guard::fn_guard(multipart_handling::multipart_content_type_guard))
                     .to(update_from_multipart),
             )
             .route(web::delete().to(delete_by_id)),
@@ -527,6 +521,7 @@ fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/reports")
             .route(web::get().to(find))
+            // Multiple mappings for post based on content-type
             .route(
                 web::route()
                     .guard(guard::Post())
@@ -536,7 +531,7 @@ fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
             .route(
                 web::route()
                     .guard(guard::Post())
-                    .guard(guard::Header("Content-Type", "multipart/form-data"))
+                    .guard(guard::fn_guard(multipart_handling::multipart_content_type_guard))
                     .to(create_from_multipart),
             ),
     );

@@ -108,13 +108,6 @@ lazy_static! {
         Err(_) => String::from("/carrot/wdl"),
     };
 
-    // Notebook Storage
-    /// Local directory in which to store notebooks for reports.  Defaults to /carrot/notebook
-    pub static ref NOTEBOOK_DIRECTORY: String = match env::var("NOTEBOOK_DIRECTORY") {
-        Ok(val) => val,
-        Err(_) => String::from("/carrot/notebook"),
-    };
-
     // GITHUB
     /// If true, enables triggering carrot test runs from github
     pub static ref ENABLE_GITHUB_REQUESTS: bool = match env::var("CARROT_ENABLE_GITHUB_REQUESTS") {
@@ -240,9 +233,6 @@ pub fn initialize() {
 
     // WDL Storage
     lazy_static::initialize(&WDL_DIRECTORY);
-
-    // Notebook Storage
-    lazy_static::initialize(&NOTEBOOK_DIRECTORY);
 
     // Emailer
     lazy_static::initialize(&EMAIL_MODE);

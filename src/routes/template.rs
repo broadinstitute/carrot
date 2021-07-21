@@ -26,6 +26,8 @@ use std::path::Path;
 use uuid::Uuid;
 use tempfile::NamedTempFile;
 use std::fs::File;
+use diesel::r2d2::{PooledConnection, ConnectionManager};
+use std::collections::HashMap;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
 /// where the only difference is whether we're using the test or eval wdl
@@ -185,7 +187,7 @@ async fn create_from_multipart(
     let new_template: NewTemplate =
         get_new_template_from_multipart(payload, &client, &conn).await?;
     // Create the template
-    create(req, new_template, pool).await
+    create(req, new_template, conn).await
 }
 
 /// Handles requests to /templates with content-type application/json for creating templates
@@ -250,7 +252,7 @@ async fn create_from_json(
     };
 
     // Create the template
-    create(req, new_new_template, pool).await
+    create(req, new_new_template, conn).await
 }
 
 /// Handles requests to /templates for creating templates
@@ -266,11 +268,10 @@ async fn create_from_json(
 async fn create(
     req: HttpRequest,
     new_template: NewTemplate,
-    pool: web::Data<db::DbPool>,
+    conn: PooledConnection<ConnectionManager<PgConnection>>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Insert in new thread
     let res = web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
 
         // Create template
         match TemplateData::create(&conn, new_template) {
@@ -303,9 +304,9 @@ async fn create(
 /// Wrapper for [`update`] for handling json requests. This function is called by Actix-Web when a
 /// put request is made to the /templates/{id} mapping with the content-type header set to
 /// application/json
-/// It deserializes the request body to a NewTemplate, connects to the db via a connection from
-/// `pool`, creates a template with the specified parameters, and returns the created template, or
-/// an error message if creating the template fails for some reason
+/// It deserializes the request body to a TemplateChangeset, connects to the db via a connection
+/// from `pool`, updates a template with the specified parameters, and returns the updated template,
+/// or an error message if updating the template fails for some reason
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
@@ -317,82 +318,6 @@ async fn update_from_json(
     pool: web::Data<db::DbPool>,
     client: web::Data<Client>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    // If either WDL is a gs uri, make sure those are allowed
-    if new_template
-        .test_wdl
-        .starts_with(gcloud_storage::GS_URI_PREFIX)
-        || new_template
-        .eval_wdl
-        .starts_with(gcloud_storage::GS_URI_PREFIX)
-    {
-        is_gs_uris_for_wdls_enabled()?;
-    }
-
-    let conn = pool.get().expect("Failed to get DB connection from pool");
-
-    // Store and validate the WDLs
-    let test_wdl_temp_file = get_wdl_as_temp_file(&client, &new_template.test_wdl).await?;
-    let test_wdl_location = validate_and_store_wdl(
-        &client,
-        &conn,
-        &test_wdl_temp_file,
-        WdlType::Test,
-        &new_template.name,
-    )
-        .await?;
-    let eval_wdl_temp_file = get_wdl_as_temp_file(&client, &new_template.eval_wdl).await?;
-    let eval_wdl_location = validate_and_store_wdl(
-        &client,
-        &conn,
-        &eval_wdl_temp_file,
-        WdlType::Eval,
-        &new_template.name,
-    )
-        .await?;
-
-    // Create a new NewTemplate with the new locations of the WDLs
-    let new_new_template = NewTemplate {
-        name: new_template.name,
-        pipeline_id: new_template.pipeline_id,
-        description: new_template.description,
-        test_wdl: test_wdl_location,
-        eval_wdl: eval_wdl_location,
-        created_by: new_template.created_by,
-    };
-
-    // Create the template
-    create(req, new_new_template, pool).await
-}
-
-/// Handles requests to /templates/{id} for updating a template
-///
-/// This function is called by Actix-Web when a put request is made to the /templates/{id} mapping
-/// It deserializes the request body to a TemplateChangeset, connects to the db via a connection
-/// from `pool`, updates the specified template, and returns the updated template or an error
-/// message if some error occurs
-///
-/// # Panics
-/// Panics if attempting to connect to the detabase results in an error
-async fn update(
-    req: HttpRequest,
-    id_param: web::Path<String>,
-    template_changes: TemplateChangeset,
-    pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
-) -> impl Responder {
-    //Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id_param) {
-        Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
-    };
 
     // Make a mutable version of the changeset in case we need to update the wdl values
     let mut processed_template_changes: TemplateChangeset = template_changes.clone();
@@ -413,9 +338,75 @@ async fn update(
         processed_template_changes.eval_wdl = Some(eval_wdl_location);
     }
 
+    // Update the template
+    update(req, id_param, processed_template_changes, conn).await
+}
+
+/// Handles requests to /templates/{id} with content-type multipart/form-data for updating templates
+///
+/// Wrapper for [`update`] for handling multipart requests. This function is called by Actix-Web
+/// when a put request is made to the /templates/{id} mapping with the content-type header set to
+/// multipart/form-data
+/// It deserializes the request body to a TemplateChangeset, connects to the db via a connection
+/// from `pool`, updates a template with the specified parameters, and returns the updated template,
+/// or an error message if updating the template fails for some reason
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
+/// poisoned
+async fn update_from_multipart(
+    req: HttpRequest,
+    id_param: web::Path<String>,
+    payload: Multipart,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<Client>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    // Process the multipart payload as a TemplateChangeset
+    let template_changes = get_template_changeset_from_multipart(
+        payload,
+        &id_param,
+        &client,
+        &conn,
+    ).await?;
+
+    // Perform the update
+    update(req, id_param, template_changes, conn).await
+}
+
+/// Handles requests to /templates/{id} for updating a template
+///
+/// This function is called by Actix-Web when a put request is made to the /templates/{id} mapping
+/// It deserializes the request body to a TemplateChangeset, connects to the db via a connection
+/// from `pool`, updates the specified template, and returns the updated template or an error
+/// message if some error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the detabase results in an error
+async fn update(
+    req: HttpRequest,
+    id_param: web::Path<String>,
+    template_changes: TemplateChangeset,
+    conn: PooledConnection<ConnectionManager<PgConnection>>,
+) -> Result<HttpResponse, actix_web::Error> {
+    //Parse ID into Uuid
+    let id = match Uuid::parse_str(&*id_param) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("{}", e);
+            // If it doesn't parse successfully, return an error to the user
+            return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                title: "ID formatted incorrectly".to_string(),
+                status: 400,
+                detail: "ID must be formatted as a Uuid".to_string(),
+            }));
+        }
+    };
+
     //Update in new thread
-    web::block(move || {
-        match TemplateData::update(&conn, id, processed_template_changes) {
+    let res = web::block(move || {
+        match TemplateData::update(&conn, id, template_changes) {
             Ok(template) => Ok(template),
             Err(e) => {
                 error!("{}", e);
@@ -443,7 +434,9 @@ async fn update(
             },
             _ => default_500(&e)
         }
-    })
+    })?;
+
+    Ok(res)
 }
 
 /// Handles DELETE requests to /templates/{id} for deleting template rows by template_id
@@ -642,23 +635,22 @@ async fn get_new_template_from_multipart(
     conn: &PgConnection,
 ) -> Result<NewTemplate, HttpResponse> {
     // The fields we expect from the multipart payload
-    const EXPECTED_TEXT_FIELDS: [&'static str; 4] =
-        ["name", "description", "pipeline_id", "created_by"];
-    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
+    const EXPECTED_TEXT_FIELDS: [&'static str; 6] =
+        ["name", "description", "pipeline_id", "created_by", "test_wdl", "eval_wdl"];
+    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl_file", "eval_wdl_file"];
     // The fields that are required from the multipart payload
     const REQUIRED_TEXT_FIELDS: [&'static str; 2] = ["name", "pipeline_id"];
-    const REQUIRED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
     // Get the data from the multipart payload
     let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(
         payload,
         &EXPECTED_TEXT_FIELDS.to_vec(),
         &EXPECTED_FILE_FIELDS.to_vec(),
         &REQUIRED_TEXT_FIELDS.to_vec(),
-        &REQUIRED_FILE_FIELDS.to_vec(),
+        &[].to_vec(),
     )
     .await?;
     // Convert pipeline_id to a UUID
-    let pipeline_id = {
+    let pipeline_id: Uuid = {
         let pipeline_id_str = text_data_map
             .get("pipeline_id")
             .expect("Failed to retrieve pipeline_id from text_data_map. This should not happen.");
@@ -675,16 +667,36 @@ async fn get_new_template_from_multipart(
             }
         }
     };
-    // Store and validate the wdls
-    let name = text_data_map
+    // Get name now so we can use it in potential error message for validating and storing wdls
+    let name: String = text_data_map
         .remove("name")
         .expect("Failed to retrieve name from text_data_map.  This should not happen.");
-    let test_wdl = file_data_map
-        .remove("test_wdl")
-        .expect("Failed to retrieve test_wdl from file_data_map. This should not happen.");
-    let eval_wdl = file_data_map
-        .remove("eval_wdl")
-        .expect("Failed to retrieve eval_wdl from file_data_map. This should not happen.");
+    // Make sure we have values for test wdl and eval wdl
+    let test_wdl: NamedTempFile = match get_wdl_from_multipart_maps(&mut text_data_map, &mut file_data_map, WdlType::Test, client).await? {
+        Some(test_wdl) => test_wdl,
+        None => {
+            return Err(HttpResponse::BadRequest().json(
+                ErrorBody {
+                    title: "Missing required field".to_string(),
+                    status: 400,
+                    detail: String::from("Payload must contain a value for either \"test_wdl\" or \"test_wdl_file\"")
+                }
+            ));
+        }
+    };
+    let eval_wdl: NamedTempFile = match get_wdl_from_multipart_maps(&mut text_data_map, &mut file_data_map, WdlType::Eval, client).await? {
+        Some(eval_wdl) => eval_wdl,
+        None => {
+            return Err(HttpResponse::BadRequest().json(
+                ErrorBody {
+                    title: "Missing required field".to_string(),
+                    status: 400,
+                    detail: String::from("Payload must contain a value for either \"eval_wdl\" or \"eval_wdl_file\"")
+                }
+            ));
+        }
+    };
+    // Store and validate the wdls
     let test_wdl_location = validate_and_store_wdl(
         client,
         &conn,
@@ -712,6 +724,95 @@ async fn get_new_template_from_multipart(
         eval_wdl: eval_wdl_location,
         created_by: text_data_map.remove("created_by"),
     })
+}
+
+/// Attempts to create a TemplateChangeset instance from the fields in `payload`.  Uses `identifier`
+/// to identify the template in error messages. Returns an error in the form of an HttpResponse if
+/// there are missing or unexpected fields, or some other error occurs
+async fn get_template_changeset_from_multipart(
+    payload: Multipart,
+    identifier: &str,
+    client: &Client,
+    conn: &PgConnection,
+) -> Result<TemplateChangeset, HttpResponse> {
+    // The fields we expect from the multipart payload
+    const EXPECTED_TEXT_FIELDS: [&'static str; 2] = ["name", "description"];
+    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl", "eval_wdl"];
+    // Get the data from the multipart payload
+    let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(
+        payload,
+        &EXPECTED_TEXT_FIELDS.to_vec(),
+        &EXPECTED_FILE_FIELDS.to_vec(),
+        &[].to_vec(),
+        &[].to_vec(),
+    )
+        .await?;
+    // Store and validate the wdls if they're present
+    let test_wdl: Option<NamedTempFile> = get_wdl_from_multipart_maps(&mut text_data_map, &mut file_data_map, WdlType::Test, client).await?;
+    let eval_wdl: Option<NamedTempFile> = get_wdl_from_multipart_maps(&mut text_data_map, &mut file_data_map, WdlType::Eval, client).await?;
+    let test_wdl_location: Option<String> = match test_wdl {
+        Some(test_wdl) => {
+            // If there is a test wdl, store and validate
+            let test_wdl_location = validate_and_store_wdl(
+                client,
+                &conn,
+                &test_wdl,
+                WdlType::Test,
+                identifier,
+            ).await?;
+            Some(test_wdl_location)
+        },
+        None => None
+    };
+    let eval_wdl_location: Option<String> = match eval_wdl {
+        Some(eval_wdl) => {
+            // If there is an eval wdl, store and validate
+            let eval_wdl_location = validate_and_store_wdl(
+                client,
+                &conn,
+                &eval_wdl,
+                WdlType::Eval,
+                identifier,
+            ).await?;
+            Some(eval_wdl_location)
+        },
+        None => None
+    };
+
+    // Put the data in a TemplateChangeset and return
+    Ok(TemplateChangeset {
+        name: text_data_map.remove("name"),
+        description: text_data_map.remove("description"),
+        test_wdl: test_wdl_location,
+        eval_wdl: eval_wdl_location,
+    })
+}
+
+/// Attempts to get the wdl of type `wdl_type` from either `text_data_map` (if it was supplied as a
+/// uri) or `file_data_map` (if it was supplied as a file).  If it was supplied as a URI, the wdl
+/// will be downloaded to a temp file, which will be returned.  If it is not present, None will be
+/// returned
+async fn get_wdl_from_multipart_maps(text_data_map: &mut HashMap<String, String>, file_data_map: &mut HashMap<String, NamedTempFile>, wdl_type: WdlType, client: &Client) -> Result<Option<NamedTempFile>, HttpResponse> {
+    // Set the keys based on the wdl type
+    let (text_key, file_key): (&str, &str) = match wdl_type{
+        WdlType::Test => ("test_wdl", "test_wdl_file"),
+        WdlType::Eval => ("eval_wdl", "eval_wdl_file")
+    };
+    if let Some(wdl_uri) = text_data_map.remove(text_key) {
+        // If it's been supplied as a uri, retrieve and return it
+        match get_wdl_as_temp_file(client,&wdl_uri).await {
+            Ok(wdl_file) => Ok(Some(wdl_file)),
+            Err(e) => Err(e)
+        }
+    }
+    else if let Some(wdl_file) = file_data_map.remove(file_key) {
+        // If it's been supplied as a file, return the file
+        Ok(Some(wdl_file))
+    }
+    else {
+        // If it's not in either, return None
+        Ok(None)
+    }
 }
 
 /// Convenience function for validating `wdl_file`, storing it, and returning its stored location.
@@ -844,7 +945,7 @@ async fn store_wdl(
     match wdl_storage::store_wdl(client, conn, wdl_location, &format!("{}.wdl", wdl_type)).await {
         Ok(wdl_local_path) => Ok(wdl_local_path),
         Err(e) => {
-            debug!(
+            error!(
                 "Encountered error trying to retrieve and store wdl at {}: {}",
                 wdl_location, e
             );
@@ -852,8 +953,8 @@ async fn store_wdl(
                 title: "Failed to store WDL".to_string(),
                 status: 500,
                 detail: format!(
-                    "Attempt to retrieve WDL at {} and store locally resulted in error: {}",
-                    wdl_location, e
+                    "Attempt to retrieve WDL and store locally resulted in error: {}",
+                    e
                 ),
             }))
         }
@@ -904,7 +1005,18 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/templates/{id}")
             .route(web::get().to(find_by_id))
-            .route(web::put().to(update))
+            .route(
+                web::route()
+                    .guard(guard::Put())
+                    .guard(guard::Header("Content-Type", "application/json"))
+                    .to(update_from_json),
+            )
+            .route(
+                web::route()
+                    .guard(guard::Put())
+                    .guard(guard::fn_guard(multipart_handling::multipart_content_type_guard))
+                    .to(update_from_multipart),
+            )
             .route(web::delete().to(delete_by_id)),
     );
     cfg.service(web::resource("/templates/{id}/test_wdl").route(web::get().to(download_test_wdl)));
@@ -921,7 +1033,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route(
                 web::route()
                     .guard(guard::Post())
-                    .guard(guard::Header("Content-Type", "multipart/form-data"))
+                    .guard(guard::fn_guard(multipart_handling::multipart_content_type_guard))
                     .to(create_from_multipart),
             ),
     );
@@ -936,6 +1048,8 @@ mod tests {
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
+    use actix_web::dev::Payload;
+    use actix_web::web::Bytes;
     use chrono::Utc;
     use diesel::PgConnection;
     use mockito::Mock;
@@ -943,6 +1057,8 @@ mod tests {
     use std::fs::read_to_string;
     use tempfile::NamedTempFile;
     use uuid::Uuid;
+    use std::ops::Deref;
+    use futures::StreamExt;
 
     fn insert_test_pipeline(conn: &PgConnection) -> PipelineData {
         let new_pipeline = NewPipeline {
@@ -1340,13 +1456,9 @@ mod tests {
         valid_wdl_mock.assert();
         different_valid_wdl_mock.assert();
 
-        //assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
-
-        assert_eq!(error_body.detail, "random nonsense");
-        /*
         let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
 
         // Verify that what's returned is the template we expect
@@ -1377,6 +1489,71 @@ mod tests {
                 .created_by
                 .expect("Created template missing created_by"),
             new_template.created_by.unwrap()
+        );
+
+    }
+
+    #[actix_rt::test]
+    async fn create_with_multipart_success() {
+        load_env_config();
+
+        let client = Client::default();
+        let pool = get_test_db_pool();
+
+        let pipeline = insert_test_pipeline(&pool.get().unwrap());
+
+        let mut app =
+            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+
+        let multipart_body = read_to_string("testdata/routes/template/valid_create_multipart.txt").unwrap().replace("{pipeline_id}", &pipeline.pipeline_id.to_string());
+        let multipart_body_bytes = Bytes::from(multipart_body);
+        let content_length = multipart_body_bytes.len();
+
+        let mut req = test::TestRequest::post()
+            .uri("/templates")
+            .header("Content-Type", "multipart/form-data; boundary=---------------------------974767299852498929531610575")
+            .header("Content-Length", content_length)
+            .set_payload(multipart_body_bytes)
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+
+        //assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        //let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.detail, "other random nonsense");
+        /*
+        // Verify that what's returned is the template we expect
+        assert_eq!(test_template.name, "Test template");
+        assert_eq!(test_template.pipeline_id, pipeline.pipeline_id);
+        assert_eq!(
+            test_template
+                .description
+                .expect("Created template missing description"),
+            "Template for testing multipart template creation"
+        );
+        assert_eq!(
+            test_template.test_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/test_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template
+                .created_by
+                .expect("Created template missing created_by"),
+            "Kevin@example.com"
         );*/
 
     }
@@ -1420,7 +1597,7 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
-        assert_eq!(error_body.detail, "random nonsense");
+        assert_eq!(error_body.detail, "Encountered the following error while trying to process your request: DatabaseError(UniqueViolation, \"duplicate key value violates unique constraint \\\"template_name_key\\\"\")");
     }
 
     #[actix_rt::test]

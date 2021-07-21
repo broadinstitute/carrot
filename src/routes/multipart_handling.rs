@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::Write;
 use tempfile::NamedTempFile;
+use actix_web::dev::RequestHead;
+use log::warn;
 
 #[derive(Debug)]
 pub enum Error {
@@ -203,6 +205,29 @@ pub async fn extract_data_from_multipart(
     Ok((string_map, file_map))
 }
 
+/// Header guard function for checking if the content type of a request head (`req`) is multipart
+///
+/// This is necessary (instead of just using `guard::Header("Content-Type","multipart/form-data")`)
+/// to account for the inclusion of the required boundary parameter in the header
+/// (e.g. `multipart/form-data;boundary="abcd"`)
+pub fn multipart_content_type_guard(req: &RequestHead) -> bool {
+    // Get the content type header from the request head
+    let content_type_header = match req.headers().get("content-type") {
+        Some(content_type) => content_type,
+        None => { return false; }
+    };
+    // Parse the header as a string
+    let content_type_string = match content_type_header.to_str() {
+        Ok(header_string) => String::from(header_string),
+        Err(e) => {
+            warn!("Failed to parse content-type header for request as string with error: {}", e);
+            return false;
+        }
+    };
+    // Check if the content type is multipart
+    content_type_string.starts_with("multipart/form-data")
+}
+
 /// Returns () if `string_map` contains all the keys in `required_text_fields` and `file_map`
 /// contains all the keys in `required_file_fields`.  Otherwise, returns an error
 fn check_for_required_fields(
@@ -224,4 +249,14 @@ fn check_for_required_fields(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[actix_rt::test]
+    async fn extract_data_from_multipart_success() {
+
+    }
+
 }
