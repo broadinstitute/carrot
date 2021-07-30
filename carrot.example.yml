@@ -1,0 +1,85 @@
+# API Config
+api:
+  host: 127.0.0.1
+  port: 8080
+# DB Config
+database:
+  url: postgres://test_framework_admin:admin@localhost:5432/test_framework_db_dev
+  threads: 4
+# Cromwell Config
+cromwell:
+  address: http://localhost:8000
+status_manager:
+  # Optional time, in seconds, to wait between updating statuses of running tests
+  # Defaults to 5 minutes if not specified
+  status_check_wait_time_in_secs: 300
+  # Optional number of consecutive failures to allow when checking run/build statuses before terminating, defaults to 5
+  allowed_consecutive_status_check_failures: 5
+wdl_storage:
+  # Where to store WDLs locally (defaults to /carrot/wdl)
+  wdl_directory: ~/carrot/wdl
+# Email config (optional)
+email:
+  # Use server if you want to connect to a mail server
+  server:
+    # Address to include in the from field
+    from: carrot@example.com
+    # Domain of the mail server
+    domain: smtp.example.com
+    # Username for the mail server
+    username: carrot@example.com
+    # Password for the mail server
+    password: password
+  # Use sendmail if you want to use the Unix sendmail utility
+  # sendmail:
+    # from: carrot@example.com
+# Config for connection to gcloud (optional)
+gcloud:
+  # Location of the sa key file for the service account to use to authenticate to gcloud
+  gcloud_sa_key_file: /path/to/key/file.json
+  # Allow retrieving wdls from gcs locations accessible by the service account
+  enable_gs_uris_for_wdl: true
+# Configuration for connecting to github and enabling triggering runs from github comments (optional)
+github:
+  # User id for the account carrot will use to connect to github
+  client_id: example_account
+  # User token for the account carrot will use to connect to github
+  client_token: example_token
+  # The Google Cloud Pubsub subscription name from which messages from github to trigger test
+  # runs will be retrieved
+  pubsub_subscription_name: projects/example/subscriptions/example
+  # The maximum number of messages to retrieve from the pubsub subscription at once (optional)
+  # Defaults to 20
+  pubsub_max_messages_per: 20,
+  # The number of time, in seconds, to wait between checks of the pubsub subscription (optional)
+  # Defaults to 60
+  pubsub_wait_time_in_secs: 60,
+# Config for building custom docker images from git repos (optional)
+custom_image_build:
+  # The host address for the docker image registry where we'll store custom docker images
+  image_registry_host: us.gcr.io/dsde-methods-carrot
+  # Config for accessing private github repos (optional)
+  private_github_access:
+    # The github username for the user to use to access private repositories
+    client_id: example_account
+    # The github user token for the user to use to access private repositories
+    client_token: example_token
+    # The GCS URL of a google kms encrypted file containing the password for the account specified by `client_id`
+    client_pass_uri: gs://example/token.encrypted
+    # The GCloud KMS keyring for decrypting `client_pass_uri`
+    kms_keyring: example-key-ring
+    # The GCloud KMS key for decrypting `client_pass_uri`
+    kms_key: example-key
+# Config for validating parts of a test
+validation:
+  # The location of the womtool jar to use to validate WDLs
+  womtool_location: /path/to/womtool.jar
+# Config for reporting functionality (optional)
+reporting:
+  # GCS directory where we'll put generated report files (in the form bucket-name/my/report/directory)
+  report_location: gs://example/reports
+  # Docker repo location of the docker image that will be used to run the report generation WDLs
+  report_docker_location: us.gcr.io/example/vis_docker:latest
+# Config for logging level of carrot
+logging:
+  level: DEBUG

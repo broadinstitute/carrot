@@ -3,7 +3,6 @@
 //! Contains functions for processing requests to create, update, and search software, along with
 //! their URI mappings
 
-use crate::config;
 use crate::db;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
 use crate::routes::disabled_features;
@@ -132,9 +131,10 @@ async fn find(
 async fn create(
     web::Json(new_software): web::Json<NewSoftware>,
     pool: web::Data<db::DbPool>,
+    git_repo_checker: web::Data<git_repos::GitRepoChecker>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Verify the repository_url points to a valid git repo
-    match git_repos::git_repo_exists(&new_software.repository_url).await {
+    match git_repo_checker.git_repo_exists(&new_software.repository_url) {
         Ok(val) => {
             // If we didn't find it, tell the user we couldn't find it
             if !val {
@@ -240,9 +240,9 @@ async fn update(
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
-pub fn init_routes(cfg: &mut web::ServiceConfig) {
+pub fn init_routes(cfg: &mut web::ServiceConfig, enable_custom_image_builds: bool) {
     // Create mappings only if software building is enabled
-    if *config::ENABLE_CUSTOM_IMAGE_BUILDS {
+    if enable_custom_image_builds {
         init_routes_software_building_enabled(cfg);
     } else {
         init_routes_software_building_disabled(cfg);
@@ -282,6 +282,7 @@ mod tests {
     use super::*;
     use crate::routes::error_handling::ErrorBody;
     use crate::unit_test_util::*;
+    use crate::util::git_repos::GitRepoChecker;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use uuid::Uuid;
@@ -295,6 +296,10 @@ mod tests {
         };
 
         SoftwareData::create(conn, new_software).expect("Failed inserting test software")
+    }
+
+    fn create_test_git_repo_checker() -> GitRepoChecker {
+        GitRepoChecker::new(None)
     }
 
     #[actix_rt::test]
@@ -502,6 +507,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
+                .data(create_test_git_repo_checker())
                 .configure(init_routes_software_building_enabled),
         )
         .await;
@@ -549,6 +555,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
+                .data(create_test_git_repo_checker())
                 .configure(init_routes_software_building_enabled),
         )
         .await;
@@ -585,6 +592,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
+                .data(create_test_git_repo_checker())
                 .configure(init_routes_software_building_enabled),
         )
         .await;

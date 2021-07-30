@@ -1,0 +1,32 @@
+api:
+  host: 127.0.0.1
+  port: 8080
+database:
+  url: postgres://test_framework_user:test@localhost:5432/test_framework_db_test
+  threads: 4
+cromwell:
+  address: http://localhost:8000
+status_manager:
+  status_check_wait_time_in_secs: 30
+  allowed_consecutive_status_check_failures: 1
+wdl_storage:
+  wdl_directory: ~/carrot/wdl
+email:
+  sendmail:
+    from: kevin@example.com
+gcloud:
+  gcloud_sa_key_file: testdata/mock_gcloud_sa_key_file.json
+  enable_gs_uris_for_wdl: false
+github:
+  client_id: user
+  client_token: aaaaaaaaaaaaaaaaaaaaaa
+  pubsub_subscription_name: projects/example/subscriptions/example
+custom_image_build:
+  image_registry_host: https://example.com
+validation:
+  womtool_location: /usr/local/bin/womtool/womtool-54.jar
+reporting:
+  report_location: test
+  report_docker_location: example.com/test:test
+logging:
+  level: INFO

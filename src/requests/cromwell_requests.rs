@@ -1,10 +1,7 @@
 //! Module for making requests to Cromwell
 
-#[cfg(not(test))]
-use crate::config;
 use actix_multipart_rfc7578::client::multipart;
-use actix_web::client::{Client, SendRequestError};
-use actix_web::error::PayloadError;
+use actix_web::client::Client;
 use log::debug;
 #[cfg(test)]
 use mockito;
@@ -107,8 +104,8 @@ pub struct WorkflowIdAndStatus {
 pub enum CromwellRequestError {
     Json(serde_json::error::Error),
     Io(std::io::Error),
-    Request(SendRequestError),
-    Payload(PayloadError),
+    Request(actix_web::client::SendRequestError),
+    Payload(actix_web::error::PayloadError),
     Utf8(Utf8Error),
     Params(serde_urlencoded::ser::Error),
     Failed(String),
@@ -141,13 +138,13 @@ impl From<std::io::Error> for CromwellRequestError {
         CromwellRequestError::Io(e)
     }
 }
-impl From<SendRequestError> for CromwellRequestError {
-    fn from(e: SendRequestError) -> CromwellRequestError {
+impl From<actix_web::client::SendRequestError> for CromwellRequestError {
+    fn from(e: actix_web::client::SendRequestError) -> CromwellRequestError {
         CromwellRequestError::Request(e)
     }
 }
-impl From<PayloadError> for CromwellRequestError {
-    fn from(e: PayloadError) -> CromwellRequestError {
+impl From<actix_web::error::PayloadError> for CromwellRequestError {
+    fn from(e: actix_web::error::PayloadError) -> CromwellRequestError {
         CromwellRequestError::Payload(e)
     }
 }
@@ -195,240 +192,256 @@ impl fmt::Display for MetadataSourceEnum {
     }
 }
 
-/// Submits a job to Cromwell for processing
-///
-/// Submits a request to the Cromwell /api/workflows/v1 mapping, with the form values
-/// specified in job_data.  Returns either the id and status from the response from Cromwell
-/// or one of the following errors wrapped in a CromwellRequestError:
-/// Io if there is an issue reading files when creating the form data
-/// Request if there is an issue sending the request
-/// Payload if there is an issue getting the response body
-/// Utf8 if there is an issue converting the response body to Utf8
-/// Json if there is an issue parsing the response body to a WorkflowIdAndStatus struct
-pub async fn start_job(
-    client: &Client,
-    job_data: StartJobParams,
-) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
-    // Set address to query based on whether we're running a unit test or not
-    #[cfg(not(test))]
-    let cromwell_address = &*config::CROMWELL_ADDRESS;
-    #[cfg(test)]
-    let cromwell_address = &mockito::server_url();
-
-    // Create a multipart form and fill in fields from job_data
-    let form = match assemble_form_data(job_data) {
-        Ok(form_data) => form_data,
-        Err(e) => return Err(CromwellRequestError::Io(e)),
-    };
-
-    // Make request
-    let response = client
-        .post(format!("{}/api/workflows/v1", cromwell_address))
-        .content_type(form.content_type())
-        .send_body(multipart::Body::from(form))
-        .await;
-
-    // Get response
-    let mut response = match response {
-        Ok(res) => res,
-        Err(e) => return Err(CromwellRequestError::Request(e)),
-    };
-
-    // Get response body and convert it into bytes
-    let response_body = response.body().await?;
-    let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
-
-    debug!("{}", body_utf8);
-
-    // If it didn't return a success status code, that's an error
-    if !response.status().is_success() {
-        return Err(CromwellRequestError::Failed(format!(
-            "Cromwell request returned status:{} body:{}",
-            response.status(),
-            body_utf8
-        )));
-    }
-
-    // Parse response body into WorkflowIdAndStatus
-    match serde_json::from_str(body_utf8) {
-        Ok(id_and_status) => Ok(id_and_status),
-        Err(e) => Err(e.into()),
-    }
+/// Struct for submitting requests to Cromwell
+#[derive(Clone)]
+pub struct CromwellClient {
+    client: Client,
+    address: String,
 }
 
-/// Retrieve metadata for a job from Cromwell
-///
-/// Submits a request to the Cromwell /api/workflows/v1/{id}/metadata mapping, with the
-/// specified id and the query params specified in `params`.
-/// Returns either the end and status from the response from Cromwell
-/// or one of the following errors wrapped in a CheckStatusError:
-/// Request if there is an issue sending the request
-/// Payload if there is an issue getting the response body
-/// Utf8 if there is an issue converting the response body to Utf8
-/// Params if there is an issue parsing `params`
-pub async fn get_metadata(
-    client: &Client,
-    job_id: &str,
-    params: &MetadataParams,
-) -> Result<Value, CromwellRequestError> {
-    // Set address to query based on whether we're running a unit test or not
-    #[cfg(not(test))]
-    let cromwell_address = &*config::CROMWELL_ADDRESS;
-    #[cfg(test)]
-    let cromwell_address = &mockito::server_url();
-
-    let query_data = assemble_query_data(params);
-    // Make request
-    let request = match client
-        .get(format!(
-            "{}/api/workflows/v1/{}/metadata",
-            cromwell_address, job_id
-        ))
-        .query(&query_data)
-    {
-        Ok(val) => val,
-        Err(e) => return Err(e.into()),
-    };
-
-    //Send request
-    let response = request.send().await;
-
-    // Get response
-    let mut response = match response {
-        Ok(res) => res,
-        Err(e) => return Err(e.into()),
-    };
-
-    // Get response body and convert it into bytes
-    let response_body = response.body().await?;
-    let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
-
-    // If it didn't return a success status code, that's an error
-    if !response.status().is_success() {
-        return Err(CromwellRequestError::Failed(format!(
-            "Cromwell request returned status:{} body:{}",
-            response.status(),
-            body_utf8
-        )));
-    }
-
-    // Parse response body into Json
-    match serde_json::from_str(body_utf8) {
-        Ok(value) => Ok(value),
-        Err(e) => return Err(e.into()),
-    }
-}
-
-/// Assembles data specified into job_data into a Form object for making an http request
-///
-/// Returns either a completed form to be used for submitting the job or an io error if there
-/// is an issue reading a file
-fn assemble_form_data<'a>(job_data: StartJobParams) -> Result<multipart::Form<'a>, std::io::Error> {
-    let mut form = multipart::Form::default();
-
-    // Add fields to the form for any fields in job_data that have values
-    if let Some(value) = job_data.labels {
-        if let Err(e) = form.add_file("labels", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_dependencies {
-        if let Err(e) = form.add_file("workflowDependencies", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_inputs {
-        if let Err(e) = form.add_file("workflowInputs", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_inputs_2 {
-        if let Err(e) = form.add_file("workflowInputs_2", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_inputs_3 {
-        if let Err(e) = form.add_file("workflowInputs_3", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_inputs_4 {
-        if let Err(e) = form.add_file("workflowInputs_4", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_inputs_5 {
-        if let Err(e) = form.add_file("workflowInputs_5", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_on_hold {
-        form.add_text("workflowOnHold", value.to_string());
-    }
-    if let Some(value) = job_data.workflow_options {
-        if let Err(e) = form.add_file("workflowOptions", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_root {
-        form.add_text("workflowRoot", value);
-    }
-    if let Some(value) = job_data.workflow_source {
-        if let Err(e) = form.add_file("workflowSource", value) {
-            return Err(e);
-        }
-    }
-    if let Some(value) = job_data.workflow_type {
-        form.add_text("workflowType", value.to_string());
-    }
-    if let Some(value) = job_data.workflow_type_version {
-        form.add_text("workflowTypeVersion", value.to_string());
-    }
-    if let Some(value) = job_data.workflow_url {
-        form.add_text("workflowUrl", value);
-    }
-
-    Ok(form)
-}
-
-/// Assembles data from `MetadataParams` into array of tuples to pass in as request query params
-///
-/// To parse correctly for assembling a query string, the params must be assembled into a vector
-/// of key-value pairs of strings
-fn assemble_query_data(params: &MetadataParams) -> Vec<(String, String)> {
-    let mut output: Vec<(String, String)> = Vec::new();
-
-    if let Some(val) = &params.metadata_source {
-        output.push(("metadataSource".to_string(), val.to_string()));
-    }
-    if let Some(val) = &params.expand_sub_workflows {
-        output.push(("expandSubWorkflows".to_string(), val.to_string()));
-    }
-    if let Some(val) = &params.exclude_key {
-        for key in val {
-            output.push(("excludeKey".to_string(), key.clone()));
-        }
-    }
-    if let Some(val) = &params.include_key {
-        for key in val {
-            output.push(("includeKey".to_string(), key.clone()));
+impl CromwellClient {
+    /// Creates a new CromwellClient that will use `client` to submit requests to the cromwell
+    /// server at `address`
+    pub fn new(client: Client, address: &str) -> CromwellClient {
+        CromwellClient {
+            client,
+            address: String::from(address),
         }
     }
 
-    output
+    /// Submits a job to Cromwell for processing
+    ///
+    /// Submits a request to the Cromwell /api/workflows/v1 mapping, with the form values
+    /// specified in job_data.  Returns either the id and status from the response from Cromwell
+    /// or one of the following errors wrapped in a CromwellRequestError:
+    /// Io if there is an issue reading files when creating the form data
+    /// Request if there is an issue sending the request
+    /// Payload if there is an issue getting the response body
+    /// Utf8 if there is an issue converting the response body to Utf8
+    /// Json if there is an issue parsing the response body to a WorkflowIdAndStatus struct
+    pub async fn start_job(
+        &self,
+        job_data: StartJobParams,
+    ) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
+        // Set address to query based on whether we're running a unit test or not
+        let cromwell_address = &self.address;
+
+        // Create a multipart form and fill in fields from job_data
+        let form: multipart::Form = match CromwellClient::assemble_form_data(job_data) {
+            Ok(form_data) => form_data,
+            Err(e) => return Err(CromwellRequestError::Io(e)),
+        };
+
+        // Make request
+        let response = self
+            .client
+            .post(format!("{}/api/workflows/v1", cromwell_address))
+            .content_type(form.content_type())
+            .send_body(multipart::Body::from(form))
+            .await;
+
+        // Get response
+        let mut response = match response {
+            Ok(res) => res,
+            Err(e) => return Err(CromwellRequestError::Request(e)),
+        };
+
+        // Get response body and convert it into bytes
+        let response_body = response.body().await?;
+        let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
+
+        debug!("{}", body_utf8);
+
+        // If it didn't return a success status code, that's an error
+        if !response.status().is_success() {
+            return Err(CromwellRequestError::Failed(format!(
+                "Cromwell request returned status:{} body:{}",
+                response.status(),
+                body_utf8
+            )));
+        }
+
+        // Parse response body into WorkflowIdAndStatus
+        match serde_json::from_str(body_utf8) {
+            Ok(id_and_status) => Ok(id_and_status),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Retrieve metadata for a job from Cromwell
+    ///
+    /// Submits a request to the Cromwell /api/workflows/v1/{id}/metadata mapping, with the
+    /// specified id and the query params specified in `params`.
+    /// Returns either the end and status from the response from Cromwell
+    /// or one of the following errors wrapped in a CheckStatusError:
+    /// Request if there is an issue sending the request
+    /// Payload if there is an issue getting the response body
+    /// Utf8 if there is an issue converting the response body to Utf8
+    /// Params if there is an issue parsing `params`
+    pub async fn get_metadata(
+        &self,
+        job_id: &str,
+        params: &MetadataParams,
+    ) -> Result<Value, CromwellRequestError> {
+        // Set address to query based on whether we're running a unit test or not
+        let cromwell_address = &self.address;
+
+        let query_data = CromwellClient::assemble_query_data(params);
+        // Make request
+        let request = self
+            .client
+            .get(format!(
+                "{}/api/workflows/v1/{}/metadata",
+                cromwell_address, job_id
+            ))
+            .query(&query_data)?;
+
+        //Send request
+        let response = request.send().await;
+
+        // Get response
+        let mut response = match response {
+            Ok(res) => res,
+            Err(e) => return Err(e.into()),
+        };
+
+        // Get response body and convert it into bytes
+        let response_body = response.body().await?;
+        let body_utf8 = std::str::from_utf8(response_body.as_ref())?;
+
+        // If it didn't return a success status code, that's an error
+        if !response.status().is_success() {
+            return Err(CromwellRequestError::Failed(format!(
+                "Cromwell request returned status:{} body:{}",
+                response.status(),
+                body_utf8
+            )));
+        }
+
+        // Parse response body into Json
+        match serde_json::from_str(body_utf8) {
+            Ok(value) => Ok(value),
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    /// Assembles data specified into job_data into a Form object for making an http request
+    ///
+    /// Returns either a completed form to be used for submitting the job or an io error if there
+    /// is an issue reading a file
+    fn assemble_form_data<'a>(
+        job_data: StartJobParams,
+    ) -> Result<multipart::Form<'a>, std::io::Error> {
+        let mut form = multipart::Form::default();
+
+        // Add fields to the form for any fields in job_data that have values
+        if let Some(value) = job_data.labels {
+            if let Err(e) = form.add_file("labels", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_dependencies {
+            if let Err(e) = form.add_file("workflowDependencies", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_inputs {
+            if let Err(e) = form.add_file("workflowInputs", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_inputs_2 {
+            if let Err(e) = form.add_file("workflowInputs_2", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_inputs_3 {
+            if let Err(e) = form.add_file("workflowInputs_3", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_inputs_4 {
+            if let Err(e) = form.add_file("workflowInputs_4", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_inputs_5 {
+            if let Err(e) = form.add_file("workflowInputs_5", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_on_hold {
+            form.add_text("workflowOnHold", value.to_string());
+        }
+        if let Some(value) = job_data.workflow_options {
+            if let Err(e) = form.add_file("workflowOptions", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_root {
+            form.add_text("workflowRoot", value);
+        }
+        if let Some(value) = job_data.workflow_source {
+            if let Err(e) = form.add_file("workflowSource", value) {
+                return Err(e);
+            }
+        }
+        if let Some(value) = job_data.workflow_type {
+            form.add_text("workflowType", value.to_string());
+        }
+        if let Some(value) = job_data.workflow_type_version {
+            form.add_text("workflowTypeVersion", value.to_string());
+        }
+        if let Some(value) = job_data.workflow_url {
+            form.add_text("workflowUrl", value);
+        }
+
+        Ok(form)
+    }
+
+    /// Assembles data from `MetadataParams` into array of tuples to pass in as request query params
+    ///
+    /// To parse correctly for assembling a query string, the params must be assembled into a vector
+    /// of key-value pairs of strings
+    fn assemble_query_data(params: &MetadataParams) -> Vec<(String, String)> {
+        let mut output: Vec<(String, String)> = Vec::new();
+
+        if let Some(val) = &params.metadata_source {
+            output.push(("metadataSource".to_string(), val.to_string()));
+        }
+        if let Some(val) = &params.expand_sub_workflows {
+            output.push(("expandSubWorkflows".to_string(), val.to_string()));
+        }
+        if let Some(val) = &params.exclude_key {
+            for key in val {
+                output.push(("excludeKey".to_string(), key.clone()));
+            }
+        }
+        if let Some(val) = &params.include_key {
+            for key in val {
+                output.push(("includeKey".to_string(), key.clone()));
+            }
+        }
+
+        output
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{get_metadata, start_job, MetadataParams, StartJobParams};
+    use super::{MetadataParams, StartJobParams};
+    use crate::requests::cromwell_requests::CromwellClient;
     use actix_web::client::Client;
     use serde_json::json;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[actix_rt::test]
     async fn test_start_job_simple() {
         // Get client
         let client = Client::default();
+        let test_cromwell_client: CromwellClient =
+            CromwellClient::new(client, &mockito::server_url());
         // Create job data with simple test workflow
         let test_path = PathBuf::from("testdata/requests/cromwell_requests/test_workflow.wdl");
         let job_data = StartJobParams {
@@ -458,7 +471,7 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response = start_job(&client, job_data).await.unwrap();
+        let response = test_cromwell_client.start_job(job_data).await.unwrap();
 
         mock.assert();
 
@@ -470,6 +483,8 @@ mod tests {
     async fn test_get_metadata_simple() {
         //Get client
         let client = Client::default();
+        let test_cromwell_client: CromwellClient =
+            CromwellClient::new(client, &mockito::server_url());
         // Define mockito mapping for response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -494,7 +509,9 @@ mod tests {
             include_key: Some(vec![String::from("status")]),
             metadata_source: None,
         };
-        let response = get_metadata(&client, "53709600-d114-4194-a7f7-9e41211ca2ce", &params).await;
+        let response = test_cromwell_client
+            .get_metadata("53709600-d114-4194-a7f7-9e41211ca2ce", &params)
+            .await;
 
         mock.assert();
 

@@ -6,11 +6,12 @@
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
+use crate::manager::test_runner::TestRunner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultData};
 use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
-use actix_web::{client::Client, error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use chrono::NaiveDateTime;
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -375,21 +376,21 @@ async fn run_for_test(
     id: web::Path<String>,
     web::Json(run_inputs): web::Json<NewRunIncomplete>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    test_runner: web::Data<TestRunner>,
 ) -> HttpResponse {
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
     // Create run
-    match test_runner::create_run(
-        &conn,
-        client.get_ref(),
-        &*id,
-        run_inputs.name,
-        run_inputs.test_input,
-        run_inputs.eval_input,
-        run_inputs.created_by,
-    )
-    .await
+    match test_runner
+        .create_run(
+            &conn,
+            &*id,
+            run_inputs.name,
+            run_inputs.test_input,
+            run_inputs.eval_input,
+            run_inputs.created_by,
+        )
+        .await
     {
         Ok(run) => HttpResponse::Ok().json(run),
         Err(err) => {
@@ -553,7 +554,10 @@ mod tests {
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
+    use crate::requests::cromwell_requests::CromwellClient;
+    use crate::requests::test_resource_requests::TestResourceClient;
     use crate::unit_test_util::*;
+    use actix_web::client::Client;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
     use rand::distributions::Alphanumeric;
@@ -1111,6 +1115,11 @@ mod tests {
     #[actix_rt::test]
     async fn run_test() {
         let pool = get_test_db_pool();
+        let test_runner = TestRunner::new(
+            CromwellClient::new(Client::default(), &mockito::server_url()),
+            TestResourceClient::new(Client::default(), None),
+            None,
+        );
 
         let test_template = create_test_template(&pool.get().unwrap());
         let test_test =
@@ -1147,7 +1156,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(Client::default())
+                .data(test_runner)
                 .configure(init_routes),
         )
         .await;
@@ -1190,6 +1199,11 @@ mod tests {
     #[actix_rt::test]
     async fn run_test_failure_taken_name() {
         let pool = get_test_db_pool();
+        let test_runner = TestRunner::new(
+            CromwellClient::new(Client::default(), &mockito::server_url()),
+            TestResourceClient::new(Client::default(), None),
+            None,
+        );
 
         let test_template = create_test_template(&pool.get().unwrap());
         let test_test =
@@ -1209,7 +1223,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(Client::default())
+                .data(test_runner)
                 .configure(init_routes),
         )
         .await;

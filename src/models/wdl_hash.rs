@@ -8,7 +8,7 @@ use crate::schema::wdl_hash::dsl::*;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
-use sha2::{ Sha512, Digest };
+use sha2::{Digest, Sha512};
 
 /// Mapping to a wdl_hash record as it exists in the WDL_HASH table in the database.
 ///
@@ -38,11 +38,10 @@ pub struct WdlDataToHash {
 #[table_name = "wdl_hash"]
 struct NewWdlHash {
     pub location: String,
-    pub hash: Vec<u8>
+    pub hash: Vec<u8>,
 }
 
 impl WdlHashData {
-
     /// Queries the DB for wdl_hash records for the specified data
     ///
     /// Queries the DB using `conn` to retrieve all rows with a hash matching the SHA-512 hash for
@@ -57,9 +56,7 @@ impl WdlHashData {
         let mut hasher: Sha512 = Sha512::new();
         hasher.update(query_data);
         let result: Vec<u8> = hasher.finalize().to_vec();
-        wdl_hash
-            .filter(hash.eq(&result))
-            .load::<Self>(conn)
+        wdl_hash.filter(hash.eq(&result)).load::<Self>(conn)
     }
 
     /// Inserts a new wdl_hash mapping into the DB
@@ -79,7 +76,7 @@ impl WdlHashData {
         // Build the record we'll actually insert
         let new_wdl_hash = NewWdlHash {
             location: params.location,
-            hash: result
+            hash: result,
         };
         // Insert
         diesel::insert_into(wdl_hash)
@@ -92,8 +89,8 @@ impl WdlHashData {
 mod tests {
 
     use super::*;
-    use sha2::{Sha512, Digest};
     use crate::unit_test_util::get_test_db_connection;
+    use sha2::{Digest, Sha512};
 
     fn insert_test_wdl_hash(conn: &PgConnection) -> WdlHashData {
         let new_wdl_hash = WdlDataToHash {
@@ -101,8 +98,7 @@ mod tests {
             data: String::from("Test data to hash"),
         };
 
-        WdlHashData::create(conn, new_wdl_hash)
-            .expect("Failed inserting test wdl_hash")
+        WdlHashData::create(conn, new_wdl_hash).expect("Failed inserting test wdl_hash")
     }
 
     fn insert_test_wdl_hashes(conn: &PgConnection) -> Vec<WdlHashData> {
@@ -113,16 +109,16 @@ mod tests {
             data: String::from("Different test data to hash"),
         };
 
-        test_wdl_hashes.push(WdlHashData::create(conn, new_wdl_hash)
-            .expect("Failed inserting test wdl_hash"));
+        test_wdl_hashes
+            .push(WdlHashData::create(conn, new_wdl_hash).expect("Failed inserting test wdl_hash"));
 
         let new_wdl_hash = WdlDataToHash {
             location: String::from("/different/path/to/wdl.wdl"),
             data: String::from("Different test data to hash"),
         };
 
-        test_wdl_hashes.push(WdlHashData::create(conn, new_wdl_hash)
-            .expect("Failed inserting test wdl_hash"));
+        test_wdl_hashes
+            .push(WdlHashData::create(conn, new_wdl_hash).expect("Failed inserting test wdl_hash"));
 
         test_wdl_hashes
     }
@@ -135,11 +131,9 @@ mod tests {
         insert_test_wdl_hash(&conn);
         let test_wdl_hashes = insert_test_wdl_hashes(&conn);
 
-        let found_wdl_hashes = WdlHashData::find_by_data_to_hash(
-            &conn,
-            "Different test data to hash",
-        )
-            .expect("Failed to retrieve test wdl_hash by hash");
+        let found_wdl_hashes =
+            WdlHashData::find_by_data_to_hash(&conn, "Different test data to hash")
+                .expect("Failed to retrieve test wdl_hash by hash");
 
         assert_eq!(found_wdl_hashes.len(), 2);
         assert!(found_wdl_hashes.contains(&test_wdl_hashes[0]));
@@ -153,7 +147,8 @@ mod tests {
         // Insert some values so we don't grab those
         insert_test_wdl_hashes(&conn);
 
-        let empty_result = WdlHashData::find_by_data_to_hash(&conn, "Random data we won't find").unwrap();
+        let empty_result =
+            WdlHashData::find_by_data_to_hash(&conn, "Random data we won't find").unwrap();
 
         assert_eq!(empty_result.len(), 0);
     }

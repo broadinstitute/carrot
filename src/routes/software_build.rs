@@ -3,7 +3,6 @@
 //! Contains functions for processing requests to create, update, and search software_builds, along with
 //! their URI mappings
 
-use crate::config;
 use crate::db;
 use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
 use crate::routes::disabled_features;
@@ -119,9 +118,9 @@ async fn find(
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
-pub fn init_routes(cfg: &mut web::ServiceConfig) {
+pub fn init_routes(cfg: &mut web::ServiceConfig, enable_custom_image_builds: bool) {
     // Create mappings only if software building is enabled
-    if *config::ENABLE_CUSTOM_IMAGE_BUILDS {
+    if enable_custom_image_builds {
         init_routes_software_building_enabled(cfg);
     } else {
         init_routes_software_building_disabled(cfg);

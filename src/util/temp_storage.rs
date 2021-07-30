@@ -1,8 +1,8 @@
 //! Contains functionality for interacting with temporary file storage
 
+use log::error;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use log::error;
 
 /// Creates a temporary file with `contents` and returns it
 ///
