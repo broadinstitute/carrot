@@ -16,14 +16,14 @@ lazy_static! {
     pub static ref WDL_TEMP_DIR: TempDir = TempDir::new().unwrap();
 }
 
-// For creating DB schema only once before tests run
+// For creating DB schema.md only once before tests run
 static INIT: Once = Once::new();
 
 pub fn initialize_db_schema(conn: &PgConnection) {
     INIT.call_once(|| {
         let migrations_result = embedded_migrations::run_with_output(conn, &mut std::io::stdout());
         if let Err(e) = migrations_result {
-            panic!("Database schema migrations failed with error: {}", e);
+            panic!("Database schema.md migrations failed with error: {}", e);
         }
     });
 }
@@ -35,7 +35,7 @@ pub fn get_test_db_connection() -> PgConnection {
     let db_url = String::from(&*config::DATABASE_URL);
     // Connect
     let conn = PgConnection::establish(&db_url).expect("Failed to connect to database");
-    // Initialize schema if necessary
+    // Initialize schema.md if necessary
     initialize_db_schema(&conn);
     // Start a test transaction, so test changes will not be committed
     conn.begin_test_transaction()
@@ -51,7 +51,7 @@ pub fn get_test_db_pool() -> db::DbPool {
     let db_url = String::from(&*config::DATABASE_URL);
     // Connect
     let conn = db::get_pool(&db_url, 1);
-    // Initialize schema if necessary
+    // Initialize schema.md if necessary
     initialize_db_schema(&conn.get().unwrap());
     // Start a test transaction, so test changes will not be committed
     conn.get()

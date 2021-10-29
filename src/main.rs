@@ -66,11 +66,11 @@ fn main() {
     info!("Starting DB Connection Pool");
     let pool = db::get_pool(&*config::DATABASE_URL, *config::DB_THREADS);
 
-    info!("Running DB schema migrations, if necessary");
+    info!("Running DB schema.md migrations, if necessary");
     let migrations_result =
         embedded_migrations::run_with_output(&pool.get().unwrap(), &mut std::io::stdout());
     if let Err(e) = migrations_result {
-        error!("Database schema migrations failed with error: {}", e);
+        error!("Database schema.md migrations failed with error: {}", e);
         panic!();
     }
 

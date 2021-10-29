@@ -1,7 +1,7 @@
 //! Module contains types that map to custom types defined in the DB
 //!
 //! Contains custom types that are not in the diesel SqlTypes library, so they have to be defined
-//! and mapped to types that can be used by diesel for schema definition via the DieselType trait
+//! and mapped to types that can be used by diesel for schema.md definition via the DieselType trait
 
 use diesel_derive_enum::*;
 use serde::{Deserialize, Serialize};
