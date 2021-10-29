@@ -12,8 +12,8 @@ parent: REST API
 ## Table of contents
 {: .no_toc .text-delta}
 
-* TOC
-  {:toc}
+* TOC 
+{:toc}
 
 ---
 

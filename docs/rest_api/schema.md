@@ -13,7 +13,7 @@ parent: REST API
 {: .no_toc .text-delta}
 
 * TOC
-  {:toc}
+{:toc}
 
 ---
 
