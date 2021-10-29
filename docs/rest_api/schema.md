@@ -34,6 +34,7 @@ This page contains documentation for the types of data that can be returned by t
 |**created_by** <br>*optional*|Email address of the creator of the pipeline <br>**Example**: `"creator@example.com"`|string (email)|
 
 ### ErrorBody
+
 |Name|Description|Schema|
 |---|---|---|
 |**title**|A short message explaining the error <br>**Example**:`""ID formatted incorrectly""`|string|

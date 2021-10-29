@@ -43,7 +43,7 @@ POST /api/v1/pipelines/{id}
 
 |HTTP Code|Description|Schema|
 |---|---|---|
-|**200**|Success|[Pipeline](/schema#pipeline)|
-|**400**|Bad request|[ErrorBody](/schema#errorbody)|
-|**404**|Not found|[ErrorBody](/schema#errorbody)|
-|**500**|Server Error|[ErrorBody](/schema#errorbody)|
+|**200**|Success|[Pipeline](/carrot/rest_api/schema#pipeline)|
+|**400**|Bad request|[ErrorBody](/carrot/rest_api/schema#errorbody)|
+|**404**|Not found|[ErrorBody](/carrot/rest_api/schema#errorbody)|
+|**500**|Server Error|[ErrorBody](/carrot/rest_api/schema#errorbody)|
