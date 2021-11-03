@@ -45,5 +45,31 @@ POST /api/v1/pipelines/{id}
 |---|---|---|
 |**200**|Success|[Pipeline](/carrot/rest_api/schema#pipeline)|
 |**400**|Bad request|[ErrorBody](/carrot/rest_api/schema#errorbody)|
-|**404**|Not found|[ErrorBody](/carrot/rest_api/schema#errorbody)|
+|**404**|No pipeline found|[ErrorBody](/carrot/rest_api/schema#errorbody)|
+|**500**|Server Error|[ErrorBody](/carrot/rest_api/schema#errorbody)|
+
+### Find
+Retrieve pipelines from the CARROT database by specific filter parameters.
+
+```http request
+POST /api/v1/pipelines
+```
+**Consumes:** `application/json`
+
+**Parameters:**
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Path**|**id** <br>*required*|Unique ID for the pipeline|string
+
+
+**Produces:** `application/json`
+
+**Responses:**
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**200**|Success|[Pipeline](/carrot/rest_api/schema#pipeline) array|
+|**400**|Bad request|[ErrorBody](/carrot/rest_api/schema#errorbody)|
+|**404**|No pipelines found|[ErrorBody](/carrot/rest_api/schema#errorbody)|
 |**500**|Server Error|[ErrorBody](/carrot/rest_api/schema#errorbody)|
