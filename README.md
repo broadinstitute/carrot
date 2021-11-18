@@ -12,6 +12,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
     * [Reporting](#reporting)
 * [Style](#style)
 * [Using CARROT](#using_carrot)
+* [License](#license)
 
 ## <a name="requirements">Requirements</a>
 
@@ -88,3 +89,7 @@ To make adhering to the style guide easier, there is a Rust automatic formatting
 Once you have a CARROT server running, please see the [User Guide](UserGuide.md) for instructions on using CARROT.
 
 There is also an [example test repo](https://github.com/broadinstitute/carrot-example-test) available with instructions on how to create and run an example test on your CARROT server.
+
+## <a name="license">License</a>
+
+Licensed under Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE)) AND MIT License ([LICENSE-MIT](LICENSE-MIT))
