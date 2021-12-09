@@ -429,7 +429,11 @@ pub struct WdlStorageConfig {
 
 // Function for providing the default value
 fn wdl_directory_default() -> String {
-    String::from("/carrot/wdl")
+    let mut current_dir = std::env::current_dir()
+        .expect("Failed to get current directory for wdl directory default");
+    current_dir.push("carrot");
+    current_dir.push("wdl");
+    current_dir.to_str().expect("Failed to convert wdl directory path to string").to_string()
 }
 
 // Defining a default value for WdlStorageConfig so the user doesn't have to explicitly specify it

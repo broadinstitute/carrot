@@ -38,6 +38,57 @@ use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+/// Enum of cromwell statuses that can map to different statues in status updates for runs, reports,
+/// and builds
+#[derive(Debug)]
+enum CromwellStatus {
+    Submitted,
+    Running,
+    Starting,
+    QueuedInCromwell,
+    WaitingForQueueSpace,
+    Succeeded,
+    Failed,
+    Aborted,
+    Aborting,
+    Other(String)
+}
+
+/// Implementing From<&str> and Display for CromwellStatus so we can easily convert to and from the raw
+/// cromwell status
+impl std::convert::From<&str> for CromwellStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "submitted" => Self::Submitted,
+            "running" => Self::Running,
+            "starting" => Self::Starting,
+            "queuedincromwell" => Self::QueuedInCromwell,
+            "waitingforqueuespace" => Self::WaitingForQueueSpace,
+            "succeeded" => Self::Succeeded,
+            "failed" => Self::Failed,
+            "aborted" => Self::Aborted,
+            "aborting" => Self::Aborting,
+            _ => Self::Other(String::from(s))
+        }
+    }
+}
+impl fmt::Display for CromwellStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CromwellStatus::Submitted => write!(f, "submitted"),
+            CromwellStatus::Running => write!(f, "running"),
+            CromwellStatus::Starting => write!(f, "starting"),
+            CromwellStatus::QueuedInCromwell => write!(f, "queuedincromwell"),
+            CromwellStatus::WaitingForQueueSpace => write!(f, "waitingforqueuespace"),
+            CromwellStatus::Succeeded => write!(f, "succeeded"),
+            CromwellStatus::Failed => write!(f, "failed"),
+            CromwellStatus::Aborted => write!(f, "aborted"),
+            CromwellStatus::Aborting => write!(f, "aborting"),
+            CromwellStatus::Other(s) => write!(f, "{}", s)
+        }
+    }
+}
+
 /// Enum of possible errors from checking and updating a run's status
 #[derive(Debug)]
 enum UpdateStatusError {
@@ -516,7 +567,7 @@ impl StatusManager {
         let status = match metadata.get("status") {
             Some(status) => {
                 match StatusManager::get_run_status_for_cromwell_status(
-                    &status.as_str().unwrap().to_lowercase(),
+                    (&*status.as_str().unwrap().to_lowercase()).into(),
                     true,
                 ) {
                     Some(status) => status,
@@ -623,7 +674,7 @@ impl StatusManager {
         let status = match metadata.get("status") {
             Some(status) => {
                 match StatusManager::get_run_status_for_cromwell_status(
-                    &status.as_str().unwrap().to_lowercase(),
+                    (&*status.as_str().unwrap().to_lowercase()).into(),
                     false,
                 ) {
                     Some(status) => status,
@@ -848,7 +899,7 @@ impl StatusManager {
         let status = match metadata.get("status") {
             Some(status) => {
                 match StatusManager::get_build_status_for_cromwell_status(
-                    &status.as_str().unwrap().to_lowercase(),
+                    (&*status.as_str().unwrap().to_lowercase()).into(),
                 ) {
                     Some(status) => status,
                     None => {
@@ -949,7 +1000,7 @@ impl StatusManager {
         let status = match metadata.get("status") {
             Some(status) => {
                 match StatusManager::get_report_status_for_cromwell_status(
-                    &status.as_str().unwrap().to_lowercase(),
+                    (&*status.as_str().unwrap().to_lowercase()).into(),
                 ) {
                     Some(status) => status,
                     None => {
@@ -1101,64 +1152,64 @@ impl StatusManager {
     /// Returns equivalent RunStatusEnum for `cromwell_status`, with the Test-prefixed status if
     /// `is_test_step`, and the Eval-prefixed status if not
     fn get_run_status_for_cromwell_status(
-        cromwell_status: &str,
+        cromwell_status: CromwellStatus,
         is_test_step: bool,
     ) -> Option<RunStatusEnum> {
         if is_test_step {
             match cromwell_status {
-                "submitted" => Some(RunStatusEnum::TestSubmitted),
-                "running" => Some(RunStatusEnum::TestRunning),
-                "starting" => Some(RunStatusEnum::TestStarting),
-                "queuedincromwell" => Some(RunStatusEnum::TestQueuedInCromwell),
-                "waitingforqueuespace" => Some(RunStatusEnum::TestWaitingForQueueSpace),
-                "succeeded" => Some(RunStatusEnum::Succeeded),
-                "failed" => Some(RunStatusEnum::TestFailed),
-                "aborted" => Some(RunStatusEnum::TestAborted),
-                "aborting" => Some(RunStatusEnum::TestAborting),
+                CromwellStatus::Submitted => Some(RunStatusEnum::TestSubmitted),
+                CromwellStatus::Running => Some(RunStatusEnum::TestRunning),
+                CromwellStatus::Starting => Some(RunStatusEnum::TestStarting),
+                CromwellStatus::QueuedInCromwell => Some(RunStatusEnum::TestQueuedInCromwell),
+                CromwellStatus::WaitingForQueueSpace => Some(RunStatusEnum::TestWaitingForQueueSpace),
+                CromwellStatus::Succeeded => Some(RunStatusEnum::Succeeded),
+                CromwellStatus::Failed => Some(RunStatusEnum::TestFailed),
+                CromwellStatus::Aborted => Some(RunStatusEnum::TestAborted),
+                CromwellStatus::Aborting => Some(RunStatusEnum::TestAborting),
                 _ => None,
             }
         } else {
             match cromwell_status {
-                "submitted" => Some(RunStatusEnum::TestSubmitted),
-                "running" => Some(RunStatusEnum::EvalRunning),
-                "starting" => Some(RunStatusEnum::EvalStarting),
-                "queuedincromwell" => Some(RunStatusEnum::EvalQueuedInCromwell),
-                "waitingforqueuespace" => Some(RunStatusEnum::EvalWaitingForQueueSpace),
-                "succeeded" => Some(RunStatusEnum::Succeeded),
-                "failed" => Some(RunStatusEnum::EvalFailed),
-                "aborted" => Some(RunStatusEnum::EvalAborted),
-                "aborting" => Some(RunStatusEnum::EvalAborting),
+                CromwellStatus::Submitted => Some(RunStatusEnum::TestSubmitted),
+                CromwellStatus::Running => Some(RunStatusEnum::EvalRunning),
+                CromwellStatus::Starting => Some(RunStatusEnum::EvalStarting),
+                CromwellStatus::QueuedInCromwell => Some(RunStatusEnum::EvalQueuedInCromwell),
+                CromwellStatus::WaitingForQueueSpace => Some(RunStatusEnum::EvalWaitingForQueueSpace),
+                CromwellStatus::Succeeded => Some(RunStatusEnum::Succeeded),
+                CromwellStatus::Failed => Some(RunStatusEnum::EvalFailed),
+                CromwellStatus::Aborted => Some(RunStatusEnum::EvalAborted),
+                CromwellStatus::Aborting => Some(RunStatusEnum::EvalAborting),
                 _ => None,
             }
         }
     }
 
     /// Returns equivalent BuildStatusEnum for `cromwell_status`
-    fn get_build_status_for_cromwell_status(cromwell_status: &str) -> Option<BuildStatusEnum> {
+    fn get_build_status_for_cromwell_status(cromwell_status: CromwellStatus) -> Option<BuildStatusEnum> {
         match cromwell_status {
-            "submitted" => Some(BuildStatusEnum::Submitted),
-            "running" => Some(BuildStatusEnum::Running),
-            "starting" => Some(BuildStatusEnum::Starting),
-            "queuedincromwell" => Some(BuildStatusEnum::QueuedInCromwell),
-            "waitingforqueuespace" => Some(BuildStatusEnum::WaitingForQueueSpace),
-            "succeeded" => Some(BuildStatusEnum::Succeeded),
-            "failed" => Some(BuildStatusEnum::Failed),
-            "aborted" => Some(BuildStatusEnum::Aborted),
+            CromwellStatus::Submitted => Some(BuildStatusEnum::Submitted),
+            CromwellStatus::Running => Some(BuildStatusEnum::Running),
+            CromwellStatus::Starting => Some(BuildStatusEnum::Starting),
+            CromwellStatus::QueuedInCromwell => Some(BuildStatusEnum::QueuedInCromwell),
+            CromwellStatus::WaitingForQueueSpace => Some(BuildStatusEnum::WaitingForQueueSpace),
+            CromwellStatus::Succeeded => Some(BuildStatusEnum::Succeeded),
+            CromwellStatus::Failed => Some(BuildStatusEnum::Failed),
+            CromwellStatus::Aborted => Some(BuildStatusEnum::Aborted),
             _ => None,
         }
     }
 
     /// Returns equivalent ReportStatusEnum for `cromwell_status`
-    fn get_report_status_for_cromwell_status(cromwell_status: &str) -> Option<ReportStatusEnum> {
+    fn get_report_status_for_cromwell_status(cromwell_status: CromwellStatus) -> Option<ReportStatusEnum> {
         match cromwell_status {
-            "submitted" => Some(ReportStatusEnum::Submitted),
-            "running" => Some(ReportStatusEnum::Running),
-            "starting" => Some(ReportStatusEnum::Starting),
-            "queuedincromwell" => Some(ReportStatusEnum::QueuedInCromwell),
-            "waitingforqueuespace" => Some(ReportStatusEnum::WaitingForQueueSpace),
-            "succeeded" => Some(ReportStatusEnum::Succeeded),
-            "failed" => Some(ReportStatusEnum::Failed),
-            "aborted" => Some(ReportStatusEnum::Aborted),
+            CromwellStatus::Submitted  => Some(ReportStatusEnum::Submitted),
+            CromwellStatus::Running => Some(ReportStatusEnum::Running),
+            CromwellStatus::Starting => Some(ReportStatusEnum::Starting),
+            CromwellStatus::QueuedInCromwell => Some(ReportStatusEnum::QueuedInCromwell),
+            CromwellStatus::WaitingForQueueSpace => Some(ReportStatusEnum::WaitingForQueueSpace),
+            CromwellStatus::Succeeded => Some(ReportStatusEnum::Succeeded),
+            CromwellStatus::Failed => Some(ReportStatusEnum::Failed),
+            CromwellStatus::Aborted => Some(ReportStatusEnum::Aborted),
             _ => None,
         }
     }
