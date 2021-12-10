@@ -4,22 +4,26 @@
 //! contains messages for starting test runs.  Should poll the subscription on a schedule and
 //! process any messages it finds by starting test runs as specified in the messages
 
-use crate::config;
+use crate::config::{Config, GCloudConfig, GithubConfig};
 use crate::db::DbPool;
-use crate::manager::github_runner;
-use crate::manager::github_runner::GithubRunRequest;
+use crate::manager::github_runner::{GithubRunRequest, GithubRunner};
+use crate::manager::notification_handler::NotificationHandler;
+use crate::manager::test_runner::TestRunner;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
-use actix_rt::System;
+use crate::notifications::emailer::Emailer;
+use crate::notifications::github_commenter::GithubCommenter;
+use crate::requests::cromwell_requests::CromwellClient;
+use crate::requests::github_requests::GithubClient;
+use crate::requests::test_resource_requests::TestResourceClient;
+use crate::storage::gcloud_storage::GCloudClient;
 use actix_web::client::Client;
 use base64;
 use diesel::PgConnection;
-use google_pubsub1::{Pubsub, ReceivedMessage};
-use log::{debug, error, info};
+use google_pubsub1::{AcknowledgeRequest, Pubsub, PullRequest, ReceivedMessage};
+use log::{debug, error};
+use std::fmt;
 use std::sync::mpsc;
-use std::sync::mpsc::Sender;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use std::{fmt, thread};
 use yup_oauth2;
 
 type PubsubClient = Pubsub<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
@@ -62,77 +66,26 @@ impl From<std::string::FromUtf8Error> for ParseMessageError {
     }
 }
 
-/// If the ENABLE_GITHUB_REQUESTS environment variable is set to `true`, starts running the
-/// subscriber and returns a message channel sender for sending it a termination message and a join
-/// handle to join the thread.  If not, returns (None, None)
-///
-/// # Panics
-/// Panics if ENABLE_GITHUB_REQUESTS is set to `true` and a required environments variable is not
-/// set
-pub fn init_or_not(pool: DbPool) -> (Option<Sender<()>>, Option<JoinHandle<()>>) {
-    // If we're enabling github requests, start the subscriber
-    if *config::ENABLE_GITHUB_REQUESTS {
-        // Start the gcloud_subscriber server and return the channel sender to communicate with
-        // it and the thread to join on it
-        let (gcloud_subscriber_send, gcloud_subscriber_receive) = mpsc::channel();
-        info!("Starting gcloud subscriber thread");
-        let gcloud_subscriber_thread = thread::spawn(move || {
-            let mut sys = System::new("GCloudSubscriberSystem");
-            sys.block_on(run_subscriber(
-                pool,
-                Client::default(),
-                gcloud_subscriber_receive,
-            ));
-        });
-        (Some(gcloud_subscriber_send), Some(gcloud_subscriber_thread))
-    }
-    // Otherwise, return Nones
-    else {
-        (None, None)
-    }
-}
-
-/// Main loop function for this manager. Initializes the manager, then loops checking the pubsub
-/// subscription for requests, and attempts to start a test run for each request
-async fn run_subscriber(db_pool: DbPool, client: Client, channel_recv: mpsc::Receiver<()>) {
-    // Create the pubsub client so we can connect to the subscription
-    let pubsub_client = initialize_pubsub();
-
-    // Main loop
-    loop {
-        // Get the time we started this so we can sleep for a specified time between queries
-        let query_time = Instant::now();
-        debug!("Starting gcloud subscriber check");
-        // Pull and process messages
-        pull_message_data_from_subscription(&pubsub_client, &client, &db_pool.get().unwrap()).await;
-        // Check if we've received a terminate message from main
-        // While the time since we last started a check of the subscription hasn't exceeded
-        // PUBSUB_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
-        debug!("Finished gcloud subscription check.  Sleeping . . .");
-        let wait_timeout = Duration::new(*config::PUBSUB_WAIT_TIME_IN_SECS, 0)
-            .checked_sub(Instant::now() - query_time);
-        if let Some(timeout) = wait_timeout {
-            if let Some(_) = check_for_terminate_message_with_timeout(&channel_recv, timeout) {
-                return;
-            }
-        } else {
-            // If we've exceeded the wait time, check with no wait
-            if let Some(_) = check_for_terminate_message(&channel_recv) {
-                return;
-            }
-        }
-    }
+/// Struct for retrieving and processing messages in GCloud Pubsub for starting runs from github
+pub struct GCloudSubscriber {
+    db_pool: DbPool,
+    pubsub_subscription_name: String,
+    pubsub_max_messages_per: i32,
+    pubsub_wait_time_in_secs: u64,
+    channel_recv: mpsc::Receiver<()>,
+    github_runner: GithubRunner,
+    pubsub_client: PubsubClient,
 }
 
 /// Creates and returns a Pubsub instance that will connect to the subscription specified by
 /// PUBSUB_SUBSCRIPTION_NAME and authenticate using the service account key in the file specified
 /// by GCLOUD_SA_KEY_FILE
-fn initialize_pubsub() -> PubsubClient {
+fn initialize_pubsub(gcloud_sa_key_file_location: &String) -> PubsubClient {
     // Load GCloud SA key so we can use it for authentication
-    let client_secret = yup_oauth2::service_account_key_from_file(&*config::GCLOUD_SA_KEY_FILE)
+    let client_secret = yup_oauth2::service_account_key_from_file(gcloud_sa_key_file_location)
         .expect(&format!(
             "Failed to load service account key from file at: {}",
-            &*config::GCLOUD_SA_KEY_FILE
+            gcloud_sa_key_file_location
         ));
     // Create hyper client for connecting to GCloud
     let auth_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
@@ -147,142 +100,270 @@ fn initialize_pubsub() -> PubsubClient {
     )
 }
 
-/// Pulls messages from the subscription specified by PUBSUB_SUBSCRIPTION_NAME and processes them
-async fn pull_message_data_from_subscription(
-    pubsub_client: &PubsubClient,
-    client: &Client,
-    conn: &PgConnection,
-) {
-    // Set up request to not return immediately if there are no messages (Google's recommendation),
-    // and retrieve, at max, the number of messages set in the environment variable
-    let message_req = google_pubsub1::PullRequest {
-        return_immediately: None,
-        max_messages: Some(*config::PUBSUB_MAX_MESSAGES_PER),
+/// Convenience function for initializing and running a gcloud subscriber with all the necessary
+/// handlers. Takes `db_pool` for connecting to the DB, `carrot_config` for initializing handlers,
+/// and `channel_recv` for receiving signals to terminate
+pub async fn init_and_run(
+    db_pool: DbPool,
+    carrot_config: Config,
+    channel_recv: mpsc::Receiver<()>,
+) -> () {
+    // Get the github and gcloud configs, since we'll need those
+    let github_config: &GithubConfig = carrot_config
+        .github()
+        .expect("Failed to get github config when creating gcloud subscriber");
+    let gcloud_config: &GCloudConfig = carrot_config
+        .gcloud()
+        .expect("Failed to get gcloud config when creating gcloud subscriber");
+    // Make a client that'll be used for http requests
+    let http_client: Client = Client::default();
+    // Make a gcloud client for interacting with gcs
+    let gcloud_client: GCloudClient = GCloudClient::new(gcloud_config.gcloud_sa_key_file());
+    // Create an emailer (or not, if we don't have the config for one)
+    let emailer: Option<Emailer> = match carrot_config.email() {
+        Some(email_config) => Some(Emailer::new(email_config.clone())),
+        None => None,
     };
-    // Send the request to get the messages
-    match pubsub_client
-        .projects()
-        .subscriptions_pull(message_req, &*config::PUBSUB_SUBSCRIPTION_NAME)
-        .doit()
-    {
-        Ok((_, response)) => {
-            match response.received_messages {
-                Some(messages) => {
-                    // First acknowledge that we received the messages
-                    acknowledge_messages(pubsub_client, &messages);
-                    // Now try to start runs for any messages we received
-                    for message in messages {
-                        start_run_from_message(conn, client, &message).await;
-                    }
-                }
-                None => debug!("No messages retrieved from pubsub"),
-            }
-        }
-        Err(e) => {
-            error!(
-                "Failed to retrieve messages from subscription with error: {}",
-                e
-            );
-        }
-    }
+    // Create a github commenter
+    let github_client: GithubClient = GithubClient::new(
+        github_config.client_id(),
+        github_config.client_token(),
+        http_client.clone(),
+    );
+    let github_commenter: GithubCommenter = GithubCommenter::new(github_client);
+    // Create a notification handler
+    let notification_handler: NotificationHandler =
+        NotificationHandler::new(emailer, Some(github_commenter));
+    // Create a test resource client and cromwell client for the test runner
+    let test_resource_client: TestResourceClient =
+        TestResourceClient::new(http_client.clone(), Some(gcloud_client));
+    let cromwell_client: CromwellClient =
+        CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
+    // Create a test runner
+    let test_runner: TestRunner = match carrot_config.custom_image_build() {
+        Some(image_build_config) => TestRunner::new(
+            cromwell_client,
+            test_resource_client,
+            Some(image_build_config.image_registry_host()),
+        ),
+        None => TestRunner::new(cromwell_client, test_resource_client, None),
+    };
+    let gcloud_subscriber: GCloudSubscriber = GCloudSubscriber::new(
+        db_pool,
+        github_config.pubsub_subscription_name(),
+        github_config.pubsub_max_messages_per(),
+        github_config.pubsub_wait_time_in_secs(),
+        channel_recv,
+        GithubRunner::new(test_runner, notification_handler),
+        carrot_config.gcloud().expect("Failed to unwrap gcloud config to create gcloud subscriber.  This should not happen").gcloud_sa_key_file()
+    );
+    gcloud_subscriber.run().await
 }
 
-/// Parses `message` and attempts to start a run from it.  Logs errors in the case that anything
-/// goes wrong
-async fn start_run_from_message(conn: &PgConnection, client: &Client, message: &ReceivedMessage) {
-    if let Some(contents) = &message.message {
-        match &contents.data {
-            Some(message_data) => {
-                // Parse message
-                match parse_github_request_from_message(&message_data) {
-                    Ok(message_request) => {
-                        // Attempt to start run from request
-                        github_runner::process_request(conn, client, message_request).await;
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to parse GithubRunRequest from message {:?} due to error: {}",
-                            message, e
-                        );
-                    }
+impl GCloudSubscriber {
+    /// Creates a new gcloud subscriber that will use `db_pool` for database connections,
+    /// `pubsub_subscription_name` as the name of the pubsub subscription to query,
+    /// `pubsub_max_messages_per` as the number of messages to request per query,
+    /// `pubsub_wait_time_in_secs` as the number of seconds to wait between query attempts,
+    /// `channel_recv` to receive a message to terminate, `github_runner` to start test runs, and
+    /// `gcloud_sa_key_file_location` as the location of the sa key file that will be used to
+    /// authenticate with google pubsub
+    pub fn new(
+        db_pool: DbPool,
+        pubsub_subscription_name: &str,
+        pubsub_max_messages_per: i32,
+        pubsub_wait_time_in_secs: u64,
+        channel_recv: mpsc::Receiver<()>,
+        github_runner: GithubRunner,
+        gcloud_sa_key_file_location: &String,
+    ) -> GCloudSubscriber {
+        let pubsub_client = initialize_pubsub(gcloud_sa_key_file_location);
+
+        GCloudSubscriber {
+            db_pool,
+            pubsub_subscription_name: String::from(pubsub_subscription_name),
+            pubsub_max_messages_per,
+            pubsub_wait_time_in_secs,
+            channel_recv,
+            github_runner,
+            pubsub_client,
+        }
+    }
+
+    /// Main loop function for this manager. Initializes the manager, then loops checking the pubsub
+    /// subscription for requests, and attempts to start a test run for each request
+    pub async fn run(&self) {
+        // Main loop
+        loop {
+            // Get the time we started this so we can sleep for a specified time between queries
+            let query_time = Instant::now();
+            debug!("Starting gcloud subscriber check");
+            // Pull and process messages
+            self.pull_message_data_from_subscription().await;
+            // Check if we've received a terminate message from main
+            // While the time since we last started a check of the subscription hasn't exceeded
+            // PUBSUB_WAIT_TIME_IN_SECS, check for signal from main thread to terminate
+            debug!("Finished gcloud subscription check.  Sleeping . . .");
+            let wait_timeout = Duration::new(self.pubsub_wait_time_in_secs, 0)
+                .checked_sub(Instant::now() - query_time);
+            if let Some(timeout) = wait_timeout {
+                if let Some(_) =
+                    check_for_terminate_message_with_timeout(&self.channel_recv, timeout)
+                {
+                    return;
+                }
+            } else {
+                // If we've exceeded the wait time, check with no wait
+                if let Some(_) = check_for_terminate_message(&self.channel_recv) {
+                    return;
                 }
             }
-            None => {
-                error!("Received message without data in body: {:?}", message);
-            }
         }
-    } else {
-        debug!("Received message without message body");
     }
-}
 
-/// Collects the ack ids from `messages` and sends a request to pubsub to acknowledge that the
-/// messages have been received
-fn acknowledge_messages(pubsub_client: &PubsubClient, messages: &Vec<ReceivedMessage>) {
-    let mut ack_ids = Vec::new();
-    // Collect ack_ids for messages
-    for message in messages {
-        if let Some(ack_id) = &message.ack_id {
-            ack_ids.push(ack_id.to_string());
-        } else {
-            debug!("Received message without ack ID");
-        }
-    }
-    // Then acknowledge them
-    if !ack_ids.is_empty() {
-        let ack_request = google_pubsub1::AcknowledgeRequest {
-            ack_ids: Some(ack_ids),
+    /// Pulls messages from the subscription specified by PUBSUB_SUBSCRIPTION_NAME and processes them
+    async fn pull_message_data_from_subscription(&self) {
+        // Set up request to not return immediately if there are no messages (Google's recommendation),
+        // and retrieve, at max, the number of messages set in the environment variable
+        let message_req = PullRequest {
+            return_immediately: None,
+            max_messages: Some(self.pubsub_max_messages_per),
         };
-        match pubsub_client
+        // Send the request to get the messages
+        match self
+            .pubsub_client
             .projects()
-            .subscriptions_acknowledge(ack_request, &*config::PUBSUB_SUBSCRIPTION_NAME)
+            .subscriptions_pull(message_req, &self.pubsub_subscription_name)
             .doit()
         {
-            Ok(_) => debug!("Acknowledged message"),
+            Ok((_, response)) => {
+                match response.received_messages {
+                    Some(messages) => {
+                        // First acknowledge that we received the messages
+                        self.acknowledge_messages(&messages).await;
+                        // Now try to start runs for any messages we received
+                        for message in messages {
+                            self.start_run_from_message(&self.db_pool.get().unwrap(), &message)
+                                .await;
+                        }
+                    }
+                    None => debug!("No messages retrieved from pubsub"),
+                }
+            }
             Err(e) => {
-                error!("Failed to ack message with error: {}", e);
+                error!(
+                    "Failed to retrieve messages from subscription with error: {}",
+                    e
+                );
             }
         }
-    }
-}
-
-/// Parses `message` as a GithubRunRequest and returns it, or returns and error if the parsing
-/// fails
-fn parse_github_request_from_message(message: &str) -> Result<GithubRunRequest, ParseMessageError> {
-    // Convert message from base64 to utf8 (pubsub sends messages as base64
-    // but rust strings are utf8)
-    let message_unicode: String = String::from_utf8(base64::decode(message)?)?;
-    debug!("Received message: {}", message_unicode);
-    // Parse as a GithubRunRequest
-    let mut request: GithubRunRequest = serde_json::from_str(&message_unicode)?;
-    // If either of the input keys for docker images is an empty string, set it to null
-    match &request.test_input_key {
-        Some(key) => {
-            if key.is_empty() {
-                request.test_input_key = None;
-            }
-        }
-        None => {}
-    }
-    match &request.eval_input_key {
-        Some(key) => {
-            if key.is_empty() {
-                request.eval_input_key = None;
-            }
-        }
-        None => {}
     }
 
-    Ok(request)
+    /// Parses `message` and attempts to start a run from it.  Logs errors in the case that anything
+    /// goes wrong
+    async fn start_run_from_message(&self, conn: &PgConnection, message: &ReceivedMessage) {
+        if let Some(contents) = &message.message {
+            match &contents.data {
+                Some(message_data) => {
+                    // Parse message
+                    match GCloudSubscriber::parse_github_request_from_message(&message_data) {
+                        Ok(message_request) => {
+                            // Attempt to start run from request
+                            self.github_runner
+                                .process_request(conn, message_request)
+                                .await;
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to parse GithubRunRequest from message {:?} due to error: {}",
+                                message, e
+                            );
+                        }
+                    }
+                }
+                None => {
+                    error!("Received message without data in body: {:?}", message);
+                }
+            }
+        } else {
+            debug!("Received message without message body");
+        }
+    }
+
+    /// Collects the ack ids from `messages` and sends a request to pubsub to acknowledge that the
+    /// messages have been received
+    async fn acknowledge_messages(&self, messages: &Vec<ReceivedMessage>) {
+        let mut ack_ids = Vec::new();
+        // Collect ack_ids for messages
+        for message in messages {
+            if let Some(ack_id) = &message.ack_id {
+                ack_ids.push(ack_id.to_string());
+            } else {
+                debug!("Received message without ack ID");
+            }
+        }
+        // Then acknowledge them
+        if !ack_ids.is_empty() {
+            let ack_request = AcknowledgeRequest {
+                ack_ids: Some(ack_ids),
+            };
+            match self
+                .pubsub_client
+                .projects()
+                .subscriptions_acknowledge(ack_request, &self.pubsub_subscription_name)
+                .doit()
+            {
+                Ok(_) => debug!("Acknowledged message"),
+                Err(e) => {
+                    error!("Failed to ack message with error: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Parses `message` as a GithubRunRequest and returns it, or returns and error if the parsing
+    /// fails
+    fn parse_github_request_from_message(
+        message: &str,
+    ) -> Result<GithubRunRequest, ParseMessageError> {
+        // Convert message from base64 to utf8 (pubsub sends messages as base64
+        // but rust strings are utf8)
+        let message_unicode: String = String::from_utf8(base64::decode(message)?)?;
+        debug!("Received message: {}", message_unicode);
+        // Parse as a GithubRunRequest
+        let mut request: GithubRunRequest = serde_json::from_str(&message_unicode)?;
+        // If either of the input keys for docker images is an empty string, set it to null
+        match &request.test_input_key {
+            Some(key) => {
+                if key.is_empty() {
+                    request.test_input_key = None;
+                }
+            }
+            None => {}
+        }
+        match &request.eval_input_key {
+            Some(key) => {
+                if key.is_empty() {
+                    request.eval_input_key = None;
+                }
+            }
+            None => {}
+        }
+
+        Ok(request)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use crate::config::{GCloudConfig, GithubConfig};
     use crate::custom_sql_types::{BuildStatusEnum, EntityTypeEnum, RunStatusEnum};
-    use crate::manager::gcloud_subscriber::{
-        parse_github_request_from_message, start_run_from_message, ParseMessageError,
-    };
+    use crate::db::DbPool;
+    use crate::manager::gcloud_subscriber::{GCloudSubscriber, ParseMessageError};
+    use crate::manager::github_runner::GithubRunner;
+    use crate::manager::notification_handler::NotificationHandler;
+    use crate::manager::test_runner::TestRunner;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::RunData;
     use crate::models::run_software_version::RunSoftwareVersionData;
@@ -292,7 +373,13 @@ mod tests {
     use crate::models::subscription::{NewSubscription, SubscriptionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
-    use crate::unit_test_util::{get_test_db_connection, load_env_config};
+    use crate::notifications::emailer::Emailer;
+    use crate::notifications::github_commenter::GithubCommenter;
+    use crate::requests::cromwell_requests::CromwellClient;
+    use crate::requests::github_requests::GithubClient;
+    use crate::requests::test_resource_requests::TestResourceClient;
+    use crate::storage::gcloud_storage::GCloudClient;
+    use crate::unit_test_util::{get_test_db_connection, get_test_db_pool, load_default_config};
     use actix_web::client::Client;
     use diesel::PgConnection;
     use google_pubsub1::{PubsubMessage, ReceivedMessage};
@@ -301,6 +388,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::env::temp_dir;
     use std::fs::{read_dir, read_to_string, DirEntry};
+    use std::sync::mpsc;
     use uuid::Uuid;
 
     #[derive(Deserialize)]
@@ -394,12 +482,65 @@ mod tests {
         SoftwareData::create(conn, new_software).unwrap()
     }
 
+    fn create_test_gcloud_subscriber(db_pool: DbPool) -> GCloudSubscriber {
+        let carrot_config = load_default_config();
+        let (_, channel_recv) = mpsc::channel();
+        // Get the github and gcloud configs, since we'll need those
+        let github_config: &GithubConfig = carrot_config
+            .github()
+            .expect("Failed to get github config when creating gcloud subscriber");
+        let gcloud_config: &GCloudConfig = carrot_config
+            .gcloud()
+            .expect("Failed to get gcloud config when creating gcloud subscriber");
+        // Make a client that'll be used for http requests
+        let http_client: Client = Client::default();
+        // Make a gcloud client for interacting with gcs
+        let gcloud_client: GCloudClient = GCloudClient::new(gcloud_config.gcloud_sa_key_file());
+        // Create an emailer (or not, if we don't have the config for one)
+        let emailer: Option<Emailer> = match carrot_config.email() {
+            Some(email_config) => Some(Emailer::new(email_config.clone())),
+            None => None,
+        };
+        // Create a github commenter
+        let github_client: GithubClient = GithubClient::new(
+            github_config.client_id(),
+            github_config.client_token(),
+            http_client.clone(),
+        );
+        let github_commenter: GithubCommenter = GithubCommenter::new(github_client);
+        // Create a notification handler
+        let notification_handler: NotificationHandler =
+            NotificationHandler::new(emailer, Some(github_commenter));
+        // Create a test resource client and cromwell client for the test runner
+        let test_resource_client: TestResourceClient =
+            TestResourceClient::new(http_client.clone(), Some(gcloud_client));
+        let cromwell_client: CromwellClient =
+            CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
+        // Create a test runner
+        let test_runner: TestRunner = match carrot_config.custom_image_build() {
+            Some(image_build_config) => TestRunner::new(
+                cromwell_client,
+                test_resource_client,
+                Some(image_build_config.image_registry_host()),
+            ),
+            None => TestRunner::new(cromwell_client, test_resource_client, None),
+        };
+        GCloudSubscriber::new(
+            db_pool,
+            github_config.pubsub_subscription_name(),
+            github_config.pubsub_max_messages_per(),
+            github_config.pubsub_wait_time_in_secs(),
+            channel_recv,
+            GithubRunner::new(test_runner, notification_handler),
+            carrot_config.gcloud().expect("Failed to unwrap gcloud config to create gcloud subscriber.  This should not happen").gcloud_sa_key_file()
+        )
+    }
+
     #[actix_rt::test]
     async fn test_start_run_from_message() {
-        load_env_config();
-
-        let conn = get_test_db_connection();
-        let client = Client::default();
+        let db_pool = get_test_db_pool();
+        let conn = db_pool.get().unwrap();
+        let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
         let test_test = insert_test_test_with_subscriptions_with_entities(
             &conn,
             "test_process_request_success",
@@ -450,7 +591,9 @@ mod tests {
             .tempdir_in(temp_dir())
             .unwrap();
 
-        start_run_from_message(&conn, &client, &received_message).await;
+        test_gcloud_subscriber
+            .start_run_from_message(&conn, &received_message)
+            .await;
 
         // Verify that the email was created correctly
         let files_in_dir = read_dir(email_path.path())
@@ -556,7 +699,8 @@ mod tests {
         });
         let message_string = serde_json::to_string(&message_json).unwrap();
         let base64_message = base64::encode(&message_string);
-        let parsed_request = parse_github_request_from_message(&base64_message).unwrap();
+        let parsed_request =
+            GCloudSubscriber::parse_github_request_from_message(&base64_message).unwrap();
         assert_eq!(parsed_request.test_name, "test_test");
         assert_eq!(parsed_request.test_input_key.unwrap(), "test_key");
         assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
@@ -583,7 +727,8 @@ mod tests {
         });
         let message_string = serde_json::to_string(&message_json).unwrap();
         let base64_message = base64::encode(&message_string);
-        let parsed_request = parse_github_request_from_message(&base64_message).unwrap();
+        let parsed_request =
+            GCloudSubscriber::parse_github_request_from_message(&base64_message).unwrap();
         assert_eq!(parsed_request.test_name, "test_test");
         assert_eq!(parsed_request.test_input_key.is_none(), true);
         assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
@@ -609,7 +754,7 @@ mod tests {
             "author": "me"
         });
         let message_string = serde_json::to_string(&message_json).unwrap();
-        let parsed_request = parse_github_request_from_message(&message_string);
+        let parsed_request = GCloudSubscriber::parse_github_request_from_message(&message_string);
         assert!(matches!(parsed_request, Err(ParseMessageError::Base64(_))));
     }
 
@@ -622,7 +767,7 @@ mod tests {
         });
         let message_string = serde_json::to_string(&message_json).unwrap();
         let base64_message = base64::encode(&message_string);
-        let parsed_request = parse_github_request_from_message(&base64_message);
+        let parsed_request = GCloudSubscriber::parse_github_request_from_message(&base64_message);
         assert!(matches!(parsed_request, Err(ParseMessageError::Json(_))));
     }
 }

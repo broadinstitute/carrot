@@ -25,14 +25,13 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
     * It is also a requirement that the PostgreSQL DB have the `uuid-ossp` extension for using UUIDs.
         * This extension can be installed by connecting to the database as a user with SUPERUSER privileges and running the following command:
         `create extension if not exists "uuid-ossp";`
-* Certain configuration information must be specified in environment variables before running.
-    * These variables can be specified using a `.env` file.  An example of a `.env` configuration can be found within the `.env.example` file.
-    * Alternatively, they can be specified normally as environment variables.  The `.env.example` file can be used for reference for the types and purposes of the various environment variables.
+* Certain configuration information must be specified in config variables before running.
+    * These variables can be specified using a `.yml` file.  An example of a `.yml` configuration can be found within the `carrot.example.yml` file.
 * CARROT uses the [Diesel](http://diesel.rs/) crate for interfacing with the database.  For certain dev and build tasks, the Diesel CLI is required.
     * Instructions for installing the Diesel CLI can be found [here](http://diesel.rs/guides/getting-started/).
     * Once the Diesel CLI is installed and the PostgreSQL database is running, the Diesel CLI migration tool can be used to create all of the required tables and types in the database with the command `diesel migration run`
     * Alternatively, these tables and types will all be created when running CARROT for the first time
-* CARROT uses [womtool](https://cromwell.readthedocs.io/en/develop/WOMtool/) for WDL validation.  If running outside of a docker container created using the included Dockerfile, it will be necessary to include the womtool jar on the same machine and set the `CARROT_WOMTOOL_LOCATION` environment variable to its location.
+* CARROT uses [womtool](https://cromwell.readthedocs.io/en/develop/WOMtool/) for WDL validation.  If running outside of a docker container created using the included Dockerfile, it will be necessary to include the womtool jar on the same machine and set the `womtool_location` config variable to its location, as shown in the `carrot.example.yml` file
 * Once Rust is installed, the project can be built using the `cargo build` command in the project directory.
     * Building for release can be done using `cargo build --release`
 * CARROT requires a [Cromwell](https://github.com/broadinstitute/cromwell) server to run tests
@@ -51,12 +50,11 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
     * Emails can be configured to be sent in the following ways:
         * Using the local machine's `sendmail` utility, or
         * Using an SMTP mail server (either running your own, or using an existing mail service like GMail).
-    * Enabling this requires the use of a few configuration variables which are listed and explained in the `.env.example` file.
-* If you do not wish to use the email features, set the `CARROT_EMAIL_MODE` environment variable to `None`.
+    * Enabling this requires the use of a few configuration variables which are listed and explained in the `carrot.example.yml` file.
 
 ### <a name="software_building">Dynamic Software Testing</a>
 * It is possible (and encouraged) to set up CARROT to allow automatic generation of docker images for testing specific software hosted in a git repository
-* In order to allow this for private GitHub repos, it is necessary to set the `CARROT_ENABLE_PRIVATE_GITHUB_ACCESS` environment variable to true and fill in the related environment variables as detailed in the `.env.example` file
+* In order to allow this for private GitHub repos, it is necessary to set up private github access configuration as detailed in the `carrot.example.yml` file
 
 ### <a name="github_integration">GitHub Integration</a>
 * CARROT supports triggering runs via GitHub PR comments, and receiving reply comments with run results.
@@ -66,17 +64,16 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
     * Create a GitHub account for CARROT to use to view and interact with GitHub
     * Add the [carrot-publish-github-action](https://github.com/broadinstitute/carrot-publish-github-action) to the GitHub Actions workflow for the repository you want to test
         * Instructions for doing so are included in the README for the action
-    * Set the `CARROT_ENABLE_GITHUB_REQUESTS` environment variable to true
-        * Also set other related environment variables as detailed in the `.env.example` file
+    * Set up the `github` configuration as detailed in the `carrot.example.yml` file
 
 ### <a name="reporting">Reporting</a>
 * An important functionality of CARROT is the generation of reports from test runs in the form of Jupyter Notebooks
 * In order for this functionality to work properly, it is necessary to:
-    * Set the `CARROT_ENABLE_REPORTING` environment variable to true.
-    * Create a Google Cloud bucket for storing report templates and use it as the value for the `CARROT_REPORT_LOCATION` environment variable
-    * Build and push the report Dockerfile (`scripts/docker/reports/Dockerfile`) to a repository accessible by the Google Cloud service account associated with your Cromwell instance
-        * Also set the `CARROT_REPORT_DOCKER_LOCATION` environment variable to its location
-        * Alternatively, you can build a docker image with Jupyter Notebook support and the libraries you need if the provided Dockerfile does not meet your needs
+    * Set up the `reporting` config in the config yaml file
+        * Create a Google Cloud bucket for storing report templates and use it as the value for the `report_location` variable
+        * Build and push the report Dockerfile (`scripts/docker/reports/Dockerfile`) to a repository accessible by the Google Cloud service account associated with your Cromwell instance
+            * Also set the `report_docker_location` variable to its location
+            * Alternatively, you can build a docker image with Jupyter Notebook support and the libraries you need if the provided Dockerfile does not meet your needs
 
 ## <a name="style">Style</a>
 

@@ -3,13 +3,12 @@
 //! Contains functions for processing requests to create, update, and search run_report
 //!s, along with their URIs
 
-use crate::config;
 use crate::db;
 use crate::manager::report_builder;
+use crate::manager::report_builder::ReportBuilder;
 use crate::models::run_report::{RunReportData, RunReportQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::client::Client;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Query;
@@ -189,7 +188,7 @@ async fn create(
     web::Json(run_report_inputs): web::Json<NewRunReportIncomplete>,
     query_params: Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    report_builder: web::Data<ReportBuilder>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
@@ -228,15 +227,15 @@ async fn create(
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
     // Create run report
-    match report_builder::create_run_report(
-        &conn,
-        &client,
-        id,
-        report_id,
-        &run_report_inputs.created_by,
-        delete_failed,
-    )
-    .await
+    match report_builder
+        .create_run_report(
+            &conn,
+            id,
+            report_id,
+            &run_report_inputs.created_by,
+            delete_failed,
+        )
+        .await
     {
         Ok(run_report) => Ok(HttpResponse::Ok().json(run_report)),
         Err(err) => {
@@ -291,14 +290,6 @@ async fn create(
                     status: 403,
                     detail: format!(
                         "Error, run report already exists for the specified run and report id: {}",
-                        e
-                    ),
-                },
-                report_builder::Error::Request(e) => ErrorBody {
-                    title: "Request error".to_string(),
-                    status: 500,
-                    detail: format!(
-                        "Error while attempting to retrieve wdl from network location: {}",
                         e
                     ),
                 },
@@ -405,9 +396,9 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 ///
 /// To be called when configuring the Actix-Web app service.  Registers thes in this file
 /// as part of the service defined in `cfg`
-pub fn init_routes(cfg: &mut web::ServiceConfig) {
+pub fn init_routes(cfg: &mut web::ServiceConfig, enable_reporting: bool) {
     // Create mappings only if reporting is enabled
-    if *config::ENABLE_REPORTING {
+    if enable_reporting {
         init_routes_reporting_enabled(cfg);
     } else {
         init_routes_reporting_disabled(cfg);
@@ -442,6 +433,7 @@ fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
 mod tests {
     use super::*;
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
+    use crate::db::DbPool;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::result::{NewResult, ResultData};
@@ -452,13 +444,15 @@ mod tests {
     use crate::models::template_report::{NewTemplateReport, TemplateReportData};
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
+    use crate::requests::cromwell_requests::CromwellClient;
+    use crate::storage::gcloud_storage::GCloudClient;
     use crate::unit_test_util::*;
-    use actix_web::{http, test, App};
+    use actix_web::{client::Client, http, test, App};
     use chrono::Utc;
     use diesel::PgConnection;
     use serde_json::Value;
     use std::env;
-    use std::fs::read_to_string;
+    use std::fs::{read_to_string, File};
     use uuid::Uuid;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
@@ -762,10 +756,39 @@ mod tests {
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
+    fn create_test_report_builder() -> ReportBuilder {
+        let carrot_config = load_default_config();
+
+        // Make a client that'll be used for http requests
+        let http_client: Client = Client::default();
+        // Make a gcloud client for interacting with gcs
+        let gcloud_client: Option<GCloudClient> = match carrot_config.gcloud() {
+            Some(gcloud_config) => {
+                let mut gcloud_client = GCloudClient::new(gcloud_config.gcloud_sa_key_file());
+                gcloud_client.set_upload_file(Box::new(
+                    |f: File,
+                     address: &str,
+                     name: &str|
+                     -> Result<String, crate::storage::gcloud_storage::Error> {
+                        Ok(String::from("example.com/report/template/location.ipynb"))
+                    },
+                ));
+                Some(gcloud_client)
+            }
+            None => None,
+        };
+        let cromwell_client: CromwellClient =
+            CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
+        // Create report builder
+        let reporting_config = carrot_config
+            .reporting()
+            .expect("Cannot create report builder for testing without reporting config");
+        ReportBuilder::new(cromwell_client.clone(), gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen").clone(), reporting_config)
+    }
+
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
-        let client = Client::default();
 
         // Set up data in DB
         let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
@@ -781,10 +804,11 @@ mod tests {
             .create();
 
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -836,10 +860,11 @@ mod tests {
             .create();
 
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_disabled),
         )
         .await;
@@ -882,10 +907,11 @@ mod tests {
             .create();
 
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -935,10 +961,11 @@ mod tests {
             .create();
 
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -979,10 +1006,11 @@ mod tests {
             .create();
 
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -1022,10 +1050,11 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -1066,10 +1095,11 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -1114,10 +1144,11 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
         // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(client)
+                .data(test_report_builder)
                 .configure(init_routes_reporting_enabled),
         )
         .await;

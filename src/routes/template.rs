@@ -3,23 +3,26 @@
 //! Contains functions for processing requests to create, update, and search templates, along with
 //! their URI mappings
 
+use crate::config::Config;
 use crate::db;
-use crate::models::template::{NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError};
-use crate::requests::test_resource_requests;
+use crate::models::template::{
+    NewTemplate, TemplateChangeset, TemplateData, TemplateQuery, UpdateError,
+};
+use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::storage::gcloud_storage;
 use crate::util::temp_storage;
 use crate::util::wdl_storage;
 use crate::validation::womtool;
-use actix_web::client::Client;
+use crate::validation::womtool::WomtoolRunner;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use diesel::PgConnection;
 use log::{debug, error};
 use serde_json::json;
 use std::fmt;
-use std::path::{Path};
+use std::path::Path;
 use uuid::Uuid;
-use diesel::PgConnection;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
 /// where the only difference is whether we're using the test or eval wdl
@@ -170,18 +173,44 @@ async fn create(
     req: HttpRequest,
     web::Json(new_template): web::Json<NewTemplate>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    test_resource_client: web::Data<TestResourceClient>,
+    womtool_runner: web::Data<WomtoolRunner>,
+    carrot_config: web::Data<Config>,
 ) -> impl Responder {
     // If either WDL is a gs uri, make sure those are allowed
-    if new_template.test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) || new_template.eval_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
-        is_gs_uris_for_wdls_enabled()?;
+    if new_template
+        .test_wdl
+        .starts_with(gcloud_storage::GS_URI_PREFIX)
+        || new_template
+            .eval_wdl
+            .starts_with(gcloud_storage::GS_URI_PREFIX)
+    {
+        is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
     }
 
     let conn = pool.get().expect("Failed to get DB connection from pool");
 
     // Store and validate the WDLs
-    let test_wdl_location = validate_and_store_wdl(&client, &conn, &new_template.test_wdl, WdlType::Test, &new_template.name).await?;
-    let eval_wdl_location = validate_and_store_wdl(&client, &conn, &new_template.eval_wdl, WdlType::Eval, &new_template.name).await?;
+    let test_wdl_location = validate_and_store_wdl(
+        &test_resource_client,
+        &womtool_runner,
+        &conn,
+        &new_template.test_wdl,
+        WdlType::Test,
+        carrot_config.wdl_storage().wdl_directory(),
+        &new_template.name,
+    )
+    .await?;
+    let eval_wdl_location = validate_and_store_wdl(
+        &test_resource_client,
+        &womtool_runner,
+        &conn,
+        &new_template.eval_wdl,
+        WdlType::Eval,
+        carrot_config.wdl_storage().wdl_directory(),
+        &new_template.name,
+    )
+    .await?;
 
     // Insert in new thread
     web::block(move || {
@@ -190,14 +219,10 @@ async fn create(
             name: new_template.name,
             pipeline_id: new_template.pipeline_id,
             description: new_template.description,
-            // We can unwrap on these because, if we're making a non-unicode path for the WDLs,
-            // CARROT won't function properly anyway
             test_wdl: test_wdl_location,
             eval_wdl: eval_wdl_location,
             created_by: new_template.created_by,
         };
-
-        //let conn = pool.get().expect("Failed to get DB connection from pool");
 
         // Create template
         match TemplateData::create(&conn, new_new_template) {
@@ -237,8 +262,22 @@ async fn update(
     id_param: web::Path<String>,
     web::Json(template_changes): web::Json<TemplateChangeset>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    test_resource_client: web::Data<TestResourceClient>,
+    womtool_runner: web::Data<WomtoolRunner>,
+    carrot_config: web::Data<Config>,
 ) -> impl Responder {
+    // If either WDL is a gs uri, make sure those are allowed
+    if let Some(test_wdl) = &template_changes.test_wdl {
+        if test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
+        }
+    }
+    if let Some(eval_wdl) = &template_changes.eval_wdl {
+        if eval_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
+        }
+    }
+
     //Parse ID into Uuid
     let id = match Uuid::parse_str(&*id_param) {
         Ok(id) => id,
@@ -260,11 +299,29 @@ async fn update(
 
     // If the user wants to update either of the WDLs, store and validate them
     if let Some(test_wdl) = &template_changes.test_wdl {
-        let test_wdl_location = validate_and_store_wdl(&client, &conn, test_wdl, WdlType::Test, &id_param).await?;
+        let test_wdl_location = validate_and_store_wdl(
+            &test_resource_client,
+            &womtool_runner,
+            &conn,
+            test_wdl,
+            WdlType::Test,
+            carrot_config.wdl_storage().wdl_directory(),
+            &id_param,
+        )
+        .await?;
         processed_template_changes.test_wdl = Some(test_wdl_location);
     }
     if let Some(eval_wdl) = &template_changes.eval_wdl {
-        let eval_wdl_location = validate_and_store_wdl(&client, &conn, eval_wdl, WdlType::Eval, &id_param).await?;
+        let eval_wdl_location = validate_and_store_wdl(
+            &test_resource_client,
+            &womtool_runner,
+            &conn,
+            eval_wdl,
+            WdlType::Eval,
+            carrot_config.wdl_storage().wdl_directory(),
+            &id_param,
+        )
+        .await?;
         processed_template_changes.eval_wdl = Some(eval_wdl_location);
     }
 
@@ -385,9 +442,9 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 async fn download_test_wdl(
     id_param: web::Path<String>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    client: web::Data<TestResourceClient>,
 ) -> impl Responder {
-    download_wdl(id_param, pool, client, WdlType::Test).await
+    download_wdl(id_param, pool, &client, WdlType::Test).await
 }
 
 /// Handles GET requests to /templates/{id}/eval_wdl for retrieving eval wdl by template_id
@@ -402,9 +459,9 @@ async fn download_test_wdl(
 async fn download_eval_wdl(
     id_param: web::Path<String>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    client: web::Data<TestResourceClient>,
 ) -> impl Responder {
-    download_wdl(id_param, pool, client, WdlType::Eval).await
+    download_wdl(id_param, pool, &client, WdlType::Eval).await
 }
 
 /// Handlers requests for downloading WDLs for a template.  Meant to be called by other functions
@@ -419,7 +476,7 @@ async fn download_eval_wdl(
 async fn download_wdl(
     id_param: web::Path<String>,
     pool: web::Data<db::DbPool>,
-    client: web::Data<Client>,
+    client: &TestResourceClient,
     wdl_type: WdlType,
 ) -> impl Responder {
     // Parse ID into Uuid
@@ -474,7 +531,7 @@ async fn download_wdl(
     };
 
     // Attempt to retrieve the WDL
-    match test_resource_requests::get_resource_as_string(&client, &wdl_location).await {
+    match client.get_resource_as_string(&wdl_location).await {
         // If we retrieved it successfully, return it
         Ok(wdl_string) => Ok(HttpResponse::Ok().body(wdl_string)),
         // Otherwise, let the user know of the error
@@ -494,18 +551,23 @@ async fn download_wdl(
 /// `identifier` should be an identifier for the entity to which the wdl belongs (e.g. the
 /// template's name or id)
 async fn validate_and_store_wdl(
-    client: &Client,
+    client: &TestResourceClient,
+    womtool_runner: &WomtoolRunner,
     conn: &PgConnection,
     wdl_location: &str,
     wdl_type: WdlType,
-    identifier: &str
+    wdl_dir: &str,
+    identifier: &str,
 ) -> Result<String, HttpResponse> {
     // Get the wdl and stick it in a temp file first so we can validate it
-    let wdl_string: String = match test_resource_requests::get_resource_as_string(client, wdl_location).await {
+    let wdl_string: String = match client.get_resource_as_string(wdl_location).await {
         Ok(wdl_string) => wdl_string,
         // If we failed to get it, return an error response
         Err(e) => {
-            debug!("Encountered error trying to retrieve at {}: {}", wdl_location, e);
+            debug!(
+                "Encountered error trying to retrieve at {}: {}",
+                wdl_location, e
+            );
             return Err(HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Failed to retrieve WDL".to_string(),
                 status: 500,
@@ -513,7 +575,7 @@ async fn validate_and_store_wdl(
                     "Attempt to retrieve WDL at {} resulted in error: {}",
                     wdl_location, e
                 ),
-            }))
+            }));
         }
     };
     let wdl_temp_file = match temp_storage::get_temp_file(&wdl_string) {
@@ -530,16 +592,27 @@ async fn validate_and_store_wdl(
                     "Attempt to temporarily store WDL from {} resulted in error: {}",
                     wdl_location, e
                 ),
-            }))
+            }));
         }
     };
     // Validate the wdl
-    validate_wdl(wdl_temp_file.path(), wdl_type, identifier).await?;
+    validate_wdl(womtool_runner, wdl_temp_file.path(), wdl_type, identifier).await?;
     // Store it
     // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
     // CARROT won't work properly anyway
-    store_wdl(client, conn, wdl_temp_file.path().to_str().unwrap_or_else(|| panic!("Failed to get wdl temp file path {:?} as str", wdl_temp_file.path())), wdl_type).await
-
+    store_wdl(
+        client,
+        conn,
+        wdl_temp_file.path().to_str().unwrap_or_else(|| {
+            panic!(
+                "Failed to get wdl temp file path {:?} as str",
+                wdl_temp_file.path()
+            )
+        }),
+        wdl_type,
+        wdl_dir,
+    )
+    .await
 }
 
 /// Validates the specified WDL and returns either the unit type if it's valid or an appropriate
@@ -551,19 +624,20 @@ async fn validate_and_store_wdl(
 /// WDL failed WDL validation).  If the validation errors out for some reason, returns a 500
 /// response with a message explaining that the validation failed
 async fn validate_wdl(
+    womtool_runner: &WomtoolRunner,
     wdl_path: &Path,
     wdl_type: WdlType,
     identifier: &str,
 ) -> Result<(), HttpResponse> {
     // Make an owned version of the wdl path so we can move it into the web::block thread
     let owned_wdl_path = wdl_path.to_owned();
-    // Validate the wdl in its own thread
-    web::block(move || womtool::womtool_validate(&owned_wdl_path))
-        .await
+    // Validate the wdl
+    womtool_runner
+        .womtool_validate(&owned_wdl_path)
         .map_err(|e| {
             // If it's not a valid WDL, return an error to inform the user
             match e {
-                BlockingError::Error(womtool::Error::Invalid(msg)) => {
+                womtool::Error::Invalid(msg) => {
                     debug!(
                         "Invalid {} WDL submitted for template {} with womtool msg {}",
                         wdl_type, identifier, msg
@@ -576,7 +650,7 @@ async fn validate_wdl(
                             wdl_type, msg
                         ),
                     })
-                },
+                }
                 _ => {
                     error!("{:?}", e);
                     default_500(&e)
@@ -591,13 +665,22 @@ async fn validate_wdl(
 /// This function is basically a wrapper for [`crate::util::wdl_storage::store_wdl`] that converts
 /// the output into a format that can be more easily used by the routes functions within this module
 async fn store_wdl(
-    client: &Client,
+    client: &TestResourceClient,
     conn: &PgConnection,
     wdl_location: &str,
     wdl_type: WdlType,
+    wdl_dir: &str,
 ) -> Result<String, HttpResponse> {
     // Attempt to store the wdl locally
-    match wdl_storage::store_wdl(client, conn, wdl_location, &format!("{}.wdl", wdl_type)).await {
+    match wdl_storage::store_wdl(
+        client,
+        conn,
+        wdl_location,
+        &format!("{}.wdl", wdl_type),
+        wdl_dir,
+    )
+    .await
+    {
         Ok(wdl_local_path) => Ok(wdl_local_path),
         Err(e) => {
             debug!(
@@ -680,6 +763,7 @@ mod tests {
     use crate::models::run::{NewRun, RunData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
+    use actix_web::client::Client;
     use actix_web::{http, test, App};
     use chrono::Utc;
     use diesel::PgConnection;
@@ -1053,15 +1137,23 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_success() {
-        load_env_config();
-        
-        let client = Client::default();
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
-        let pipeline = insert_test_pipeline(&pool.get().unwrap());
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .configure(init_routes),
+        )
+        .await;
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let pipeline = insert_test_pipeline(&pool.get().unwrap());
 
         let (valid_wdl_address, valid_wdl_mock) = setup_valid_wdl_address();
         let (different_valid_wdl_address, different_valid_wdl_mock) =
@@ -1124,18 +1216,23 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_failure_duplicate_name() {
-        
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
-
-        let template = create_test_template(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
-                .data(pool)
-                .data(Client::default())
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
                 .configure(init_routes),
         )
         .await;
+
+        let template = create_test_template(&pool.get().unwrap());
 
         let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
@@ -1166,19 +1263,23 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_failure_invalid_wdl() {
-        
-        load_env_config();
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
-
-        let template = create_test_template(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
-                .data(pool)
-                .data(Client::default())
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
                 .configure(init_routes),
         )
         .await;
+
+        let template = create_test_template(&pool.get().unwrap());
 
         let (invalid_wdl_address, _mock) = setup_invalid_wdl_address();
 
@@ -1213,21 +1314,26 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_success() {
-        
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .configure(init_routes),
+        )
+        .await;
 
         let template = create_test_template(&pool.get().unwrap());
         let test_test =
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
-
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .data(Client::default())
-                .configure(init_routes),
-        )
-        .await;
 
         let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
@@ -1267,18 +1373,23 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_bad_uuid() {
-        
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
-
-        create_test_template(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
-                .data(pool)
-                .data(Client::default())
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
                 .configure(init_routes),
         )
         .await;
+
+        create_test_template(&pool.get().unwrap());
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -1306,20 +1417,25 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_prohibited_params() {
-        
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .configure(init_routes),
+        )
+        .await;
 
         let template = create_test_template(&pool.get().unwrap());
         let test = insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test.test_id);
-
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .data(Client::default())
-                .configure(init_routes),
-        )
-        .await;
 
         let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
@@ -1352,18 +1468,23 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_nonexistent_template() {
-        
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
-
-        create_test_template(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
-                .data(pool)
-                .data(Client::default())
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
                 .configure(init_routes),
         )
         .await;
+
+        create_test_template(&pool.get().unwrap());
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
@@ -1390,21 +1511,26 @@ mod tests {
 
     #[actix_rt::test]
     async fn update_failure_invalid_wdl() {
-        
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .configure(init_routes),
+        )
+        .await;
 
         let template = create_test_template(&pool.get().unwrap());
         let test_test =
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
-
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .data(Client::default())
-                .configure(init_routes),
-        )
-        .await;
 
         let (valid_wdl_address, _valid_mock) = setup_valid_wdl_address();
         let (invalid_wdl_address, _invalid_mock) = setup_invalid_wdl_address();
@@ -1535,7 +1661,7 @@ mod tests {
     #[actix_rt::test]
     async fn download_test_wdl_file_path() {
         let pool = get_test_db_pool();
-        let client = Client::new();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
 
         let expected_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
         let test_wdl = get_temp_file(&expected_wdl);
@@ -1549,8 +1675,13 @@ mod tests {
         let template =
             create_test_template_wdl_locations(&pool.get().unwrap(), test_wdl_path, eval_wdl_path);
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/test_wdl", template.template_id))
@@ -1568,7 +1699,7 @@ mod tests {
     #[actix_rt::test]
     async fn download_test_wdl_http() {
         let pool = get_test_db_pool();
-        let client = Client::new();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
 
         let expected_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
         let (test_wdl_address, test_mock) = setup_valid_wdl_address();
@@ -1584,8 +1715,13 @@ mod tests {
             eval_wdl_path,
         );
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/test_wdl", template.template_id))
@@ -1605,10 +1741,15 @@ mod tests {
     #[actix_rt::test]
     async fn download_test_wdl_failure_no_template() {
         let pool = get_test_db_pool();
-        let client = Client::new();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/test_wdl", Uuid::new_v4()))
@@ -1628,7 +1769,7 @@ mod tests {
     #[actix_rt::test]
     async fn download_eval_wdl_file_path() {
         let pool = get_test_db_pool();
-        let client = Client::new();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
 
         let not_expected_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
         let test_wdl = get_temp_file(&not_expected_wdl);
@@ -1642,8 +1783,13 @@ mod tests {
         let template =
             create_test_template_wdl_locations(&pool.get().unwrap(), test_wdl_path, eval_wdl_path);
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/eval_wdl", template.template_id))
@@ -1661,7 +1807,7 @@ mod tests {
     #[actix_rt::test]
     async fn download_eval_wdl_http() {
         let pool = get_test_db_pool();
-        let client = Client::new();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
 
         let not_expected_wdl = read_to_string("testdata/routes/template/valid_wdl.wdl").unwrap();
         let (test_wdl_address, test_mock) = setup_valid_wdl_address();
@@ -1676,8 +1822,13 @@ mod tests {
             &eval_wdl_address,
         );
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/eval_wdl", template.template_id))
@@ -1697,10 +1848,15 @@ mod tests {
     #[actix_rt::test]
     async fn download_eval_wdl_failure_no_template() {
         let pool = get_test_db_pool();
-        let client = Client::new();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
 
-        let mut app =
-            test::init_service(App::new().data(pool).data(client).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/eval_wdl", Uuid::new_v4()))

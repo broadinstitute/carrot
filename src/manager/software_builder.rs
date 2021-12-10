@@ -1,6 +1,6 @@
 //! This module contains functions for managing software builds
 
-use crate::config;
+use crate::config::CustomImageBuildConfig;
 use crate::custom_sql_types::BuildStatusEnum;
 use crate::manager::util;
 use crate::models::software_build::{
@@ -9,13 +9,18 @@ use crate::models::software_build::{
 use crate::models::software_version::{
     NewSoftwareVersion, SoftwareVersionData, SoftwareVersionQuery,
 };
-use crate::requests::cromwell_requests::CromwellRequestError;
-use actix_web::client::Client;
+use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use diesel::PgConnection;
 use serde_json::json;
 use std::fmt;
 use std::path::Path;
 use uuid::Uuid;
+
+/// Struct for handling setting up and starting software builds
+pub struct SoftwareBuilder {
+    cromwell_client: CromwellClient,
+    config: CustomImageBuildConfig,
+}
 
 #[derive(Debug)]
 pub enum Error {
@@ -51,6 +56,91 @@ impl From<diesel::result::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
         Error::TempFile(e)
+    }
+}
+
+impl SoftwareBuilder {
+    /// Creates a new SoftwareBuilder that will use `cromwell_client` for dispatching build jobs,
+    /// with behavior set by `config`
+    pub fn new(
+        cromwell_client: CromwellClient,
+        config: &CustomImageBuildConfig,
+    ) -> SoftwareBuilder {
+        SoftwareBuilder {
+            cromwell_client,
+            config: config.to_owned(),
+        }
+    }
+    /// Starts a cromwell job for building the software associated with the software_build specified
+    /// by `software_build_id` and updates the status of the software_build to `Submitted`
+    pub async fn start_software_build(
+        &self,
+        conn: &PgConnection,
+        software_version_id: Uuid,
+        software_build_id: Uuid,
+    ) -> Result<SoftwareBuildData, Error> {
+        // Include docker build wdls in project build
+        let docker_build_wdl = include_str!("../../scripts/wdl/docker_build.wdl");
+        let docker_build_with_github_auth_wdl =
+            include_str!("../../scripts/wdl/docker_build_with_github_auth.wdl");
+
+        let wdl_to_use = match self.config.private_github_access() {
+            Some(_) => docker_build_with_github_auth_wdl,
+            None => docker_build_wdl,
+        };
+
+        // Put it in a temporary file to be sent with cromwell request
+        let wdl_file = util::get_temp_file(wdl_to_use)?;
+
+        // Create path to wdl that builds docker images
+        let wdl_file_path: &Path = &wdl_file.path();
+
+        // Get necessary params for build wdl
+        let (software_name, repo_url, commit) =
+            SoftwareVersionData::find_name_repo_url_and_commit_by_id(conn, software_version_id)?;
+
+        // Build input json, including github credential stuff if we might be accessing a private
+        // github repo
+        let json_to_submit = match self.config.private_github_access() {
+            Some(private_github_config) => json!({
+                "docker_build.repo_url": repo_url,
+                "docker_build.software_name": software_name,
+                "docker_build.commit_hash": commit,
+                "docker_build.registry_host": self.config.image_registry_host(),
+                "docker_build.github_user": private_github_config.client_id(),
+                "docker_build.github_pass_encrypted": private_github_config.client_pass_uri(),
+                "docker_build.gcloud_kms_keyring": private_github_config.kms_keyring(),
+                "docker_build.gcloud_kms_key": private_github_config.kms_key()
+            }),
+            None => json!({
+                "docker_build.repo_url": repo_url,
+                "docker_build.software_name": software_name,
+                "docker_build.commit_hash": commit,
+                "docker_build.registry_host": self.config.image_registry_host()
+            }),
+        };
+
+        // Write json to temp file so it can be submitted to cromwell
+        let json_file = util::get_temp_file(&json_to_submit.to_string())?;
+
+        // Send job request to cromwell
+        let start_job_response =
+            util::start_job_from_file(&self.cromwell_client, wdl_file_path, &json_file.path())
+                .await?;
+
+        // Update build with job id and Submitted status
+        let build_update = SoftwareBuildChangeset {
+            image_url: None,
+            finished_at: None,
+            build_job_id: Some(start_job_response.id),
+            status: Some(BuildStatusEnum::Submitted),
+        };
+
+        Ok(SoftwareBuildData::update(
+            conn,
+            software_build_id,
+            build_update,
+        )?)
     }
 }
 
@@ -164,86 +254,17 @@ pub fn get_or_create_software_build(
     return software_build_closure();
 }
 
-/// Starts a cromwell job for building the software associated with the software_build specified by
-/// `software_build_id` and updates the status of the software_build to `Submitted`
-pub async fn start_software_build(
-    client: &Client,
-    conn: &PgConnection,
-    software_version_id: Uuid,
-    software_build_id: Uuid,
-) -> Result<SoftwareBuildData, Error> {
-    // Include docker build wdls in project build
-    let docker_build_wdl = include_str!("../../scripts/wdl/docker_build.wdl");
-    let docker_build_with_github_auth_wdl =
-        include_str!("../../scripts/wdl/docker_build_with_github_auth.wdl");
-
-    let wdl_to_use = match *config::ENABLE_PRIVATE_GITHUB_ACCESS {
-        true => docker_build_with_github_auth_wdl,
-        false => docker_build_wdl,
-    };
-
-    // Put it in a temporary file to be sent with cromwell request
-    let wdl_file = util::get_temp_file(wdl_to_use)?;
-
-    // Create path to wdl that builds docker images
-    let wdl_file_path: &Path = &wdl_file.path();
-
-    // Get necessary params for build wdl
-    let (software_name, repo_url, commit) =
-        SoftwareVersionData::find_name_repo_url_and_commit_by_id(conn, software_version_id)?;
-
-    // Build input json, including github credential stuff if we might be accessing a private
-    // github repo
-    let json_to_submit = match *config::ENABLE_PRIVATE_GITHUB_ACCESS {
-        true => json!({
-            "docker_build.repo_url": repo_url,
-            "docker_build.software_name": software_name,
-            "docker_build.commit_hash": commit,
-            "docker_build.registry_host": *config::IMAGE_REGISTRY_HOST,
-            "docker_build.github_user": *config::PRIVATE_GITHUB_CLIENT_ID,
-            "docker_build.github_pass_encrypted": *config::PRIVATE_GITHUB_CLIENT_PASS_URI,
-            "docker_build.gcloud_kms_keyring": *config::PRIVATE_GITHUB_KMS_KEYRING,
-            "docker_build.gcloud_kms_key": *config::PRIVATE_GITHUB_KMS_KEY
-        }),
-        false => json!({
-            "docker_build.repo_url": repo_url,
-            "docker_build.software_name": software_name,
-            "docker_build.commit_hash": commit,
-            "docker_build.registry_host": *config::IMAGE_REGISTRY_HOST
-        }),
-    };
-
-    // Write json to temp file so it can be submitted to cromwell
-    let json_file = util::get_temp_file(&json_to_submit.to_string())?;
-
-    // Send job request to cromwell
-    let start_job_response =
-        util::start_job_from_file(client, wdl_file_path, &json_file.path()).await?;
-
-    // Update build with job id and Submitted status
-    let build_update = SoftwareBuildChangeset {
-        image_url: None,
-        finished_at: None,
-        build_job_id: Some(start_job_response.id),
-        status: Some(BuildStatusEnum::Submitted),
-    };
-
-    Ok(SoftwareBuildData::update(
-        conn,
-        software_build_id,
-        build_update,
-    )?)
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::config::CustomImageBuildConfig;
     use crate::custom_sql_types::BuildStatusEnum;
     use crate::manager::software_builder::{
-        get_or_create_software_build, get_or_create_software_version, start_software_build,
+        get_or_create_software_build, get_or_create_software_version, SoftwareBuilder,
     };
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::requests::cromwell_requests::CromwellClient;
     use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
     use diesel::PgConnection;
@@ -455,6 +476,10 @@ mod tests {
 
         let conn = get_test_db_connection();
         let client = Client::default();
+        let cromwell_client = CromwellClient::new(client, &mockito::server_url());
+        let config: CustomImageBuildConfig =
+            CustomImageBuildConfig::new(String::from("https://example.com"), None);
+        let test_software_builder: SoftwareBuilder = SoftwareBuilder::new(cromwell_client, &config);
 
         let test_software_build = insert_test_software_build_created(&conn);
 
@@ -469,14 +494,14 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response_build = start_software_build(
-            &client,
-            &conn,
-            test_software_build.software_version_id,
-            test_software_build.software_build_id,
-        )
-        .await
-        .unwrap();
+        let response_build = test_software_builder
+            .start_software_build(
+                &conn,
+                test_software_build.software_version_id,
+                test_software_build.software_build_id,
+            )
+            .await
+            .unwrap();
 
         mock.assert();
 

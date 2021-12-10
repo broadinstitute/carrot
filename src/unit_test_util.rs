@@ -1,11 +1,13 @@
 //! Contains utility functions required by unit tests within the models module
 
 use crate::config;
+use crate::config::{Config, CromwellConfig, WdlStorageConfig};
 use crate::db;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use dotenv;
 use std::env;
+use std::fs::read_to_string;
 use std::io::Write;
 use std::sync::Once;
 use tempfile::{NamedTempFile, TempDir};
@@ -29,10 +31,10 @@ pub fn initialize_db_schema(conn: &PgConnection) {
 }
 
 pub fn get_test_db_connection() -> PgConnection {
-    // Load environment config so we can get DB connection string
-    load_env_config();
+    // Load config so we can get DB connection string
+    let config = load_default_config();
     // Get the DB url
-    let db_url = String::from(&*config::DATABASE_URL);
+    let db_url = String::from(config.database().url());
     // Connect
     let conn = PgConnection::establish(&db_url).expect("Failed to connect to database");
     // Initialize schema if necessary
@@ -45,10 +47,10 @@ pub fn get_test_db_connection() -> PgConnection {
 }
 
 pub fn get_test_db_pool() -> db::DbPool {
-    // Load environment config so we can get DB connection string
-    load_env_config();
+    // Load config so we can get DB connection string
+    let config = load_default_config();
     // Get the DB url
-    let db_url = String::from(&*config::DATABASE_URL);
+    let db_url = String::from(config.database().url());
     // Connect
     let conn = db::get_pool(&db_url, 1);
     // Initialize schema if necessary
@@ -62,12 +64,20 @@ pub fn get_test_db_pool() -> db::DbPool {
     conn
 }
 
-pub fn load_env_config() {
+pub fn load_default_config() -> Config {
     // Set up the WDL temp dir, since we can't load that from the test env file
-    init_wdl_temp_dir();
-    // Load environment variables from env file
-    dotenv::from_filename("testdata/test.env").ok();
-    config::initialize();
+    let wdl_storage_config = init_wdl_temp_dir();
+    // Make a cromwell config that uses the mockito url
+    let cromwell_config = CromwellConfig::new(mockito::server_url());
+    // Load rest of config from test config file
+    let config_string = read_to_string("testdata/test_config.yml")
+        .expect("Failed to load testdata/test_config.yml");
+    let mut test_config: Config = serde_yaml::from_str(&config_string)
+        .expect("Failed to parse provided config file as a valid CARROT config");
+    test_config.set_wdl_storage(wdl_storage_config);
+    test_config.set_cromwell(cromwell_config);
+
+    test_config
 }
 
 pub fn get_temp_file(contents: &str) -> NamedTempFile {
@@ -76,6 +86,6 @@ pub fn get_temp_file(contents: &str) -> NamedTempFile {
     temp_file
 }
 
-pub fn init_wdl_temp_dir() {
-    env::set_var("CARROT_WDL_DIRECTORY", &*WDL_TEMP_DIR.path().as_os_str());
+pub fn init_wdl_temp_dir() -> WdlStorageConfig {
+    WdlStorageConfig::new(String::from(&*WDL_TEMP_DIR.path().to_str().unwrap()))
 }

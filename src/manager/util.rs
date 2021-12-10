@@ -1,11 +1,9 @@
 //! Contains utility functions shared by multiple of the modules within the `manager` module
 
-use crate::config;
 use crate::requests::cromwell_requests;
 use crate::requests::cromwell_requests::{
-    CromwellRequestError, WorkflowIdAndStatus, WorkflowTypeEnum,
+    CromwellClient, CromwellRequestError, WorkflowIdAndStatus, WorkflowTypeEnum,
 };
-use actix_web::client::Client;
 use log::error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,7 +17,7 @@ use tempfile::NamedTempFile;
 /// json at `json_file_path` for the inputs.  Returns the response as a WorkflowIdAndType or an
 /// error if there is some issue starting the job
 pub async fn start_job_from_file(
-    client: &Client,
+    cromwell_client: &CromwellClient,
     wdl_file_path: &Path,
     json_file_path: &Path,
 ) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
@@ -41,7 +39,7 @@ pub async fn start_job_from_file(
         workflow_url: None,
     };
     // Submit request to start job
-    cromwell_requests::start_job(&client, cromwell_params).await
+    cromwell_client.start_job(cromwell_params).await
 }
 
 /// Creates a temporary file with `contents` and returns it
@@ -75,13 +73,12 @@ pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
 ///
 /// This function basically exists to reduce the number of places where an image url is built, so if
 /// we ever need to change it, we don't have to do it in a bunch of places in the code
-pub fn get_formatted_image_url(software_name: &str, commit_hash: &str) -> String {
-    format!(
-        "{}/{}:{}",
-        *config::IMAGE_REGISTRY_HOST,
-        software_name,
-        commit_hash
-    )
+pub fn get_formatted_image_url(
+    software_name: &str,
+    commit_hash: &str,
+    image_registry_host: &str,
+) -> String {
+    format!("{}/{}:{}", image_registry_host, software_name, commit_hash)
 }
 
 /// Checks for a message on `channel_recv`, and returns `Some(())` if it finds one or the channel
@@ -108,6 +105,7 @@ pub fn check_for_terminate_message_with_timeout(
 #[cfg(test)]
 mod tests {
     use crate::manager::util::{get_temp_file, start_job_from_file};
+    use crate::requests::cromwell_requests::CromwellClient;
     use actix_web::client::Client;
     use serde_json::json;
     use serde_json::Value;
@@ -116,7 +114,8 @@ mod tests {
     #[actix_rt::test]
     async fn test_start_job() {
         // Get client
-        let client = Client::default();
+        let cromwell_client: CromwellClient =
+            CromwellClient::new(Client::default(), &mockito::server_url());
         // Create job data with simple test workflow
         let test_path = PathBuf::from("testdata/requests/cromwell_requests/test_workflow.wdl");
         // Make fake params
@@ -136,9 +135,10 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response = start_job_from_file(&client, test_path.as_path(), test_json_file.path())
-            .await
-            .unwrap();
+        let response =
+            start_job_from_file(&cromwell_client, test_path.as_path(), test_json_file.path())
+                .await
+                .unwrap();
 
         mock.assert();
 

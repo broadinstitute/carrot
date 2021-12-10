@@ -3,7 +3,6 @@
 //! Contains functions for processing requests to create, update, and search reports, along with
 //! their URI mappings
 
-use crate::config;
 use crate::db;
 use crate::models::report::{NewReport, ReportChangeset, ReportData, ReportQuery, UpdateError};
 use crate::routes::disabled_features;
@@ -292,9 +291,9 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
 ///
 /// To be called when configuring the Actix-Web app service.  Registers the mappings in this file
 /// as part of the service defined in `cfg`
-pub fn init_routes(cfg: &mut web::ServiceConfig) {
+pub fn init_routes(cfg: &mut web::ServiceConfig, enable_reporting: bool) {
     // Only map routes to reporting functions if reporting is enabled
-    if *config::ENABLE_REPORTING {
+    if enable_reporting {
         init_routes_reporting_enabled(cfg);
     } else {
         init_routes_reporting_disabled(cfg);
