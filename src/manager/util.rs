@@ -4,12 +4,9 @@ use crate::requests::cromwell_requests;
 use crate::requests::cromwell_requests::{
     CromwellClient, CromwellRequestError, WorkflowIdAndStatus, WorkflowTypeEnum,
 };
-use log::error;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 
 /// Sends a request to cromwell to start a job from a WDL file
 ///
@@ -40,33 +37,6 @@ pub async fn start_job_from_file(
     };
     // Submit request to start job
     cromwell_client.start_job(cromwell_params).await
-}
-
-/// Creates a temporary file with `contents` and returns it
-///
-/// Creates a NamedTempFile and writes `contents` to it.  Returns the file if successful.  Returns
-/// an error if creating or writing to the file fails
-pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
-    match NamedTempFile::new() {
-        Ok(mut file) => {
-            if let Err(e) = write!(file, "{}", contents) {
-                error!(
-                    "Encountered error while attempting to write to temporary file: {}",
-                    e
-                );
-                Err(e)
-            } else {
-                Ok(file)
-            }
-        }
-        Err(e) => {
-            error!(
-                "Encountered error while attempting to create temporary file: {}",
-                e
-            );
-            Err(e)
-        }
-    }
 }
 
 /// Returns an image URL generated from `IMAGE_REGISTRY_HOST`, `software_name`, and `commit_hash`
@@ -104,8 +74,9 @@ pub fn check_for_terminate_message_with_timeout(
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::util::{get_temp_file, start_job_from_file};
+    use crate::manager::util::start_job_from_file;
     use crate::requests::cromwell_requests::CromwellClient;
+    use crate::util::temp_storage;
     use actix_web::client::Client;
     use serde_json::json;
     use serde_json::Value;
@@ -123,7 +94,7 @@ mod tests {
             "myWorkflow.test":"test"
         });
         // Write them to a temp file
-        let test_json_file = get_temp_file(&params.to_string()).unwrap();
+        let test_json_file = temp_storage::get_temp_file(&params.to_string()).unwrap();
         // Define mockito mapping for response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",

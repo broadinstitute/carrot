@@ -75,7 +75,8 @@ impl Config {
     /// Panics if attempting to create a Config that has:
     /// 1. A value for `github` and None for `custom_image_build`,
     /// 2. A value for `custom_image_builds` and None for `gcloud`, or
-    /// 3. A value for `reporting` and None for `gcloud`
+    /// 3. A value for `reporting` and None for `gcloud`,
+    /// 4. A GCS value for `wdl_storage` and None for `gcloud`
     pub fn validate(&self) {
         if self.github.is_some() && self.custom_image_build.is_none() {
             panic!("In order to enable Github integration, it is necessary to specify a configuration for \"custom_image_build\"");
@@ -85,6 +86,9 @@ impl Config {
         }
         if self.reporting.is_some() && self.gcloud.is_none() {
             panic!("In order to enable reporting, it is necessary to specify a configuration for \"gcloud\"");
+        }
+        if self.wdl_storage.is_gcs() && self.gcloud.is_none() {
+            panic!("In order to store WDLs in a GCS location, it is necessary to specify a configuration for \"gcloud\"");
         }
     }
     pub fn logging(&self) -> &LoggingConfig {
@@ -427,14 +431,75 @@ impl GCloudConfig {
 
 /// Config for where WDLs should be stored
 #[derive(Serialize, Deserialize, Clone)]
-pub struct WdlStorageConfig {
+pub enum WdlStorageConfig {
+    /// Mode for storing wdls locally
+    #[serde(rename = "local")]
+    Local(LocalWdlStorageConfig),
+    /// Mode for storing wdls in a GCS bucket
+    #[serde(rename = "gcs")]
+    GCS(GCSWdlStorageConfig),
+}
+
+impl WdlStorageConfig {
+    pub fn is_local(&self) -> bool {
+        match self {
+            WdlStorageConfig::Local(_) => true,
+            _ => false,
+        }
+    }
+    pub fn as_local(&self) -> Option<&LocalWdlStorageConfig> {
+        match self {
+            WdlStorageConfig::Local(s) => Some(s),
+            _ => None,
+        }
+    }
+    pub fn is_gcs(&self) -> bool {
+        match self {
+            WdlStorageConfig::GCS(_) => true,
+            _ => false,
+        }
+    }
+    pub fn as_gcs(&self) -> Option<&GCSWdlStorageConfig> {
+        match self {
+            WdlStorageConfig::GCS(s) => Some(s),
+            _ => None,
+        }
+    }
+    /// Returns the wdl location value for the config, whether it's a local directory path or a
+    /// gs uri
+    pub fn wdl_location(&self) -> &String {
+        match self {
+            WdlStorageConfig::GCS(gcs_config) => gcs_config.wdl_location(),
+            WdlStorageConfig::Local(local_config) => local_config.wdl_location(),
+        }
+    }
+}
+
+impl Default for WdlStorageConfig {
+    fn default() -> Self {
+        WdlStorageConfig::Local(LocalWdlStorageConfig::default())
+    }
+}
+
+/// Config for storing WDLs locally
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LocalWdlStorageConfig {
     /// Local directory in which to store WDLs
-    #[serde(default = "wdl_directory_default")]
-    wdl_directory: String,
+    #[serde(default = "wdl_location_default")]
+    wdl_location: String,
+}
+
+impl LocalWdlStorageConfig {
+    pub fn new(wdl_location: String) -> Self {
+        LocalWdlStorageConfig { wdl_location }
+    }
+    pub fn wdl_location(&self) -> &String {
+        &self.wdl_location
+    }
 }
 
 // Function for providing the default value
-fn wdl_directory_default() -> String {
+fn wdl_location_default() -> String {
     let mut current_dir =
         std::env::current_dir().expect("Failed to get current directory for wdl directory default");
     current_dir.push("carrot");
@@ -446,20 +511,27 @@ fn wdl_directory_default() -> String {
 }
 
 // Defining a default value for WdlStorageConfig so the user doesn't have to explicitly specify it
-impl Default for WdlStorageConfig {
+impl Default for LocalWdlStorageConfig {
     fn default() -> Self {
-        WdlStorageConfig {
-            wdl_directory: wdl_directory_default(),
+        LocalWdlStorageConfig {
+            wdl_location: wdl_location_default(),
         }
     }
 }
 
-impl WdlStorageConfig {
-    pub fn new(wdl_directory: String) -> Self {
-        WdlStorageConfig { wdl_directory }
+/// Config for storing wdls in GCS
+#[derive(Serialize, Deserialize, Clone)]
+pub struct GCSWdlStorageConfig {
+    /// gs uri to location in which to store wdls
+    wdl_location: String,
+}
+
+impl GCSWdlStorageConfig {
+    pub fn new(wdl_location: String) -> Self {
+        GCSWdlStorageConfig { wdl_location }
     }
-    pub fn wdl_directory(&self) -> &String {
-        &self.wdl_directory
+    pub fn wdl_location(&self) -> &String {
+        &self.wdl_location
     }
 }
 

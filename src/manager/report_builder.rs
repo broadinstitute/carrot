@@ -12,7 +12,7 @@ use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
-use crate::util::python_dict_formatter;
+use crate::util::{python_dict_formatter, temp_storage};
 use core::fmt;
 use diesel::PgConnection;
 use log::{debug, error, warn};
@@ -421,9 +421,9 @@ impl ReportBuilder {
             &report.config,
         )?;
         // Write it to a file
-        let json_file = util::get_temp_file(&input_json.to_string())?;
+        let json_file = temp_storage::get_temp_file(&input_json.to_string())?;
         // Write the wdl to a file
-        let wdl_file = util::get_temp_file(generator_wdl)?;
+        let wdl_file = temp_storage::get_temp_file(generator_wdl)?;
         // Submit report generation job to cromwell
         let start_job_response =
             util::start_job_from_file(&self.cromwell_client, &wdl_file.path(), &json_file.path())
@@ -740,7 +740,7 @@ impl ReportBuilder {
         run_name: &str,
     ) -> Result<String, Error> {
         // Write the json to a temporary file
-        let report_file = match util::get_temp_file(&report_json.to_string()) {
+        let report_file = match temp_storage::get_temp_file(&report_json.to_string()) {
             Ok(file) => file,
             Err(e) => {
                 error!("Failed to create temp file for uploading report template");

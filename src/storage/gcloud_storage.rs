@@ -1,9 +1,10 @@
 //! Defines functionality for interacting with the google cloud storage API
 use google_storage1::{Object, Storage};
+use hyper::client::Response;
 use percent_encoding::{AsciiSet, CONTROLS};
 use std::fmt;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 
 /// Prefix indicating a URI is a GS URI
@@ -193,7 +194,8 @@ impl GCloudClient {
         Ok(gcs_object)
     }
 
-    /// Uploads `file` to the specified gs `address` with the name `name`
+    /// Uploads `file` to the specified gs `address` with the name `name`. Returns the gs uri for
+    /// the created GCS object
     ///
     /// Uses `self.storage_hub` to place a GET request to the object at `address` using the Google
     /// Cloud Storage JSON API, specifically to retrieve the file contents as a String
@@ -238,6 +240,43 @@ impl GCloudClient {
             object.name.unwrap()
         ))
     }
+
+    /// Uploads `data` to the specified gs `address` with the name `name`. Returns the gs uri for the
+    /// created GCS object
+    ///
+    /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
+    /// Storage JSON API, specifically to retrieve the file contents as a String
+    pub async fn upload_text_to_gs_uri(
+        &self,
+        data: &str,
+        address: &str,
+        name: &str,
+    ) -> Result<String, Error> {
+        // Parse address to get bucket and object name
+        let (bucket_name, object_name): (String, String) = parse_bucket_and_object_name(address)?;
+        // Append name to the end of object name to get the full name we'll use
+        let full_name: String = object_name + "/" + name;
+        // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
+        let borrowed_storage_hub: &StorageHub = &self.storage_hub.lock().unwrap();
+        // Make a cursor from data so it can be uploaded
+        let mut data_buf_reader: Cursor<&[u8]> = Cursor::new(data.as_bytes());
+        // Make a default storage object because that's required by the gcloud storage library for some
+        // reason
+        let object: Object = Object::default();
+        // Upload the data to the gcloud location
+        let result: (Response, Object) = borrowed_storage_hub
+            .objects()
+            .insert(object, &bucket_name)
+            .name(&full_name)
+            .param("uploadType", "multipart")
+            .upload(&mut data_buf_reader, "text/plain".parse().unwrap())?;
+        // Return the gs address of the object
+        Ok(format!(
+            "gs://{}/{}",
+            result.1.bucket.unwrap(),
+            result.1.name.unwrap()
+        ))
+    }
 }
 
 /// A mock version of the GCLoudClient for other modules to use in tests that doesn't actually
@@ -251,6 +290,7 @@ pub struct GCloudClient {
     retrieve_media: Option<Arc<Box<dyn Fn(&str) -> Result<String, Error>>>>,
     retrieve_object: Option<Arc<Box<dyn Fn(&str) -> Result<Object, Error>>>>,
     upload_file: Option<Arc<Box<dyn Fn(File, &str, &str) -> Result<String, Error>>>>,
+    upload_text: Option<Arc<Box<dyn Fn(&str, &str, &str) -> Result<String, Error>>>>,
 }
 
 #[cfg(test)]
@@ -262,6 +302,7 @@ impl GCloudClient {
             retrieve_media: None,
             retrieve_object: None,
             upload_file: None,
+            upload_text: None,
         }
     }
     pub fn set_retrieve_media(
@@ -281,6 +322,12 @@ impl GCloudClient {
         upload_file_fn: Box<dyn Fn(File, &str, &str) -> Result<String, Error>>,
     ) {
         self.upload_file = Some(Arc::new(upload_file_fn));
+    }
+    pub fn set_upload_text(
+        &mut self,
+        upload_text_fn: Box<dyn Fn(&str, &str, &str) -> Result<String, Error>>,
+    ) {
+        self.upload_text = Some(Arc::new(upload_text_fn));
     }
     pub async fn retrieve_object_media_with_gs_uri(&self, address: &str) -> Result<String, Error> {
         match &self.retrieve_media {
@@ -303,6 +350,17 @@ impl GCloudClient {
         match &self.upload_file {
             Some(function) => function(file, address, name),
             None => panic!("No function set for upload_file"),
+        }
+    }
+    pub async fn upload_text_to_gs_uri(
+        &self,
+        data: &str,
+        address: &str,
+        name: &str,
+    ) -> Result<String, Error> {
+        match &self.upload_text {
+            Some(function) => function(data, address, name),
+            None => panic!("No function set for upload_text"),
         }
     }
 }

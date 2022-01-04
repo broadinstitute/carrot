@@ -10,7 +10,8 @@ status_manager:
   status_check_wait_time_in_secs: 30
   allowed_consecutive_status_check_failures: 1
 wdl_storage:
-  wdl_directory: ~/carrot/wdl
+  local:
+    wdl_location: ~/carrot/wdl
 email:
   sendmail:
     from: kevin@example.com
