@@ -18,7 +18,7 @@ openssl = "0.10"
 # Environment variables
 dotenv = "0.15.0"
 # Logging
-simple_logger = "1.13"
+simple_logger = "1.16"
 log = { version = "0.4.14", features = ["serde"] }
 # DB connection and pooling
 diesel = { version = "1.4.3", features = ["postgres", "r2d2", "uuidv07", "chrono", "serde_json"] }

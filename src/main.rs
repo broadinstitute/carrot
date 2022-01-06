@@ -113,8 +113,14 @@ fn main() {
     };
 
     // Initialize logger with level from config
-    simple_logger::init_with_level(carrot_config.logging().level().to_owned())
-        .expect("Failed to initialize logger");
+    let mut logger = simple_logger::SimpleLogger::new()
+        .with_utc_timestamps()
+        .with_level(carrot_config.logging().level().to_owned().to_level_filter());
+    // Add any module-specific levels
+    for item in carrot_config.logging().modules() {
+        logger = logger.with_module_level(item.0, item.1.to_owned().to_level_filter());
+    }
+    logger.init().expect("Failed to initialize logger");
 
     // Create atomic variable for tracking whether user has hit Ctrl-C
     let user_term = Arc::new(AtomicBool::new(true));

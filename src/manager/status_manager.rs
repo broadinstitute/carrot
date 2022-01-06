@@ -51,7 +51,7 @@ enum CromwellStatus {
     Failed,
     Aborted,
     Aborting,
-    Other(String)
+    Other(String),
 }
 
 /// Implementing From<&str> and Display for CromwellStatus so we can easily convert to and from the raw
@@ -68,7 +68,7 @@ impl std::convert::From<&str> for CromwellStatus {
             "failed" => Self::Failed,
             "aborted" => Self::Aborted,
             "aborting" => Self::Aborting,
-            _ => Self::Other(String::from(s))
+            _ => Self::Other(String::from(s)),
         }
     }
 }
@@ -84,7 +84,7 @@ impl fmt::Display for CromwellStatus {
             CromwellStatus::Failed => write!(f, "failed"),
             CromwellStatus::Aborted => write!(f, "aborted"),
             CromwellStatus::Aborting => write!(f, "aborting"),
-            CromwellStatus::Other(s) => write!(f, "{}", s)
+            CromwellStatus::Other(s) => write!(f, "{}", s),
         }
     }
 }
@@ -1161,7 +1161,9 @@ impl StatusManager {
                 CromwellStatus::Running => Some(RunStatusEnum::TestRunning),
                 CromwellStatus::Starting => Some(RunStatusEnum::TestStarting),
                 CromwellStatus::QueuedInCromwell => Some(RunStatusEnum::TestQueuedInCromwell),
-                CromwellStatus::WaitingForQueueSpace => Some(RunStatusEnum::TestWaitingForQueueSpace),
+                CromwellStatus::WaitingForQueueSpace => {
+                    Some(RunStatusEnum::TestWaitingForQueueSpace)
+                }
                 CromwellStatus::Succeeded => Some(RunStatusEnum::Succeeded),
                 CromwellStatus::Failed => Some(RunStatusEnum::TestFailed),
                 CromwellStatus::Aborted => Some(RunStatusEnum::TestAborted),
@@ -1174,7 +1176,9 @@ impl StatusManager {
                 CromwellStatus::Running => Some(RunStatusEnum::EvalRunning),
                 CromwellStatus::Starting => Some(RunStatusEnum::EvalStarting),
                 CromwellStatus::QueuedInCromwell => Some(RunStatusEnum::EvalQueuedInCromwell),
-                CromwellStatus::WaitingForQueueSpace => Some(RunStatusEnum::EvalWaitingForQueueSpace),
+                CromwellStatus::WaitingForQueueSpace => {
+                    Some(RunStatusEnum::EvalWaitingForQueueSpace)
+                }
                 CromwellStatus::Succeeded => Some(RunStatusEnum::Succeeded),
                 CromwellStatus::Failed => Some(RunStatusEnum::EvalFailed),
                 CromwellStatus::Aborted => Some(RunStatusEnum::EvalAborted),
@@ -1185,7 +1189,9 @@ impl StatusManager {
     }
 
     /// Returns equivalent BuildStatusEnum for `cromwell_status`
-    fn get_build_status_for_cromwell_status(cromwell_status: CromwellStatus) -> Option<BuildStatusEnum> {
+    fn get_build_status_for_cromwell_status(
+        cromwell_status: CromwellStatus,
+    ) -> Option<BuildStatusEnum> {
         match cromwell_status {
             CromwellStatus::Submitted => Some(BuildStatusEnum::Submitted),
             CromwellStatus::Running => Some(BuildStatusEnum::Running),
@@ -1200,9 +1206,11 @@ impl StatusManager {
     }
 
     /// Returns equivalent ReportStatusEnum for `cromwell_status`
-    fn get_report_status_for_cromwell_status(cromwell_status: CromwellStatus) -> Option<ReportStatusEnum> {
+    fn get_report_status_for_cromwell_status(
+        cromwell_status: CromwellStatus,
+    ) -> Option<ReportStatusEnum> {
         match cromwell_status {
-            CromwellStatus::Submitted  => Some(ReportStatusEnum::Submitted),
+            CromwellStatus::Submitted => Some(ReportStatusEnum::Submitted),
             CromwellStatus::Running => Some(ReportStatusEnum::Running),
             CromwellStatus::Starting => Some(ReportStatusEnum::Starting),
             CromwellStatus::QueuedInCromwell => Some(ReportStatusEnum::QueuedInCromwell),
