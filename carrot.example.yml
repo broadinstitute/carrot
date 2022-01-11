@@ -82,4 +82,10 @@ reporting:
   report_docker_location: us.gcr.io/example/vis_docker:latest
 # Config for logging level of carrot
 logging:
+  # The default logging level you want to use for all modules
   level: DEBUG
+  # Optionally, you can override the default logging level for specific modules using the name of the module as the key
+  # e.g. maybe hyper and rustls are more verbose than needed at DEBUG level, so we've overridden them to use INFO
+  modules:
+    hyper: INFO
+    rustls: INFO
