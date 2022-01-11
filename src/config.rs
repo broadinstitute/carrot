@@ -3,6 +3,7 @@
 //! from here instead of loaded again elsewhere
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Top level config struct that holds other area-specific configs
 #[derive(Serialize, Deserialize, Clone)]
@@ -179,6 +180,8 @@ impl Config {
 pub struct LoggingConfig {
     #[serde(default = "logging_level_default")]
     level: log::Level,
+    #[serde(default)]
+    modules: HashMap<String, log::Level>,
 }
 
 // Function for providing the default value
@@ -187,11 +190,14 @@ fn logging_level_default() -> log::Level {
 }
 
 impl LoggingConfig {
-    pub fn new(level: log::Level) -> Self {
-        LoggingConfig { level }
+    pub fn new(level: log::Level, modules: HashMap<String, log::Level>) -> Self {
+        LoggingConfig { level, modules }
     }
     pub fn level(&self) -> &log::Level {
         &self.level
+    }
+    pub fn modules(&self) -> &HashMap<String, log::Level> {
+        &self.modules
     }
 }
 
@@ -429,11 +435,14 @@ pub struct WdlStorageConfig {
 
 // Function for providing the default value
 fn wdl_directory_default() -> String {
-    let mut current_dir = std::env::current_dir()
-        .expect("Failed to get current directory for wdl directory default");
+    let mut current_dir =
+        std::env::current_dir().expect("Failed to get current directory for wdl directory default");
     current_dir.push("carrot");
     current_dir.push("wdl");
-    current_dir.to_str().expect("Failed to convert wdl directory path to string").to_string()
+    current_dir
+        .to_str()
+        .expect("Failed to convert wdl directory path to string")
+        .to_string()
 }
 
 // Defining a default value for WdlStorageConfig so the user doesn't have to explicitly specify it
