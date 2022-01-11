@@ -1,6 +1,6 @@
 //! Module for configuring app service
 
-use crate::config::{Config, PrivateGithubAccessConfig};
+use crate::config::{Config, PrivateGithubAccessConfig, WdlStorageConfig};
 use crate::db::DbPool;
 use crate::manager::report_builder::ReportBuilder;
 use crate::manager::test_runner::TestRunner;
@@ -9,6 +9,7 @@ use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes;
 use crate::storage::gcloud_storage::GCloudClient;
 use crate::util::git_repos::GitRepoChecker;
+use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool::WomtoolRunner;
 use actix_rt::System;
 use actix_web::client::Client;
@@ -66,7 +67,7 @@ pub fn run_app(
         let report_builder: Option<ReportBuilder> = match carrot_config.reporting() {
             Some(reporting_config) => {
                 // We can unwrap gcloud_client because reporting won't work without it
-                Some(ReportBuilder::new(cromwell_client, gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config))
+                Some(ReportBuilder::new(cromwell_client, gcloud_client.clone().expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config))
             },
             None => None
         };
@@ -81,6 +82,18 @@ pub fn run_app(
         };
         // Create a womtool runner
         let womtool_runner: WomtoolRunner = WomtoolRunner::new(carrot_config.validation().womtool_location());
+        // Create a wdl storage client according to the wdl storage config
+        let wdl_storage_client: WdlStorageClient = match carrot_config.wdl_storage() {
+            WdlStorageConfig::Local(local_storage_config) => {
+                WdlStorageClient::new_local(local_storage_config.clone())
+            },
+            WdlStorageConfig::GCS(gcs_storage_config) => {
+                WdlStorageClient::new_gcs(
+                    gcs_storage_config.clone(),
+                    gcloud_client.expect("Failed to unwrap gcloud_client to create gcs wdl storage client.  This should not happen")
+                )
+            }
+        };
 
         App::new()
             .wrap(Logger::default()) // Use default logger as configured in .env file
@@ -90,6 +103,7 @@ pub fn run_app(
             .data(report_builder) // For starting report builds in the run_report routes
             .data(womtool_runner) // For validating wdls in the template routes
             .data(test_resource_client) // For retrieving WDLs in the template routes
+            .data(wdl_storage_client) // For storing wdls in the template routes
             .data(carrot_config.clone())// Allow worker threads to access config variables
             .service(web::scope("/api/v1/").configure(move |cfg: &mut web::ServiceConfig| {
                 routes_config(cfg, enable_reporting, enable_custom_image_builds)

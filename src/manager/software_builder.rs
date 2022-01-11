@@ -10,6 +10,7 @@ use crate::models::software_version::{
     NewSoftwareVersion, SoftwareVersionData, SoftwareVersionQuery,
 };
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
+use crate::util::temp_storage;
 use diesel::PgConnection;
 use serde_json::json;
 use std::fmt;
@@ -90,7 +91,7 @@ impl SoftwareBuilder {
         };
 
         // Put it in a temporary file to be sent with cromwell request
-        let wdl_file = util::get_temp_file(wdl_to_use)?;
+        let wdl_file = temp_storage::get_temp_file(wdl_to_use)?;
 
         // Create path to wdl that builds docker images
         let wdl_file_path: &Path = &wdl_file.path();
@@ -121,7 +122,7 @@ impl SoftwareBuilder {
         };
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = util::get_temp_file(&json_to_submit.to_string())?;
+        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
 
         // Send job request to cromwell
         let start_job_response =

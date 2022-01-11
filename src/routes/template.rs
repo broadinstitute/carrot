@@ -13,7 +13,7 @@ use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::storage::gcloud_storage;
 use crate::util::temp_storage;
-use crate::util::wdl_storage;
+use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool;
 use crate::validation::womtool::WomtoolRunner;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
@@ -53,7 +53,7 @@ impl fmt::Display for WdlType {
 /// error occurs
 ///
 /// # Panics
-/// Panics if attempting to connect to the detabase results in an error
+/// Panics if attempting to connect to the database results in an error
 async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
@@ -174,6 +174,7 @@ async fn create(
     web::Json(new_template): web::Json<NewTemplate>,
     pool: web::Data<db::DbPool>,
     test_resource_client: web::Data<TestResourceClient>,
+    wdl_storage_client: web::Data<WdlStorageClient>,
     womtool_runner: web::Data<WomtoolRunner>,
     carrot_config: web::Data<Config>,
 ) -> impl Responder {
@@ -193,21 +194,21 @@ async fn create(
     // Store and validate the WDLs
     let test_wdl_location = validate_and_store_wdl(
         &test_resource_client,
+        &wdl_storage_client,
         &womtool_runner,
         &conn,
         &new_template.test_wdl,
         WdlType::Test,
-        carrot_config.wdl_storage().wdl_directory(),
         &new_template.name,
     )
     .await?;
     let eval_wdl_location = validate_and_store_wdl(
         &test_resource_client,
+        &wdl_storage_client,
         &womtool_runner,
         &conn,
         &new_template.eval_wdl,
         WdlType::Eval,
-        carrot_config.wdl_storage().wdl_directory(),
         &new_template.name,
     )
     .await?;
@@ -263,6 +264,7 @@ async fn update(
     web::Json(template_changes): web::Json<TemplateChangeset>,
     pool: web::Data<db::DbPool>,
     test_resource_client: web::Data<TestResourceClient>,
+    wdl_storage_client: web::Data<WdlStorageClient>,
     womtool_runner: web::Data<WomtoolRunner>,
     carrot_config: web::Data<Config>,
 ) -> impl Responder {
@@ -301,11 +303,11 @@ async fn update(
     if let Some(test_wdl) = &template_changes.test_wdl {
         let test_wdl_location = validate_and_store_wdl(
             &test_resource_client,
+            &wdl_storage_client,
             &womtool_runner,
             &conn,
             test_wdl,
             WdlType::Test,
-            carrot_config.wdl_storage().wdl_directory(),
             &id_param,
         )
         .await?;
@@ -314,11 +316,11 @@ async fn update(
     if let Some(eval_wdl) = &template_changes.eval_wdl {
         let eval_wdl_location = validate_and_store_wdl(
             &test_resource_client,
+            &wdl_storage_client,
             &womtool_runner,
             &conn,
             eval_wdl,
             WdlType::Eval,
-            carrot_config.wdl_storage().wdl_directory(),
             &id_param,
         )
         .await?;
@@ -551,16 +553,19 @@ async fn download_wdl(
 /// `identifier` should be an identifier for the entity to which the wdl belongs (e.g. the
 /// template's name or id)
 async fn validate_and_store_wdl(
-    client: &TestResourceClient,
+    test_resource_client: &TestResourceClient,
+    wdl_storage_client: &WdlStorageClient,
     womtool_runner: &WomtoolRunner,
     conn: &PgConnection,
     wdl_location: &str,
     wdl_type: WdlType,
-    wdl_dir: &str,
     identifier: &str,
 ) -> Result<String, HttpResponse> {
     // Get the wdl and stick it in a temp file first so we can validate it
-    let wdl_string: String = match client.get_resource_as_string(wdl_location).await {
+    let wdl_string: String = match test_resource_client
+        .get_resource_as_string(wdl_location)
+        .await
+    {
         Ok(wdl_string) => wdl_string,
         // If we failed to get it, return an error response
         Err(e) => {
@@ -598,19 +603,12 @@ async fn validate_and_store_wdl(
     // Validate the wdl
     validate_wdl(womtool_runner, wdl_temp_file.path(), wdl_type, identifier).await?;
     // Store it
-    // We can unwrap the wdl location to_str because, if the path cannot be made into a string,
-    // CARROT won't work properly anyway
     store_wdl(
-        client,
+        wdl_storage_client,
         conn,
-        wdl_temp_file.path().to_str().unwrap_or_else(|| {
-            panic!(
-                "Failed to get wdl temp file path {:?} as str",
-                wdl_temp_file.path()
-            )
-        }),
+        wdl_location,
+        &wdl_string,
         wdl_type,
-        wdl_dir,
     )
     .await
 }
@@ -629,34 +627,30 @@ async fn validate_wdl(
     wdl_type: WdlType,
     identifier: &str,
 ) -> Result<(), HttpResponse> {
-    // Make an owned version of the wdl path so we can move it into the web::block thread
-    let owned_wdl_path = wdl_path.to_owned();
     // Validate the wdl
-    womtool_runner
-        .womtool_validate(&owned_wdl_path)
-        .map_err(|e| {
-            // If it's not a valid WDL, return an error to inform the user
-            match e {
-                womtool::Error::Invalid(msg) => {
-                    debug!(
-                        "Invalid {} WDL submitted for template {} with womtool msg {}",
-                        wdl_type, identifier, msg
-                    );
-                    HttpResponse::BadRequest().json(ErrorBody {
-                        title: "Invalid WDL".to_string(),
-                        status: 400,
-                        detail: format!(
-                            "Submitted {} WDL failed WDL validation with womtool message: {}",
-                            wdl_type, msg
-                        ),
-                    })
-                }
-                _ => {
-                    error!("{:?}", e);
-                    default_500(&e)
-                }
+    womtool_runner.womtool_validate(&wdl_path).map_err(|e| {
+        // If it's not a valid WDL, return an error to inform the user
+        match e {
+            womtool::Error::Invalid(msg) => {
+                debug!(
+                    "Invalid {} WDL submitted for template {} with womtool msg {}",
+                    wdl_type, identifier, msg
+                );
+                HttpResponse::BadRequest().json(ErrorBody {
+                    title: "Invalid WDL".to_string(),
+                    status: 400,
+                    detail: format!(
+                        "Submitted {} WDL failed WDL validation with womtool message: {}",
+                        wdl_type, msg
+                    ),
+                })
             }
-        })
+            _ => {
+                error!("{:?}", e);
+                default_500(&e)
+            }
+        }
+    })
 }
 
 /// Retrieves and locally stores the wdl from wdl_location. Returns a string containing its local
@@ -665,26 +659,21 @@ async fn validate_wdl(
 /// This function is basically a wrapper for [`crate::util::wdl_storage::store_wdl`] that converts
 /// the output into a format that can be more easily used by the routes functions within this module
 async fn store_wdl(
-    client: &TestResourceClient,
+    client: &WdlStorageClient,
     conn: &PgConnection,
     wdl_location: &str,
+    wdl_string: &str,
     wdl_type: WdlType,
-    wdl_dir: &str,
 ) -> Result<String, HttpResponse> {
-    // Attempt to store the wdl locally
-    match wdl_storage::store_wdl(
-        client,
-        conn,
-        wdl_location,
-        &format!("{}.wdl", wdl_type),
-        wdl_dir,
-    )
-    .await
+    // Attempt to store the wdl
+    match client
+        .store_wdl(conn, wdl_string, &format!("{}.wdl", wdl_type))
+        .await
     {
         Ok(wdl_local_path) => Ok(wdl_local_path),
         Err(e) => {
             debug!(
-                "Encountered error trying to retrieve and store wdl at {}: {}",
+                "Encountered error trying to store wdl at {}: {}",
                 wdl_location, e
             );
             Err(HttpResponse::InternalServerError().json(ErrorBody {
@@ -719,7 +708,7 @@ fn get_uri_for_wdl_location(
     wdl_type: WdlType,
 ) -> String {
     // If the location starts with gs://, http://, or https://, we'll just return it, since the
-    // user can use that to retrive the wdl
+    // user can use that to retrieve the wdl
     if wdl_location.starts_with("gs://")
         || wdl_location.starts_with("http://")
         || wdl_location.starts_with("https://")
@@ -762,6 +751,7 @@ mod tests {
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::test::{NewTest, TestData};
+    use crate::storage::gcloud_storage::GCloudClient;
     use crate::unit_test_util::*;
     use actix_web::client::Client;
     use actix_web::{http, test, App};
@@ -1137,9 +1127,11 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_success() {
-        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        // Set up config, test resource client, womtool runner, and wdl_storage_client which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1149,6 +1141,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1219,6 +1212,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1228,6 +1223,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1266,6 +1262,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1275,6 +1273,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1317,6 +1316,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1326,6 +1327,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1376,6 +1378,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1385,6 +1389,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1420,6 +1425,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1429,6 +1436,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1471,6 +1479,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1480,6 +1490,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;
@@ -1514,6 +1525,8 @@ mod tests {
         // Set up config, test resource client, and womtool runner which are needed for this mapping
         let test_config = load_default_config();
         let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
         let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
         let pool = get_test_db_pool();
 
@@ -1523,6 +1536,7 @@ mod tests {
                 .data(test_config)
                 .data(test_resource_client)
                 .data(womtool_runner)
+                .data(wdl_storage_client)
                 .configure(init_routes),
         )
         .await;

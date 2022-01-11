@@ -1,7 +1,7 @@
 //! Contains utility functions required by unit tests within the models module
 
 use crate::config;
-use crate::config::{Config, CromwellConfig, WdlStorageConfig};
+use crate::config::{Config, CromwellConfig, LocalWdlStorageConfig, WdlStorageConfig};
 use crate::db;
 use diesel::pg::PgConnection;
 use diesel::Connection;
@@ -87,5 +87,7 @@ pub fn get_temp_file(contents: &str) -> NamedTempFile {
 }
 
 pub fn init_wdl_temp_dir() -> WdlStorageConfig {
-    WdlStorageConfig::new(String::from(&*WDL_TEMP_DIR.path().to_str().unwrap()))
+    WdlStorageConfig::Local(LocalWdlStorageConfig::new(String::from(
+        &*WDL_TEMP_DIR.path().to_str().unwrap(),
+    )))
 }

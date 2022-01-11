@@ -15,9 +15,14 @@ status_manager:
   status_check_wait_time_in_secs: 300
   # Optional number of consecutive failures to allow when checking run/build statuses before terminating, defaults to 5
   allowed_consecutive_status_check_failures: 5
+# Where to store WDLs either locally or in gcs (defaults to local with /carrot/wdl for the location)
 wdl_storage:
-  # Where to store WDLs locally (defaults to /carrot/wdl)
-  wdl_directory: ~/carrot/wdl
+  # Use local if you want to store in a local directory
+  local:
+    wdl_location: ~/carrot/wdl
+  # Use gcs if you want to store in a gcs location
+  # gcs:
+    # wdl_location: gs://example.com/example/dir
 # Email config (optional)
 email:
   # Use server if you want to connect to a mail server
