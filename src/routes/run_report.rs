@@ -766,7 +766,7 @@ mod tests {
             Some(gcloud_config) => {
                 let mut gcloud_client = GCloudClient::new(gcloud_config.gcloud_sa_key_file());
                 gcloud_client.set_upload_file(Box::new(
-                    |f: File,
+                    |f: &File,
                      address: &str,
                      name: &str|
                      -> Result<String, crate::storage::gcloud_storage::Error> {

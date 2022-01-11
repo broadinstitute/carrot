@@ -26,9 +26,9 @@ pub struct WdlHashData {
 /// DB
 /// Before insertion, `data` is hashed using SHA-512 and the hash is what is actually
 /// inserted into the DB
-pub struct WdlDataToHash {
+pub struct WdlDataToHash<'a> {
     pub location: String,
-    pub data: String,
+    pub data: &'a [u8],
 }
 
 /// The data we'll actually insert when creating a new WDL_HASH record
@@ -50,7 +50,7 @@ impl WdlHashData {
     /// WdlHashData instances or an error if the query fails for some reason
     pub fn find_by_data_to_hash(
         conn: &PgConnection,
-        query_data: &str,
+        query_data: &[u8],
     ) -> Result<Vec<Self>, diesel::result::Error> {
         // Make a hash for the data
         let mut hasher: Sha512 = Sha512::new();
@@ -95,7 +95,7 @@ mod tests {
     fn insert_test_wdl_hash(conn: &PgConnection) -> WdlHashData {
         let new_wdl_hash = WdlDataToHash {
             location: String::from("/test/path/to/wdl.wdl"),
-            data: String::from("Test data to hash"),
+            data: b"Test data to hash",
         };
 
         WdlHashData::create(conn, new_wdl_hash).expect("Failed inserting test wdl_hash")
@@ -106,7 +106,7 @@ mod tests {
 
         let new_wdl_hash = WdlDataToHash {
             location: String::from("/test/path/to/wdl.wdl"),
-            data: String::from("Different test data to hash"),
+            data: b"Different test data to hash",
         };
 
         test_wdl_hashes
@@ -114,7 +114,7 @@ mod tests {
 
         let new_wdl_hash = WdlDataToHash {
             location: String::from("/different/path/to/wdl.wdl"),
-            data: String::from("Different test data to hash"),
+            data: b"Different test data to hash",
         };
 
         test_wdl_hashes
@@ -132,7 +132,7 @@ mod tests {
         let test_wdl_hashes = insert_test_wdl_hashes(&conn);
 
         let found_wdl_hashes =
-            WdlHashData::find_by_data_to_hash(&conn, "Different test data to hash")
+            WdlHashData::find_by_data_to_hash(&conn, b"Different test data to hash")
                 .expect("Failed to retrieve test wdl_hash by hash");
 
         assert_eq!(found_wdl_hashes.len(), 2);
@@ -148,7 +148,7 @@ mod tests {
         insert_test_wdl_hashes(&conn);
 
         let empty_result =
-            WdlHashData::find_by_data_to_hash(&conn, "Random data we won't find").unwrap();
+            WdlHashData::find_by_data_to_hash(&conn, b"Random data we won't find").unwrap();
 
         assert_eq!(empty_result.len(), 0);
     }
@@ -176,7 +176,7 @@ mod tests {
 
         let copy_wdl_hash = WdlDataToHash {
             location: test_wdl_hash.location,
-            data: String::from("Test data to hash"),
+            data: b"Test data to hash",
         };
 
         let new_wdl_hash = WdlHashData::create(&conn, copy_wdl_hash);

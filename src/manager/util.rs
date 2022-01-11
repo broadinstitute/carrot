@@ -94,7 +94,7 @@ mod tests {
             "myWorkflow.test":"test"
         });
         // Write them to a temp file
-        let test_json_file = temp_storage::get_temp_file(&params.to_string()).unwrap();
+        let test_json_file = temp_storage::get_temp_file(&params.to_string().as_bytes()).unwrap();
         // Define mockito mapping for response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",

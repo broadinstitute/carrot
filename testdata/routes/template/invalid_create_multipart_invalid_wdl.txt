@@ -1,0 +1,38 @@
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="pipeline_id"
+
+{pipeline_id}
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="name"
+
+Test template
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="description"
+
+Template for testing multipart template creation
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="created_by"
+
+Kevin@example.com
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="test_wdl_file"; filename="test.wdl"
+Content-Type: text/plain; charset=UTF-8
+
+workflow myWorkflow {
+    call wrongTask
+}
+
+task myTask {
+    command {
+        echo "hello world"
+    }
+    output {
+        String out = read_string(stdout())
+    }
+}
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="eval_wdl"
+Content-Type: text/plain; charset=UTF-8
+
+{eval_wdl_location}
+-----------------------------974767299852498929531610575--

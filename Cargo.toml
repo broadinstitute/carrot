@@ -12,6 +12,7 @@ actix-web = { version = "^3.3.2", features=["openssl"] }
 actix-rt = "1.0.0"
 actix-service = "1.0.5"
 actix-codec = "0.2.0"
+actix-multipart = "0.3.0" # For receiving multipart data
 actix-multipart-rfc7578 = "0.4.0" # For sending files in requests
 # For SSL requests
 openssl = "0.10"
@@ -77,4 +78,9 @@ mockito = "0.30"
 # For parsing test emails
 mailparse = "0.13.0"
 serde_bytes = "0.11"
+# For testing multipart parsing
+tokio = { version = "1.8.4", features = ["sync"] }
+tokio-stream = "0.1"
+futures-core = { version = "0.3.7", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3.7", default-features = false, features = ["alloc"] }
 

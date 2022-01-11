@@ -8,10 +8,10 @@ use tempfile::NamedTempFile;
 ///
 /// Creates a NamedTempFile and writes `contents` to it.  Returns the file if successful.  Returns
 /// an error if creating or writing to the file fails
-pub fn get_temp_file(contents: &str) -> Result<NamedTempFile, std::io::Error> {
+pub fn get_temp_file(contents: &[u8]) -> Result<NamedTempFile, std::io::Error> {
     match NamedTempFile::new() {
         Ok(mut file) => {
-            if let Err(e) = write!(file, "{}", contents) {
+            if let Err(e) = file.write_all(contents) {
                 error!(
                     "Encountered error while attempting to write to temporary file: {}",
                     e
