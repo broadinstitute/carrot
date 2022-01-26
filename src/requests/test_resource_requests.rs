@@ -82,7 +82,8 @@ impl TestResourceClient {
 
     /// Returns body of resource at `address` as a String
     ///
-    /// Sends a get request to `address` and parses the response body as a String
+    /// Reads resource at `address` and returns it as a String.  `address` can be an http(s) url, gs
+    /// uri (if `self` has a value for `gcs_client`), or a local file path
     pub async fn get_resource_as_string(&self, address: &str) -> Result<String, Error> {
         // If the address is a gs address and retrieving from gs addresses is enabled, retrieve the data
         // using the gcloud storage api
@@ -95,7 +96,7 @@ impl TestResourceClient {
         }
         // If it's an http/https url, make an http request
         else if address.starts_with("http://") || address.starts_with("https://") {
-            self.get_resource_from_http_url(address).await
+            self.get_resource_as_string_from_http_url(address).await
         }
         // Otherwise, we'll assume it's a local file
         else {
@@ -103,8 +104,8 @@ impl TestResourceClient {
         }
     }
 
-    /// Attempts to retrieve and return the resource at `address`
-    async fn get_resource_from_http_url(&self, address: &str) -> Result<String, Error> {
+    /// Attempts to retrieve and return the resource at `address` as a String
+    async fn get_resource_as_string_from_http_url(&self, address: &str) -> Result<String, Error> {
         let request = self.http_client.get(format!("{}", address));
 
         // Make the request

@@ -91,7 +91,7 @@ impl SoftwareBuilder {
         };
 
         // Put it in a temporary file to be sent with cromwell request
-        let wdl_file = temp_storage::get_temp_file(wdl_to_use)?;
+        let wdl_file = temp_storage::get_temp_file(wdl_to_use.as_bytes())?;
 
         // Create path to wdl that builds docker images
         let wdl_file_path: &Path = &wdl_file.path();
@@ -122,7 +122,7 @@ impl SoftwareBuilder {
         };
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
+        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
 
         // Send job request to cromwell
         let start_job_response =

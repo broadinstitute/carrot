@@ -201,7 +201,7 @@ impl GCloudClient {
     /// Cloud Storage JSON API, specifically to retrieve the file contents as a String
     pub async fn upload_file_to_gs_uri(
         &self,
-        file: File,
+        file: &File,
         address: &str,
         name: &str,
     ) -> Result<String, Error> {
@@ -246,9 +246,9 @@ impl GCloudClient {
     ///
     /// Uses the `storage_hub` to place a GET request to the object at `address` using the Google Cloud
     /// Storage JSON API, specifically to retrieve the file contents as a String
-    pub async fn upload_text_to_gs_uri(
+    pub async fn upload_data_to_gs_uri(
         &self,
-        data: &str,
+        data: &[u8],
         address: &str,
         name: &str,
     ) -> Result<String, Error> {
@@ -259,7 +259,7 @@ impl GCloudClient {
         // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)
         let borrowed_storage_hub: &StorageHub = &self.storage_hub.lock().unwrap();
         // Make a cursor from data so it can be uploaded
-        let mut data_buf_reader: Cursor<&[u8]> = Cursor::new(data.as_bytes());
+        let mut data_buf_reader: Cursor<&[u8]> = Cursor::new(data);
         // Make a default storage object because that's required by the gcloud storage library for some
         // reason
         let object: Object = Object::default();
@@ -289,8 +289,8 @@ impl GCloudClient {
 pub struct GCloudClient {
     retrieve_media: Option<Arc<Box<dyn Fn(&str) -> Result<String, Error>>>>,
     retrieve_object: Option<Arc<Box<dyn Fn(&str) -> Result<Object, Error>>>>,
-    upload_file: Option<Arc<Box<dyn Fn(File, &str, &str) -> Result<String, Error>>>>,
-    upload_text: Option<Arc<Box<dyn Fn(&str, &str, &str) -> Result<String, Error>>>>,
+    upload_file: Option<Arc<Box<dyn Fn(&File, &str, &str) -> Result<String, Error>>>>,
+    upload_data: Option<Arc<Box<dyn Fn(&[u8], &str, &str) -> Result<String, Error>>>>,
 }
 
 #[cfg(test)]
@@ -302,7 +302,7 @@ impl GCloudClient {
             retrieve_media: None,
             retrieve_object: None,
             upload_file: None,
-            upload_text: None,
+            upload_data: None,
         }
     }
     pub fn set_retrieve_media(
@@ -319,15 +319,15 @@ impl GCloudClient {
     }
     pub fn set_upload_file(
         &mut self,
-        upload_file_fn: Box<dyn Fn(File, &str, &str) -> Result<String, Error>>,
+        upload_file_fn: Box<dyn Fn(&File, &str, &str) -> Result<String, Error>>,
     ) {
         self.upload_file = Some(Arc::new(upload_file_fn));
     }
-    pub fn set_upload_text(
+    pub fn set_upload_data(
         &mut self,
-        upload_text_fn: Box<dyn Fn(&str, &str, &str) -> Result<String, Error>>,
+        upload_data_fn: Box<dyn Fn(&[u8], &str, &str) -> Result<String, Error>>,
     ) {
-        self.upload_text = Some(Arc::new(upload_text_fn));
+        self.upload_data = Some(Arc::new(upload_data_fn));
     }
     pub async fn retrieve_object_media_with_gs_uri(&self, address: &str) -> Result<String, Error> {
         match &self.retrieve_media {
@@ -343,7 +343,7 @@ impl GCloudClient {
     }
     pub async fn upload_file_to_gs_uri(
         &self,
-        file: File,
+        file: &File,
         address: &str,
         name: &str,
     ) -> Result<String, Error> {
@@ -352,15 +352,15 @@ impl GCloudClient {
             None => panic!("No function set for upload_file"),
         }
     }
-    pub async fn upload_text_to_gs_uri(
+    pub async fn upload_data_to_gs_uri(
         &self,
-        data: &str,
+        data: &[u8],
         address: &str,
         name: &str,
     ) -> Result<String, Error> {
-        match &self.upload_text {
+        match &self.upload_data {
             Some(function) => function(data, address, name),
-            None => panic!("No function set for upload_text"),
+            None => panic!("No function set for upload_data"),
         }
     }
 }

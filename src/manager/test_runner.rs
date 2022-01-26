@@ -296,14 +296,14 @@ impl TestRunner {
         let json_to_submit = self.format_test_json_for_cromwell(&run.test_input)?;
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
+        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
 
         // Download test wdl and write it to a file
         let test_wdl_as_string = self
             .test_resource_client
             .get_resource_as_string(&template.test_wdl)
             .await?;
-        let test_wdl_as_file = temp_storage::get_temp_file(&test_wdl_as_string)?;
+        let test_wdl_as_file = temp_storage::get_temp_file(&test_wdl_as_string.as_bytes())?;
 
         // Send job request to cromwell
         let start_job_response = match util::start_job_from_file(
@@ -385,14 +385,14 @@ impl TestRunner {
         let json_to_submit = self.format_eval_json_for_cromwell(&run.eval_input, test_outputs)?;
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string())?;
+        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
 
         // Download eval wdl and write it to a file
         let eval_wdl_as_string = self
             .test_resource_client
             .get_resource_as_string(&template.eval_wdl)
             .await?;
-        let eval_wdl_as_file = temp_storage::get_temp_file(&eval_wdl_as_string)?;
+        let eval_wdl_as_file = temp_storage::get_temp_file(&eval_wdl_as_string.as_bytes())?;
 
         // Send job request to cromwell
         let start_job_response = match util::start_job_from_file(

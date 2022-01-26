@@ -1,4 +1,4 @@
-FROM rust:1.51.0
+FROM rust:1.55.0
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get -y --no-install-recommends install \

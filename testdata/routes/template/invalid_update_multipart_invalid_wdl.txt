@@ -1,0 +1,30 @@
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="name"
+
+Updated template
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="description"
+
+Updated description for updated template
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="test_wdl"
+Content-Type: text/plain; charset=UTF-8
+
+{test_wdl_location}
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="eval_wdl_file"; filename="eval.wdl"
+Content-Type: text/plain; charset=UTF-8
+
+workflow myWorkflow {
+    call wrongTask
+}
+
+task myTask {
+    command {
+        echo "hello world"
+    }
+    output {
+        String out = read_string(stdout())
+    }
+}
+-----------------------------974767299852498929531610575--
