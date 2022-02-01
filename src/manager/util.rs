@@ -16,19 +16,24 @@ use std::time::Duration;
 pub async fn start_job_from_file(
     cromwell_client: &CromwellClient,
     wdl_file_path: &Path,
-    json_file_path: &Path,
+    inputs_file_path: &Path,
+    options_file_path: Option<&Path>,
 ) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
+    let options_file_path = match options_file_path {
+        Some(file_path) => Some(PathBuf::from(file_path)),
+        None => None,
+    };
     // Build request parameters
     let cromwell_params = cromwell_requests::StartJobParams {
         labels: None,
         workflow_dependencies: None,
-        workflow_inputs: Some(PathBuf::from(json_file_path)),
+        workflow_inputs: Some(PathBuf::from(inputs_file_path)),
         workflow_inputs_2: None,
         workflow_inputs_3: None,
         workflow_inputs_4: None,
         workflow_inputs_5: None,
         workflow_on_hold: None,
-        workflow_options: None,
+        workflow_options: options_file_path,
         workflow_root: None,
         workflow_source: Some(PathBuf::from(wdl_file_path)),
         workflow_type: Some(WorkflowTypeEnum::WDL),
@@ -95,6 +100,12 @@ mod tests {
         });
         // Write them to a temp file
         let test_json_file = temp_storage::get_temp_file(&params.to_string().as_bytes()).unwrap();
+        // Do the same for options
+        let options: Value = json!({
+            "option": true
+        });
+        let test_options_file =
+            temp_storage::get_temp_file(&options.to_string().as_bytes()).unwrap();
         // Define mockito mapping for response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -106,10 +117,14 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-        let response =
-            start_job_from_file(&cromwell_client, test_path.as_path(), test_json_file.path())
-                .await
-                .unwrap();
+        let response = start_job_from_file(
+            &cromwell_client,
+            test_path.as_path(),
+            test_json_file.path(),
+            Some(test_json_file.path()),
+        )
+        .await
+        .unwrap();
 
         mock.assert();
 

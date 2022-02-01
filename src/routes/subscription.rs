@@ -635,7 +635,9 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            test_option_defaults: None,
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            eval_option_defaults: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 

@@ -30,7 +30,9 @@ pub struct RunQueryIncomplete {
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
     pub test_input: Option<Value>,
+    pub test_options: Option<Value>,
     pub eval_input: Option<Value>,
+    pub eval_options: Option<Value>,
     pub test_cromwell_job_id: Option<String>,
     pub eval_cromwell_job_id: Option<String>,
     pub created_before: Option<NaiveDateTime>,
@@ -52,7 +54,9 @@ pub struct RunQueryIncomplete {
 pub struct NewRunIncomplete {
     pub name: Option<String>,
     pub test_input: Option<Value>,
+    pub test_options: Option<Value>,
     pub eval_input: Option<Value>,
+    pub eval_options: Option<Value>,
     pub created_by: Option<String>,
 }
 
@@ -149,7 +153,9 @@ async fn find_for_test(
         name: query.name,
         status: query.status,
         test_input: query.test_input,
+        test_options: query.test_options,
         eval_input: query.eval_input,
+        eval_options: query.eval_options,
         test_cromwell_job_id: query.test_cromwell_job_id,
         eval_cromwell_job_id: query.eval_cromwell_job_id,
         created_before: query.created_before,
@@ -233,7 +239,9 @@ async fn find_for_template(
         name: query.name,
         status: query.status,
         test_input: query.test_input,
+        test_options: query.test_options,
         eval_input: query.eval_input,
+        eval_options: query.eval_options,
         test_cromwell_job_id: query.test_cromwell_job_id,
         eval_cromwell_job_id: query.eval_cromwell_job_id,
         created_before: query.created_before,
@@ -317,7 +325,9 @@ async fn find_for_pipeline(
         name: query.name,
         status: query.status,
         test_input: query.test_input,
+        test_options: query.test_options,
         eval_input: query.eval_input,
+        eval_options: query.eval_options,
         test_cromwell_job_id: query.test_cromwell_job_id,
         eval_cromwell_job_id: query.eval_cromwell_job_id,
         created_before: query.created_before,
@@ -387,7 +397,9 @@ async fn run_for_test(
             &*id,
             run_inputs.name,
             run_inputs.test_input,
+            run_inputs.test_options,
             run_inputs.eval_input,
+            run_inputs.eval_options,
             run_inputs.created_by,
         )
         .await
@@ -592,7 +604,9 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            test_option_defaults: Some(json!({"test_option":"test"})),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            eval_option_defaults: Some(json!({"eval_option": "test"})),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -615,7 +629,9 @@ mod tests {
             name: test_run.name,
             status: test_run.status,
             test_input: test_run.test_input,
+            test_options: test_run.test_options,
             eval_input: test_run.eval_input,
+            eval_options: test_run.eval_options,
             test_cromwell_job_id: test_run.test_cromwell_job_id,
             eval_cromwell_job_id: test_run.eval_cromwell_job_id,
             created_at: test_run.created_at,
@@ -716,7 +732,9 @@ mod tests {
             template_id: id,
             description: None,
             test_input_defaults: Some(json!({"in_greeting": "Yo"})),
+            test_option_defaults: None,
             eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
+            eval_option_defaults: Some(json!({"option": "true"})),
             created_by: None,
         };
 
@@ -729,7 +747,9 @@ mod tests {
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
+            test_options: Some(json!({"test": "test"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -765,7 +785,9 @@ mod tests {
             template_id: template.template_id,
             description: None,
             test_input_defaults: Some(json!({"in_greeting": "Yo"})),
+            test_option_defaults: Some(json!({"an_option": "true"})),
             eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
+            eval_option_defaults: Some(json!({"a_different_option": "false"})),
             created_by: None,
         };
 
@@ -776,7 +798,9 @@ mod tests {
             test_id: test.test_id,
             status: RunStatusEnum::TestSubmitted,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
+            test_options: Some(json!({"an_option": "true"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
+            eval_options: Some(json!({"a_different_option": "false"})),
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -813,7 +837,9 @@ mod tests {
             template_id: template.template_id,
             description: None,
             test_input_defaults: Some(json!({"in_greeting": "Yo"})),
+            test_option_defaults: Some(json!({"option": "value"})),
             eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
+            eval_option_defaults: Some(json!({"option":"different_value"})),
             created_by: None,
         };
 
@@ -824,7 +850,9 @@ mod tests {
             test_id: test.test_id,
             status: RunStatusEnum::TestFailed,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
+            test_options: Some(json!({"in_greeting": "Yo"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
+            eval_options: Some(json!({"option":"different_value"})),
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -1126,11 +1154,15 @@ mod tests {
             create_test_test_with_template_id(&pool.get().unwrap(), test_template.template_id);
 
         let test_input = json!({"in_greeted": "Cool Person"});
+        let test_options = Some(json!({"option": "Value"}));
         let eval_input = json!({"in_output_filename": "test_greeting.txt"});
+        let eval_options = Some(json!({"other_option": "true"}));
         let new_run = NewRunIncomplete {
             name: None,
             test_input: Some(test_input.clone()),
+            test_options: test_options.clone(),
             eval_input: Some(eval_input.clone()),
+            eval_options: eval_options.clone(),
             created_by: None,
         };
 
@@ -1192,8 +1224,16 @@ mod tests {
             &test_test.eval_input_defaults.unwrap(),
         );
         json_patch::merge(&mut eval_input_to_compare, &eval_input);
+        let mut eval_options_to_compare = json!({});
+        json_patch::merge(
+            &mut eval_options_to_compare,
+            &test_test.eval_option_defaults.unwrap(),
+        );
+        json_patch::merge(&mut eval_options_to_compare, &eval_options.unwrap());
         assert_eq!(test_run.test_input, test_input_to_compare);
+        assert_eq!(test_run.test_options, test_options);
         assert_eq!(test_run.eval_input, eval_input_to_compare);
+        assert_eq!(test_run.eval_options.unwrap(), eval_options_to_compare);
     }
 
     #[actix_rt::test]
@@ -1211,11 +1251,15 @@ mod tests {
         let test_run = create_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
         let test_input = json!({"in_greeted": "Cool Person"});
+        let test_options = Some(json!({"option": "Value"}));
         let eval_input = json!({"in_output_filename": "test_greeting.txt"});
+        let eval_options = Some(json!({"other_option": "true"}));
         let new_run = NewRunIncomplete {
             name: Some(test_run.name.clone()),
             test_input: Some(test_input.clone()),
+            test_options: test_options.clone(),
             eval_input: Some(eval_input.clone()),
+            eval_options: eval_options.clone(),
             created_by: None,
         };
 

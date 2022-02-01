@@ -392,7 +392,9 @@ mod tests {
             template_id: id,
             description: None,
             test_input_defaults: None,
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
             created_by: None,
         };
 
