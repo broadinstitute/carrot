@@ -272,18 +272,6 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::UnboundedReceiverStream;
 
-    fn create_stream() -> (
-        mpsc::UnboundedSender<Result<Bytes, PayloadError>>,
-        impl Stream<Item = Result<Bytes, PayloadError>>,
-    ) {
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        (
-            tx,
-            UnboundedReceiverStream::new(rx).map(|res| res.map_err(|_| panic!())),
-        )
-    }
-
     /// Creates and returns and Multipart instance containing `contents`
     ///
     /// `contents` must be supplied in proper Multipart format, using
@@ -478,7 +466,7 @@ mod tests {
         );
 
         // Create a multipart instance from it to parse
-        let mut multipart = create_multipart_with_contents(multipart_body);
+        let multipart = create_multipart_with_contents(multipart_body);
 
         // The fields we expect from the multipart payload
         const EXPECTED_TEXT_FIELDS: [&'static str; 5] = [

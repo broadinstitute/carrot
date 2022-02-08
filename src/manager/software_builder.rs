@@ -125,9 +125,13 @@ impl SoftwareBuilder {
         let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
 
         // Send job request to cromwell
-        let start_job_response =
-            util::start_job_from_file(&self.cromwell_client, wdl_file_path, &json_file.path())
-                .await?;
+        let start_job_response = util::start_job_from_file(
+            &self.cromwell_client,
+            wdl_file_path,
+            &json_file.path(),
+            None,
+        )
+        .await?;
 
         // Update build with job id and Submitted status
         let build_update = SoftwareBuildChangeset {

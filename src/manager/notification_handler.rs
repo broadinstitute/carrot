@@ -570,7 +570,9 @@ mod tests {
             template_id: id,
             description: None,
             test_input_defaults: None,
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
             created_by: None,
         };
 
@@ -587,7 +589,9 @@ mod tests {
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            test_options: None,
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: None,
             created_by: Some(format!("{}@example.com", email_base_name)),

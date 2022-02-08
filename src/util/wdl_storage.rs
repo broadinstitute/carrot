@@ -253,7 +253,7 @@ mod tests {
         assert_ne!(wdl_path, "gs://example/wdl/test.wdl");
 
         // Verify that we created a wdlhash for it (and it didn't just use the existing one)
-        let mut wdl_hashes: Vec<WdlHashData> =
+        let wdl_hashes: Vec<WdlHashData> =
             WdlHashData::find_by_data_to_hash(&conn, b"Test").unwrap();
         assert_eq!(wdl_hashes.len(), 2);
         if wdl_hashes.get(0).unwrap().location == wdl_path {
@@ -300,7 +300,7 @@ mod tests {
         // Verify that the path we got is the same as the path from the first wdl
         assert_eq!(existent_wdl_path, wdl_path);
         // Verify that we still only have one wdl hash for it
-        let mut wdl_hashes: Vec<WdlHashData> =
+        let wdl_hashes: Vec<WdlHashData> =
             WdlHashData::find_by_data_to_hash(&conn, b"Body of test wdl").unwrap();
         assert_eq!(wdl_hashes.len(), 1);
     }
@@ -398,7 +398,7 @@ mod tests {
         assert_ne!(new_wdl_location, "~/carrot/wdl/asfeagefagve/test.wdl");
 
         // Verify that we created a wdlhash for it (and it didn't just use the existing one)
-        let mut wdl_hashes: Vec<WdlHashData> =
+        let wdl_hashes: Vec<WdlHashData> =
             WdlHashData::find_by_data_to_hash(&conn, b"Test").unwrap();
         assert_eq!(wdl_hashes.len(), 2);
         if wdl_hashes.get(0).unwrap().location == new_wdl_location {

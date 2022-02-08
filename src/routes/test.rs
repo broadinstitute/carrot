@@ -337,7 +337,9 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            test_option_defaults: Some(serde_json::from_str("{\"test_option\":\"test\"}").unwrap()),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            eval_option_defaults: Some(serde_json::from_str("{\"eval_option\":\"test\"}").unwrap()),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -366,26 +368,15 @@ mod tests {
         TemplateData::create(&conn, new_template).expect("Failed to insert test")
     }
 
-    fn create_test_test_with_template_id(conn: &PgConnection, id: Uuid) -> TestData {
-        let new_test = NewTest {
-            name: String::from("Kevin's test test"),
-            template_id: id,
-            description: None,
-            test_input_defaults: Some(json!({"in_greeting": "Yo"})),
-            eval_input_defaults: Some(json!({"in_output_filename": "greeting.txt"})),
-            created_by: None,
-        };
-
-        TestData::create(&conn, new_test).expect("Failed to insert test")
-    }
-
     fn insert_non_failed_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
             test_id: id,
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("1234567890")),
             eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -403,7 +394,9 @@ mod tests {
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("1234567890")),
             eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -417,7 +410,9 @@ mod tests {
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: Some(serde_json::from_str("{\"test_option\":\"1\"}").unwrap()),
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456789012")),
             eval_cromwell_job_id: None,
             created_by: None,
@@ -431,7 +426,9 @@ mod tests {
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("1234567890")),
             eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -445,7 +442,9 @@ mod tests {
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: Some(serde_json::from_str("{\"eval_option\":\"test\"}").unwrap()),
             test_cromwell_job_id: Some(String::from("123456789012")),
             eval_cromwell_job_id: None,
             created_by: None,
@@ -459,7 +458,9 @@ mod tests {
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("1234567890")),
             eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -473,7 +474,9 @@ mod tests {
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -613,7 +616,13 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin's test description")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
+            test_option_defaults: Some(
+                serde_json::from_str("{\"test_option\":\"test2\"}").unwrap(),
+            ),
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
+            eval_option_defaults: Some(
+                serde_json::from_str("{\"eval_option\":\"test2\"}").unwrap(),
+            ),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -644,9 +653,21 @@ mod tests {
         );
         assert_eq!(
             test_test
+                .test_option_defaults
+                .expect("Created test missing test_option_defaults"),
+            new_test.test_option_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
                 .eval_input_defaults
                 .expect("Created test missing eval_input_defaults"),
             new_test.eval_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .eval_option_defaults
+                .expect("Created test missing eval_option_defaults"),
+            new_test.eval_option_defaults.unwrap()
         );
         assert_eq!(
             test_test
@@ -669,7 +690,9 @@ mod tests {
             template_id: Uuid::new_v4(),
             description: Some(String::from("Kevin's test description")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
+            test_option_defaults: None,
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
+            eval_option_defaults: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -701,8 +724,10 @@ mod tests {
         let test_change = TestChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
-            test_input_defaults: Some(json!({"test": "test"})),
-            eval_input_defaults: Some(json!({"eval": "eval"})),
+            test_input_defaults: Some(json!({"test": "1"})),
+            test_option_defaults: Some(json!({"test_option": "2"})),
+            eval_input_defaults: Some(json!({"eval": "3"})),
+            eval_option_defaults: Some(json!({"eval_option": "4"})),
         };
 
         let req = test::TestRequest::put()
@@ -720,8 +745,32 @@ mod tests {
         assert_eq!(
             test_test
                 .description
-                .expect("Created test missing description"),
+                .expect("Updated test missing description"),
             test_change.description.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .test_input_defaults
+                .expect("Updated test missing test_input_defaults"),
+            test_change.test_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .test_option_defaults
+                .expect("Updated test missing test_option_defaults"),
+            test_change.test_option_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .eval_input_defaults
+                .expect("Updated test missing eval_input_defaults"),
+            test_change.eval_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .eval_option_defaults
+                .expect("Updated test missing eval_option_defaults"),
+            test_change.eval_option_defaults.unwrap()
         );
     }
 
@@ -737,7 +786,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_input_defaults: None,
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
         };
 
         let req = test::TestRequest::put()
@@ -770,7 +821,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_input_defaults: Some(json!({"test": "test"})),
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
         };
 
         let req = test::TestRequest::put()
@@ -805,7 +858,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_input_defaults: None,
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
         };
 
         let req = test::TestRequest::put()

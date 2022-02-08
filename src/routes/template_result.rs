@@ -418,7 +418,9 @@ mod tests {
             template_id: id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            test_option_defaults: None,
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            eval_option_defaults: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -431,7 +433,9 @@ mod tests {
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
             test_input: serde_json::from_str("{}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("1234567890")),
             eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),

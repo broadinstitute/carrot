@@ -12,7 +12,9 @@ use crate::models::software_build::SoftwareBuildData;
 use crate::models::software_version::SoftwareVersionData;
 use crate::models::template::TemplateData;
 use crate::models::test::TestData;
-use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
+use crate::requests::cromwell_requests::{
+    CromwellClient, CromwellRequestError, WorkflowIdAndStatus,
+};
 use crate::requests::test_resource_requests;
 use crate::util::temp_storage;
 use chrono::Utc;
@@ -22,6 +24,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::fmt;
+use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 lazy_static! {
@@ -149,7 +152,9 @@ impl TestRunner {
         test_id: &str,
         name: Option<String>,
         test_input: Option<Value>,
+        test_options: Option<Value>,
         eval_input: Option<Value>,
+        eval_options: Option<Value>,
         created_by: Option<String>,
     ) -> Result<RunData, Error> {
         // Parse test id into UUID
@@ -157,7 +162,7 @@ impl TestRunner {
         // Retrieve test for id or return error
         let test = TestRunner::get_test(&conn, test_id)?;
 
-        // Merge input JSONs
+        // Merge input and options JSONs
         let mut test_json = json!({});
         if let Some(defaults) = &test.test_input_defaults {
             json_patch::merge(&mut test_json, defaults);
@@ -165,6 +170,20 @@ impl TestRunner {
         if let Some(inputs) = &test_input {
             json_patch::merge(&mut test_json, inputs);
         }
+        let test_options_json: Option<Value> = {
+            if test.test_option_defaults.is_some() || test_options.is_some() {
+                let mut test_options_json = json!({});
+                if let Some(defaults) = &test.test_option_defaults {
+                    json_patch::merge(&mut test_options_json, defaults);
+                }
+                if let Some(inputs) = &test_options {
+                    json_patch::merge(&mut test_options_json, inputs);
+                }
+                Some(test_options_json)
+            } else {
+                None
+            }
+        };
         let mut eval_json = json!({});
         if let Some(defaults) = &test.eval_input_defaults {
             json_patch::merge(&mut eval_json, defaults);
@@ -172,6 +191,20 @@ impl TestRunner {
         if let Some(inputs) = &eval_input {
             json_patch::merge(&mut eval_json, inputs);
         }
+        let eval_options_json: Option<Value> = {
+            if test.eval_option_defaults.is_some() || eval_options.is_some() {
+                let mut eval_options_json = json!({});
+                if let Some(defaults) = &test.eval_option_defaults {
+                    json_patch::merge(&mut eval_options_json, defaults);
+                }
+                if let Some(inputs) = &eval_options {
+                    json_patch::merge(&mut eval_options_json, inputs);
+                }
+                Some(eval_options_json)
+            } else {
+                None
+            }
+        };
 
         // Make a name if one has not been specified
         let run_name = match name {
@@ -181,7 +214,14 @@ impl TestRunner {
 
         // Write run to db
         let run = TestRunner::create_run_in_db(
-            conn, test_id, run_name, test_json, eval_json, created_by,
+            conn,
+            test_id,
+            run_name,
+            test_json,
+            test_options_json,
+            eval_json,
+            eval_options_json,
+            created_by,
         )?;
 
         // Process software image build parameters in the run's input if software building is enabled
@@ -293,10 +333,19 @@ impl TestRunner {
         let template = TestRunner::get_template(&conn, template_id)?;
 
         // Format json so it's ready to submit
-        let json_to_submit = self.format_test_json_for_cromwell(&run.test_input)?;
+        let input_json_to_submit = self.format_test_json_for_cromwell(&run.test_input)?;
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
+        let input_json_file =
+            temp_storage::get_temp_file(&input_json_to_submit.to_string().as_bytes())?;
+
+        // Write options json (if there is one) to file for the same reason
+        let options_json_file: Option<NamedTempFile> = match &run.test_options {
+            Some(test_options) => Some(temp_storage::get_temp_file(
+                &test_options.to_string().as_bytes(),
+            )?),
+            None => None,
+        };
 
         // Download test wdl and write it to a file
         let test_wdl_as_string = self
@@ -306,13 +355,30 @@ impl TestRunner {
         let test_wdl_as_file = temp_storage::get_temp_file(&test_wdl_as_string.as_bytes())?;
 
         // Send job request to cromwell
-        let start_job_response = match util::start_job_from_file(
-            &self.cromwell_client,
-            &test_wdl_as_file.path(),
-            &json_file.path(),
-        )
-        .await
-        {
+        let start_job_result: Result<WorkflowIdAndStatus, CromwellRequestError> =
+            match options_json_file {
+                Some(options_json_file) => {
+                    util::start_job_from_file(
+                        &self.cromwell_client,
+                        &test_wdl_as_file.path(),
+                        &input_json_file.path(),
+                        Some(options_json_file.path()),
+                    )
+                    .await
+                }
+                None => {
+                    util::start_job_from_file(
+                        &self.cromwell_client,
+                        &test_wdl_as_file.path(),
+                        &input_json_file.path(),
+                        None,
+                    )
+                    .await
+                }
+            };
+
+        // Process result
+        let start_job_response = match start_job_result {
             Ok(status) => status,
             Err(e) => {
                 error!(
@@ -382,10 +448,20 @@ impl TestRunner {
         let template = TestRunner::get_template(&conn, template_id)?;
 
         // Format json so it's ready to submit
-        let json_to_submit = self.format_eval_json_for_cromwell(&run.eval_input, test_outputs)?;
+        let input_json_to_submit =
+            self.format_eval_json_for_cromwell(&run.eval_input, test_outputs)?;
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
+        let input_json_file =
+            temp_storage::get_temp_file(&input_json_to_submit.to_string().as_bytes())?;
+
+        // Write options json (if there is one) to file for the same reason
+        let options_json_file: Option<NamedTempFile> = match &run.eval_options {
+            Some(eval_options) => Some(temp_storage::get_temp_file(
+                &eval_options.to_string().as_bytes(),
+            )?),
+            None => None,
+        };
 
         // Download eval wdl and write it to a file
         let eval_wdl_as_string = self
@@ -395,13 +471,29 @@ impl TestRunner {
         let eval_wdl_as_file = temp_storage::get_temp_file(&eval_wdl_as_string.as_bytes())?;
 
         // Send job request to cromwell
-        let start_job_response = match util::start_job_from_file(
-            &self.cromwell_client,
-            &eval_wdl_as_file.path(),
-            &json_file.path(),
-        )
-        .await
-        {
+        let start_job_result: Result<WorkflowIdAndStatus, CromwellRequestError> =
+            match options_json_file {
+                Some(options_json_file) => {
+                    util::start_job_from_file(
+                        &self.cromwell_client,
+                        &eval_wdl_as_file.path(),
+                        &input_json_file.path(),
+                        Some(options_json_file.path()),
+                    )
+                    .await
+                }
+                None => {
+                    util::start_job_from_file(
+                        &self.cromwell_client,
+                        &eval_wdl_as_file.path(),
+                        &input_json_file.path(),
+                        None,
+                    )
+                    .await
+                }
+            };
+        // Process result
+        let start_job_response: WorkflowIdAndStatus = match start_job_result {
             Ok(status) => status,
             Err(e) => {
                 error!(
@@ -577,7 +669,9 @@ impl TestRunner {
             name: Some(String::from(name)),
             status: None,
             test_input: None,
+            test_options: None,
             eval_input: None,
+            eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
             created_before: None,
@@ -790,7 +884,9 @@ impl TestRunner {
         test_id: Uuid,
         name: String,
         test_input: Value,
+        test_options: Option<Value>,
         eval_input: Value,
+        eval_options: Option<Value>,
         created_by: Option<String>,
     ) -> Result<RunData, Error> {
         let create_run_closure = || {
@@ -804,7 +900,9 @@ impl TestRunner {
                 name: name,
                 status: RunStatusEnum::Created,
                 test_input: test_input,
+                test_options: test_options,
                 eval_input: eval_input,
+                eval_options: eval_options,
                 test_cromwell_job_id: None,
                 eval_cromwell_job_id: None,
                 created_by: created_by,
@@ -983,7 +1081,9 @@ mod tests {
             template_id: id,
             description: None,
             test_input_defaults: Some(json!({"test_test.in_pleasantry":"Yo"})),
+            test_option_defaults: Some(json!({"option": true})),
             eval_input_defaults: Some(json!({"test_test.in_verb":"yelled"})),
+            eval_option_defaults: Some(json!({"option": false})),
             created_by: None,
         };
 
@@ -1010,7 +1110,9 @@ mod tests {
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: Some(json!({"option": true})),
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: Some(String::from("12345678901")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -1026,7 +1128,9 @@ mod tests {
             test_id: id,
             status: RunStatusEnum::Building,
             test_input: json!({"test_test.in_pleasantry":"Yo", "test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            test_options: Some(json!({"option": "yes"})),
             eval_input: json!({"test_test.in_verb":"yelled", "test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
+            eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -1045,7 +1149,9 @@ mod tests {
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
             test_input: json!({"test_test.in_pleasantry":"Yo", "test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
+            test_options: None,
             eval_input: json!({"test_test.in_verb":"yelled", "test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
+            eval_options: Some(json!({"test": "eval"})),
             test_cromwell_job_id: Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce")),
             eval_cromwell_job_id: None,
             created_by: Some(String::from("Kevin@example.com")),
@@ -1139,7 +1245,9 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
         let test_params = json!({"in_user_name":"Kevin"});
+        let test_options = None;
         let eval_params = json!({});
+        let eval_options = Some(json!({"flash": "thunder"}));
         // Define mockito mapping for wdl
         let wdl_mock = mockito::mock("GET", "/test_no_software_params")
             .with_status(200)
@@ -1166,7 +1274,9 @@ mod tests {
                 &test_test.test_id.to_string(),
                 Some(String::from("Test run")),
                 Some(test_params.clone()),
+                test_options,
                 Some(eval_params.clone()),
+                eval_options,
                 Some(String::from("Kevin@example.com")),
             )
             .await
@@ -1208,7 +1318,9 @@ mod tests {
         let test_software = insert_test_software(&conn);
 
         let test_params = json!({"in_user_name":"Kevin", "in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let test_options = None;
         let eval_params = json!({"in_user":"Jonn", "in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let eval_options = Some(json!({"option": true}));
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1226,7 +1338,9 @@ mod tests {
                 &test_test.test_id.to_string(),
                 Some(String::from("Test run")),
                 Some(test_params.clone()),
+                test_options,
                 Some(eval_params.clone()),
+                eval_options,
                 Some(String::from("Kevin@example.com")),
             )
             .await
@@ -1508,7 +1622,9 @@ mod tests {
             test.test_id,
             String::from("Kevin's test run"),
             json!({"test":"1"}),
+            Some(json!({"test": "option"})),
             json!({"eval":"2"}),
+            None,
             Some(String::from("Kevin@example.com")),
         )
         .expect("Failed to create run");
@@ -1530,7 +1646,9 @@ mod tests {
             Uuid::new_v4(),
             String::from("Kevin's test run"),
             json!({"test":"1"}),
+            None,
             json!({"eval":"2"}),
+            None,
             Some(String::from("Kevin@example.com")),
         );
 

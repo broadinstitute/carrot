@@ -425,9 +425,13 @@ impl ReportBuilder {
         // Write the wdl to a file
         let wdl_file = temp_storage::get_temp_file(generator_wdl.as_bytes())?;
         // Submit report generation job to cromwell
-        let start_job_response =
-            util::start_job_from_file(&self.cromwell_client, &wdl_file.path(), &json_file.path())
-                .await?;
+        let start_job_response = util::start_job_from_file(
+            &self.cromwell_client,
+            &wdl_file.path(),
+            &json_file.path(),
+            None,
+        )
+        .await?;
         // Insert run_report into the DB
         let new_run_report = NewRunReport {
             run_id,
@@ -967,7 +971,9 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: None,
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -981,10 +987,12 @@ mod tests {
                 "greeting_workflow.in_greeting": "Yo",
                 "greeting_workflow.in_greeted": "Jean-Paul Gasse"
             }),
+            test_options: None,
             eval_input: json!({
                 "greeting_file_workflow.in_output_filename": "greeting.txt",
                 "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
             }),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: Some(String::from("12345678902")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -1577,6 +1585,7 @@ mod tests {
                         "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
                         "        \"greeting_file_workflow.in_output_filename\" : \"greeting.txt\",\n",
                         "    },\n",
+                        "    \"eval_options\" : None,\n",
                         format!("    \"finished_at\" : \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
                         "    \"name\" : \"Kevin's test run\",\n",
                         "    \"results\" : {\n",
@@ -1591,6 +1600,7 @@ mod tests {
                         "        \"greeting_workflow.in_greeted\" : \"Jean-Paul Gasse\",\n",
                         "        \"greeting_workflow.in_greeting\" : \"Yo\",\n",
                         "    },\n",
+                        "    \"test_options\" : None,\n",
                         "}"
                     ]
                 },
@@ -1697,6 +1707,7 @@ mod tests {
                         "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
                         "        \"greeting_file_workflow.in_output_filename\" : \"greeting.txt\",\n",
                         "    },\n",
+                        "    \"eval_options\" : None,\n",
                         format!("    \"finished_at\" : \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
                         "    \"name\" : \"Kevin's test run\",\n",
                         "    \"results\" : {\n",
@@ -1711,6 +1722,7 @@ mod tests {
                         "        \"greeting_workflow.in_greeted\" : \"Jean-Paul Gasse\",\n",
                         "        \"greeting_workflow.in_greeting\" : \"Yo\",\n",
                         "    },\n",
+                        "    \"test_options\" : None,\n",
                         "}"
                     ]
                 },
@@ -1828,6 +1840,7 @@ mod tests {
                 "test_workflow.file": "gs://bucket/file.txt",
                 "test_workflow.second_file": "gs://bucket/second_file.bam"
             }),
+            test_options: None,
             eval_input: json!({
                 "eval_workflow.string": "hello",
                 "eval_workflow.file_array": [
@@ -1840,6 +1853,7 @@ mod tests {
                     null
                 ],
             }),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456908")),
             eval_cromwell_job_id: Some(String::from("4584902437")),
             created_at: Utc::now().naive_utc(),

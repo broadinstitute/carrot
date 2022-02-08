@@ -482,7 +482,9 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test\"}").unwrap()),
+            test_option_defaults: None,
             eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test\"}").unwrap()),
+            eval_option_defaults: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -493,7 +495,9 @@ mod tests {
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
+            test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: Some(String::from("12345678902")),
             created_by: Some(String::from("Kevin@example.com")),
@@ -529,37 +533,6 @@ mod tests {
             results: None,
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
-        };
-
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
-    }
-
-    fn insert_test_run_report_not_failed(conn: &PgConnection) -> RunReportData {
-        let run = insert_test_run(conn);
-
-        let notebook: Value = serde_json::from_str(
-            &read_to_string("testdata/routes/run_report/report_notebook.ipynb").unwrap(),
-        )
-        .unwrap();
-
-        let new_report = NewReport {
-            name: String::from("Kevin's Report"),
-            description: Some(String::from("Kevin made this report for testing")),
-            notebook,
-            config: Some(json!({"memory": "32 GiB"})),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
-
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
-            report_id: report.report_id,
-            status: ReportStatusEnum::Running,
-            cromwell_job_id: Some(String::from("testtesttesttest")),
-            results: None,
-            created_by: Some(String::from("Kevin@example.com")),
-            finished_at: None,
         };
 
         RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
@@ -611,7 +584,9 @@ mod tests {
             template_id: template.template_id,
             description: Some(String::from("Kevin made this test for testing")),
             test_input_defaults: None,
+            test_option_defaults: None,
             eval_input_defaults: None,
+            eval_option_defaults: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -625,10 +600,12 @@ mod tests {
                 "greeting_workflow.in_greeting": "Yo",
                 "greeting_workflow.in_greeted": "Jean-Paul Gasse"
             }),
+            test_options: None,
             eval_input: json!({
                 "greeting_file_workflow.in_output_filename": "greeting.txt",
                 "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
             }),
+            eval_options: None,
             test_cromwell_job_id: Some(String::from("123456789")),
             eval_cromwell_job_id: Some(String::from("12345678902")),
             created_by: Some(String::from("Kevin@example.com")),
