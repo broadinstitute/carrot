@@ -24,6 +24,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
@@ -340,12 +341,16 @@ impl TestRunner {
             temp_storage::get_temp_file(&input_json_to_submit.to_string().as_bytes())?;
 
         // Write options json (if there is one) to file for the same reason
-        let options_json_file: Option<NamedTempFile> = match &run.test_options {
-            Some(test_options) => Some(temp_storage::get_temp_file(
-                &test_options.to_string().as_bytes(),
-            )?),
-            None => None,
-        };
+        let (_options_json_file, options_json_file_path): (Option<NamedTempFile>, Option<PathBuf>) =
+            match &run.test_options {
+                Some(test_options) => {
+                    let options_file =
+                        temp_storage::get_temp_file(&test_options.to_string().as_bytes())?;
+                    let options_file_path = PathBuf::from(options_file.path());
+                    (Some(options_file), Some(options_file_path))
+                }
+                None => (None, None),
+            };
 
         // Download test wdl and write it to a file
         let test_wdl_as_string = self
@@ -354,28 +359,33 @@ impl TestRunner {
             .await?;
         let test_wdl_as_file = temp_storage::get_temp_file(&test_wdl_as_string.as_bytes())?;
 
+        // Do the same for the test wdl dependencies if present
+        let (_test_wdl_deps_file, test_wdl_deps_file_path): (
+            Option<NamedTempFile>,
+            Option<PathBuf>,
+        ) = match &template.test_wdl_dependencies {
+            Some(deps_location) => {
+                let deps_data = self
+                    .test_resource_client
+                    .get_resource_as_bytes(deps_location)
+                    .await?;
+                let deps_file = temp_storage::get_temp_file(&deps_data)?;
+                let deps_file_path = PathBuf::from(deps_file.path());
+                (Some(deps_file), Some(deps_file_path))
+            }
+            None => (None, None),
+        };
+
         // Send job request to cromwell
         let start_job_result: Result<WorkflowIdAndStatus, CromwellRequestError> =
-            match options_json_file {
-                Some(options_json_file) => {
-                    util::start_job_from_file(
-                        &self.cromwell_client,
-                        &test_wdl_as_file.path(),
-                        &input_json_file.path(),
-                        Some(options_json_file.path()),
-                    )
-                    .await
-                }
-                None => {
-                    util::start_job_from_file(
-                        &self.cromwell_client,
-                        &test_wdl_as_file.path(),
-                        &input_json_file.path(),
-                        None,
-                    )
-                    .await
-                }
-            };
+            util::start_job_from_file(
+                &self.cromwell_client,
+                &test_wdl_as_file.path(),
+                test_wdl_deps_file_path.as_deref(),
+                &input_json_file.path(),
+                options_json_file_path.as_deref(),
+            )
+            .await;
 
         // Process result
         let start_job_response = match start_job_result {
@@ -456,12 +466,16 @@ impl TestRunner {
             temp_storage::get_temp_file(&input_json_to_submit.to_string().as_bytes())?;
 
         // Write options json (if there is one) to file for the same reason
-        let options_json_file: Option<NamedTempFile> = match &run.eval_options {
-            Some(eval_options) => Some(temp_storage::get_temp_file(
-                &eval_options.to_string().as_bytes(),
-            )?),
-            None => None,
-        };
+        let (_options_json_file, options_json_file_path): (Option<NamedTempFile>, Option<PathBuf>) =
+            match &run.eval_options {
+                Some(eval_options) => {
+                    let options_file =
+                        temp_storage::get_temp_file(&eval_options.to_string().as_bytes())?;
+                    let options_file_path = PathBuf::from(options_file.path());
+                    (Some(options_file), Some(options_file_path))
+                }
+                None => (None, None),
+            };
 
         // Download eval wdl and write it to a file
         let eval_wdl_as_string = self
@@ -470,28 +484,33 @@ impl TestRunner {
             .await?;
         let eval_wdl_as_file = temp_storage::get_temp_file(&eval_wdl_as_string.as_bytes())?;
 
+        // Do the same for the eval wdl dependencies if present
+        let (_eval_wdl_deps_file, eval_wdl_deps_file_path): (
+            Option<NamedTempFile>,
+            Option<PathBuf>,
+        ) = match &template.eval_wdl_dependencies {
+            Some(deps_location) => {
+                let deps_data = self
+                    .test_resource_client
+                    .get_resource_as_bytes(deps_location)
+                    .await?;
+                let deps_file = temp_storage::get_temp_file(&deps_data)?;
+                let deps_file_path = PathBuf::from(deps_file.path());
+                (Some(deps_file), Some(deps_file_path))
+            }
+            None => (None, None),
+        };
+
         // Send job request to cromwell
         let start_job_result: Result<WorkflowIdAndStatus, CromwellRequestError> =
-            match options_json_file {
-                Some(options_json_file) => {
-                    util::start_job_from_file(
-                        &self.cromwell_client,
-                        &eval_wdl_as_file.path(),
-                        &input_json_file.path(),
-                        Some(options_json_file.path()),
-                    )
-                    .await
-                }
-                None => {
-                    util::start_job_from_file(
-                        &self.cromwell_client,
-                        &eval_wdl_as_file.path(),
-                        &input_json_file.path(),
-                        None,
-                    )
-                    .await
-                }
-            };
+            util::start_job_from_file(
+                &self.cromwell_client,
+                &eval_wdl_as_file.path(),
+                eval_wdl_deps_file_path.as_deref(),
+                &input_json_file.path(),
+                options_json_file_path.as_deref(),
+            )
+            .await;
         // Process result
         let start_job_response: WorkflowIdAndStatus = match start_job_result {
             Ok(status) => status,
@@ -1046,7 +1065,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test_no_software_params", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval_no_software_params", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -1068,7 +1089,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test_software_params", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 

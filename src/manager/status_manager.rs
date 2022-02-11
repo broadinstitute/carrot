@@ -27,6 +27,7 @@ use crate::requests::cromwell_requests;
 use crate::requests::cromwell_requests::CromwellClient;
 use crate::requests::github_requests::GithubClient;
 use crate::requests::test_resource_requests::TestResourceClient;
+use crate::run_error_logger;
 use crate::storage::gcloud_storage::GCloudClient;
 use actix_web::client::Client;
 use chrono::{NaiveDateTime, Utc};
@@ -37,7 +38,6 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use crate::run_error_logger;
 
 /// Enum of cromwell statuses that can map to different statues in status updates for runs, reports,
 /// and builds
@@ -354,7 +354,11 @@ impl StatusManager {
                             .await
                         {
                             let error_message = format!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
-                            run_error_logger::log_error(&self.db_pool.get().unwrap(), run.run_id, error_message);
+                            run_error_logger::log_error(
+                                &self.db_pool.get().unwrap(),
+                                run.run_id,
+                                error_message,
+                            );
                             self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                         }
                     }
@@ -1346,7 +1350,11 @@ mod tests {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    fn insert_test_result_with_name_and_type(conn: &PgConnection, name: String, result_type: ResultTypeEnum) -> ResultData {
+    fn insert_test_result_with_name_and_type(
+        conn: &PgConnection,
+        name: String,
+        result_type: ResultTypeEnum,
+    ) -> ResultData {
         let new_result = NewResult {
             name,
             result_type: ResultTypeEnum::Numeric,
@@ -1441,7 +1449,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -1623,7 +1633,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing2")),
             test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("test_send_email@example.com")),
         };
 
@@ -1837,47 +1849,71 @@ mod tests {
         // Insert test, run, result, and template_result we'll use for testing
         let template = insert_test_template(&conn);
         let template_id = template.template_id;
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Text Result"), ResultTypeEnum::Text);
-        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+        let test_result = insert_test_result_with_name_and_type(
             &conn,
-            template_id,
-            test_result.result_id,
-            String::from("greeting_workflow.TestKey")
+            String::from("Text Result"),
+            ResultTypeEnum::Text,
         );
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Bool Result"), ResultTypeEnum::Text);
         insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template_id,
             test_result.result_id,
-            String::from("greeting_workflow.BoolKey")
+            String::from("greeting_workflow.TestKey"),
         );
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Int Result"), ResultTypeEnum::Numeric);
-        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+        let test_result = insert_test_result_with_name_and_type(
             &conn,
-            template_id,
-            test_result.result_id,
-            String::from("greeting_workflow.IntKey")
+            String::from("Bool Result"),
+            ResultTypeEnum::Text,
         );
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Float Result"), ResultTypeEnum::Numeric);
         insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template_id,
             test_result.result_id,
-            String::from("greeting_workflow.FloatKey")
+            String::from("greeting_workflow.BoolKey"),
         );
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Array Result"), ResultTypeEnum::Text);
-        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+        let test_result = insert_test_result_with_name_and_type(
             &conn,
-            template_id,
-            test_result.result_id,
-            String::from("greeting_workflow.ArrayKey")
+            String::from("Int Result"),
+            ResultTypeEnum::Numeric,
         );
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Object Result"), ResultTypeEnum::Text);
         insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template_id,
             test_result.result_id,
-            String::from("greeting_workflow.ObjectKey")
+            String::from("greeting_workflow.IntKey"),
+        );
+        let test_result = insert_test_result_with_name_and_type(
+            &conn,
+            String::from("Float Result"),
+            ResultTypeEnum::Numeric,
+        );
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.FloatKey"),
+        );
+        let test_result = insert_test_result_with_name_and_type(
+            &conn,
+            String::from("Array Result"),
+            ResultTypeEnum::Text,
+        );
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.ArrayKey"),
+        );
+        let test_result = insert_test_result_with_name_and_type(
+            &conn,
+            String::from("Object Result"),
+            ResultTypeEnum::Text,
+        );
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.ObjectKey"),
         );
         let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(
@@ -1908,7 +1944,10 @@ mod tests {
         assert_eq!(results.get("Int Result").unwrap(), "4");
         assert_eq!(results.get("Float Result").unwrap(), "4.19");
         assert_eq!(results.get("Array Result").unwrap(), "[12,1,2,6]");
-        assert_eq!(results.get("Object Result").unwrap(), "{\"random_key\":\"hello\"}");
+        assert_eq!(
+            results.get("Object Result").unwrap(),
+            "{\"random_key\":\"hello\"}"
+        );
     }
 
     #[actix_rt::test]
@@ -1920,13 +1959,17 @@ mod tests {
         let email_dir = setup_test_email_dir("Kevin");
         // Insert test, run, result, and template_result we'll use for testing
         let template = insert_test_template(&conn);
-        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Kevin's Result"), ResultTypeEnum::Text);
+        let test_result = insert_test_result_with_name_and_type(
+            &conn,
+            String::from("Kevin's Result"),
+            ResultTypeEnum::Text,
+        );
         let test_test = insert_test_test_with_template_id(&conn, template.template_id.clone());
         insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template.template_id,
             test_result.result_id,
-            String::from("greeting_workflow.TestKey")
+            String::from("greeting_workflow.TestKey"),
         );
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(
             &conn,

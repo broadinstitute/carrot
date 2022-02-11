@@ -326,7 +326,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -361,7 +363,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 

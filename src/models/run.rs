@@ -3,6 +3,7 @@
 //! A run represents a specific run of a test.  Represented in the database by the RUN table.
 
 use crate::custom_sql_types::{RunStatusEnum, RUN_FAILURE_STATUSES};
+use crate::models::run_error::RunErrorData;
 use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::run_result::RunResultData;
 use crate::models::run_software_version::RunSoftwareVersionData;
@@ -19,7 +20,6 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::models::run_error::RunErrorData;
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -472,7 +472,7 @@ impl RunWithResultsAndErrorsData {
                 run_with_results_and_errors::dsl::created_by,
                 run_with_results_and_errors::dsl::finished_at,
                 run_with_results_and_errors::dsl::results,
-                run_with_results_and_errors::dsl::errors
+                run_with_results_and_errors::dsl::errors,
             ))
             .first::<Self>(conn)
     }
@@ -497,7 +497,8 @@ impl RunWithResultsAndErrorsData {
                 .filter(test::dsl::template_id.eq_any(pipeline_subquery))
                 .select(test::dsl::test_id);
             // Filter by the results of the template subquery
-            query = query.filter(run_with_results_and_errors::dsl::test_id.eq_any(template_subquery));
+            query =
+                query.filter(run_with_results_and_errors::dsl::test_id.eq_any(template_subquery));
         }
         if let Some(param) = params.template_id {
             // Subquery for getting all test_ids for test belonging the to specified template
@@ -505,7 +506,8 @@ impl RunWithResultsAndErrorsData {
                 .filter(test::dsl::template_id.eq(param))
                 .select(test::dsl::test_id);
             // Filter by the results of the template subquery
-            query = query.filter(run_with_results_and_errors::dsl::test_id.eq_any(template_subquery));
+            query =
+                query.filter(run_with_results_and_errors::dsl::test_id.eq_any(template_subquery));
         }
 
         // Add filters for each of the other params if they have values
@@ -559,93 +561,128 @@ impl RunWithResultsAndErrorsData {
                 match &sort_clause.key[..] {
                     "run_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::run_id.asc());
+                            query =
+                                query.then_order_by(run_with_results_and_errors::dsl::run_id.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::run_id.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::run_id.desc());
                         }
                     }
                     "test_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_id.asc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::test_id.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_id.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::test_id.desc());
                         }
                     }
                     "name" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::name.asc());
+                            query =
+                                query.then_order_by(run_with_results_and_errors::dsl::name.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::name.desc());
+                            query =
+                                query.then_order_by(run_with_results_and_errors::dsl::name.desc());
                         }
                     }
                     "status" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::status.asc());
+                            query =
+                                query.then_order_by(run_with_results_and_errors::dsl::status.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::status.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::status.desc());
                         }
                     }
                     "test_input" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_input.asc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::test_input.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_input.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::test_input.desc());
                         }
                     }
                     "test_options" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_options.asc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::test_options.asc(),
+                            );
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_options.desc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::test_options.desc(),
+                            );
                         }
                     }
                     "eval_input" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_input.asc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::eval_input.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_input.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::eval_input.desc());
                         }
                     }
                     "eval_options" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_options.asc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::eval_options.asc(),
+                            );
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_options.desc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::eval_options.desc(),
+                            );
                         }
                     }
                     "test_cromwell_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_cromwell_job_id.asc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::test_cromwell_job_id.asc(),
+                            );
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::test_cromwell_job_id.desc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::test_cromwell_job_id.desc(),
+                            );
                         }
                     }
                     "eval_cromwell_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_cromwell_job_id.asc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::eval_cromwell_job_id.asc(),
+                            );
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_cromwell_job_id.desc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::eval_cromwell_job_id.desc(),
+                            );
                         }
                     }
                     "created_at" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::created_at.asc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::created_at.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::created_at.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::created_at.desc());
                         }
                     }
                     "finished_at" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::finished_at.asc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::finished_at.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::finished_at.desc());
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::finished_at.desc(),
+                            );
                         }
                     }
                     "created_by" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::created_by.asc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::created_by.asc());
                         } else {
-                            query = query.then_order_by(run_with_results_and_errors::dsl::created_by.desc());
+                            query = query
+                                .then_order_by(run_with_results_and_errors::dsl::created_by.desc());
                         }
                     }
                     // Don't add to the order by clause of the sort key isn't recognized
@@ -686,11 +723,11 @@ impl RunWithResultsAndErrorsData {
 
 #[cfg(test)]
 mod tests {
-    use chrono::format::StrftimeItems;
     use super::*;
     use crate::custom_sql_types::ResultTypeEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
+    use crate::models::run_error::{NewRunError, RunErrorQuery};
     use crate::models::run_is_from_github::{
         NewRunIsFromGithub, RunIsFromGithubData, RunIsFromGithubQuery,
     };
@@ -703,12 +740,12 @@ mod tests {
     use crate::models::test::NewTest;
     use crate::models::test::TestData;
     use crate::unit_test_util::*;
+    use chrono::format::StrftimeItems;
     use chrono::offset::Utc;
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
     use serde_json::json;
     use uuid::Uuid;
-    use crate::models::run_error::{NewRunError, RunErrorQuery};
 
     fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultsAndErrorsData {
         let test_run = insert_test_run(&conn);
@@ -792,14 +829,14 @@ mod tests {
     fn insert_test_run_errors_with_run_id(conn: &PgConnection, id: Uuid) -> Value {
         let new_run_error = NewRunError {
             run_id: id,
-            error: String::from("A bad thing happened, but not too bad")
+            error: String::from("A bad thing happened, but not too bad"),
         };
 
         let new_run_error = RunErrorData::create(conn, new_run_error).unwrap();
 
         let another_run_error = NewRunError {
             run_id: id,
-            error: String::from("You botched it")
+            error: String::from("You botched it"),
         };
 
         let another_run_error = RunErrorData::create(conn, another_run_error).unwrap();
@@ -807,9 +844,23 @@ mod tests {
         let fmt = StrftimeItems::new("%Y-%m-%d %H:%M:%S%.3f");
 
         return json!([
-            format!("{}: {}", new_run_error.created_at.format_with_items(fmt.clone()).to_string(), new_run_error.error),
-            format!("{}: {}", another_run_error.created_at.format_with_items(fmt.clone()).to_string(), another_run_error.error)
-        ])
+            format!(
+                "{}: {}",
+                new_run_error
+                    .created_at
+                    .format_with_items(fmt.clone())
+                    .to_string(),
+                new_run_error.error
+            ),
+            format!(
+                "{}: {}",
+                another_run_error
+                    .created_at
+                    .format_with_items(fmt.clone())
+                    .to_string(),
+                another_run_error.error
+            )
+        ]);
     }
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
@@ -827,7 +878,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing2")),
             test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
@@ -879,7 +932,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing2")),
             test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
@@ -941,7 +996,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: String::from(""),
+            test_wdl_dependencies: None,
             eval_wdl: String::from(""),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -978,7 +1035,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: String::from(""),
+            test_wdl_dependencies: None,
             eval_wdl: String::from(""),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -1123,17 +1182,13 @@ mod tests {
             .expect("Failed inserting test run_is_from_github")
     }
 
-    fn insert_test_run_error_with_run_id(
-        conn: &PgConnection,
-        id: Uuid,
-    ) -> RunErrorData {
+    fn insert_test_run_error_with_run_id(conn: &PgConnection, id: Uuid) -> RunErrorData {
         let new_run_error = NewRunError {
             run_id: id,
             error: String::from("A bad thing happened"),
         };
 
-        RunErrorData::create(conn, new_run_error)
-            .expect("Failed inserting test run_error")
+        RunErrorData::create(conn, new_run_error).expect("Failed inserting test run_error")
     }
 
     #[test]
@@ -1880,8 +1935,7 @@ mod tests {
             limit: None,
             offset: None,
         };
-        let delete_run_error =
-            RunErrorData::find(&conn, deleted_rows_query).unwrap();
+        let delete_run_error = RunErrorData::find(&conn, deleted_rows_query).unwrap();
         assert!(delete_run_error.is_empty());
 
         let deleted_run = RunData::find_by_id(&conn, test_run.run_id);

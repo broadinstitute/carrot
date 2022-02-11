@@ -563,6 +563,7 @@ mod tests {
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData};
+    use crate::models::run_error::{NewRunError, RunErrorData};
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
@@ -571,14 +572,13 @@ mod tests {
     use crate::unit_test_util::*;
     use actix_web::client::Client;
     use actix_web::{http, test, App};
+    use chrono::format::StrftimeItems;
     use diesel::PgConnection;
     use rand::distributions::Alphanumeric;
     use rand::prelude::*;
     use serde_json::json;
     use std::fs::read_to_string;
-    use chrono::format::StrftimeItems;
     use uuid::Uuid;
-    use crate::models::run_error::{NewRunError, RunErrorData};
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultsAndErrorsData {
         let new_pipeline = NewPipeline {
@@ -595,7 +595,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -642,21 +644,21 @@ mod tests {
             created_by: test_run.created_by,
             finished_at: test_run.finished_at,
             results: Some(test_results),
-            errors: Some(test_errors)
+            errors: Some(test_errors),
         }
     }
 
     fn insert_test_run_errors_with_run_id(conn: &PgConnection, id: Uuid) -> Value {
         let new_run_error = NewRunError {
             run_id: id,
-            error: String::from("A bad thing happened, but not too bad")
+            error: String::from("A bad thing happened, but not too bad"),
         };
 
         let new_run_error = RunErrorData::create(conn, new_run_error).unwrap();
 
         let another_run_error = NewRunError {
             run_id: id,
-            error: String::from("You botched it")
+            error: String::from("You botched it"),
         };
 
         let another_run_error = RunErrorData::create(conn, another_run_error).unwrap();
@@ -664,9 +666,23 @@ mod tests {
         let fmt = StrftimeItems::new("%Y-%m-%d %H:%M:%S%.3f");
 
         return json!([
-            format!("{}: {}", new_run_error.created_at.format_with_items(fmt.clone()).to_string(), new_run_error.error),
-            format!("{}: {}", another_run_error.created_at.format_with_items(fmt.clone()).to_string(), another_run_error.error)
-        ])
+            format!(
+                "{}: {}",
+                new_run_error
+                    .created_at
+                    .format_with_items(fmt.clone())
+                    .to_string(),
+                new_run_error.error
+            ),
+            format!(
+                "{}: {}",
+                another_run_error
+                    .created_at
+                    .format_with_items(fmt.clone())
+                    .to_string(),
+                another_run_error.error
+            )
+        ]);
     }
 
     fn create_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
@@ -747,7 +763,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -802,7 +820,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -853,7 +873,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: None,
             test_wdl: format!("{}/test", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 

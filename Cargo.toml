@@ -69,6 +69,8 @@ percent-encoding = "2.1.0"
 sha2 = "0.9"
 # For command line arg parsing
 clap = "2.33"
+# For extracting wdl dependency archives for validation
+zip = "0.5"
 
 [dev-dependencies]
 # For generating random values in test data

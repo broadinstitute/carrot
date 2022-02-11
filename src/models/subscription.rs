@@ -379,7 +379,9 @@ mod tests {
             pipeline_id: id,
             description: None,
             test_wdl: String::from(""),
+            test_wdl_dependencies: None,
             eval_wdl: String::from(""),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 

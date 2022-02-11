@@ -428,6 +428,7 @@ impl ReportBuilder {
         let start_job_response = util::start_job_from_file(
             &self.cromwell_client,
             &wdl_file.path(),
+            None,
             &json_file.path(),
             None,
         )
@@ -486,7 +487,10 @@ impl ReportBuilder {
     /// control block if not provided, metadata header and footer cells, and a cell for downloading data
     /// related to the run) and returns the Jupyter Notebook (in json form) that will be used as a
     /// template for the report
-    fn create_report_template(notebook: &Value, run: &RunWithResultsAndErrorsData) -> Result<Value, Error> {
+    fn create_report_template(
+        notebook: &Value,
+        run: &RunWithResultsAndErrorsData,
+    ) -> Result<Value, Error> {
         // Build a cells array for the notebook
         let mut cells: Vec<Value> = Vec::new();
         // We want to keep track of whether the user supplied a control block
@@ -959,7 +963,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing2")),
             test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
@@ -1537,7 +1543,8 @@ mod tests {
 
         let test_report = insert_test_report(&conn);
         let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run_with_results =
+            RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
             ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results)
@@ -1660,7 +1667,8 @@ mod tests {
 
         let test_report = insert_test_report_with_control_block(&conn);
         let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run_with_results =
+            RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
             ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results)
@@ -1783,7 +1791,8 @@ mod tests {
 
         let test_report = insert_test_report_with_bad_notebook_and_bad_config(&conn);
         let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run_with_results =
+            RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
             ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results);
@@ -1867,7 +1876,7 @@ mod tests {
             })),
             errors: Some(json!([
                 "2004-10-19 10:23:54+02: Failed to do an unimportant thing"
-            ]))
+            ])),
         };
 
         let disk_size = test_report_builder
