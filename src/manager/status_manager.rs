@@ -1270,20 +1270,19 @@ impl StatusManager {
             match outputs.get(&template_result.result_key) {
                 // If we found it, add it to the list of results to write to the DB
                 Some(output) => {
-                    let output = match output.as_str() {
-                        Some(val) => String::from(val),
-                        None => {
-                            error!(
-                                "Failed to parse output {} as string for run {}, had value: {}",
-                                template_result.result_key, run.run_id, output
-                            );
-                            continue;
-                        }
+                    // We have to parse some of the possible result so they're not enclosed in the
+                    // redundant quotes that would be there if we used output.to_string() for
+                    // everything
+                    let parsed_output: String = match output {
+                        Value::String(string_val) => string_val.to_string(),
+                        Value::Bool(bool_val) => bool_val.to_string(),
+                        Value::Number(number_val) => number_val.to_string(),
+                        _ => output.to_string(),
                     };
                     result_list.push(NewRunResult {
                         run_id: run.run_id.clone(),
                         result_id: template_result.result_id.clone(),
-                        value: output,
+                        value: parsed_output,
                     });
                 }
                 None => {}
@@ -1345,9 +1344,9 @@ mod tests {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    fn insert_test_result(conn: &PgConnection) -> ResultData {
+    fn insert_test_result_with_name_and_type(conn: &PgConnection, name: String, result_type: ResultTypeEnum) -> ResultData {
         let new_result = NewResult {
-            name: String::from("Kevin's Result"),
+            name,
             result_type: ResultTypeEnum::Numeric,
             description: Some(String::from("Kevin made this result for testing")),
             created_by: Some(String::from("test_send_email@example.com")),
@@ -1408,15 +1407,16 @@ mod tests {
         (results, template_results)
     }
 
-    fn insert_test_template_result_with_template_id_and_result_id(
+    fn insert_test_template_result_with_template_id_and_result_id_and_result_key(
         conn: &PgConnection,
         template_id: Uuid,
         result_id: Uuid,
+        result_key: String,
     ) -> TemplateResultData {
         let new_template_result = NewTemplateResult {
             template_id: template_id,
             result_id: result_id,
-            result_key: String::from("greeting_workflow.TestKey"),
+            result_key: result_key,
             created_by: Some(String::from("test_send_email@example.com")),
         };
 
@@ -1835,13 +1835,49 @@ mod tests {
         // Insert test, run, result, and template_result we'll use for testing
         let template = insert_test_template(&conn);
         let template_id = template.template_id;
-        let test_result = insert_test_result(&conn);
-        let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
-        insert_test_template_result_with_template_id_and_result_id(
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Text Result"), ResultTypeEnum::Text);
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template_id,
             test_result.result_id,
+            String::from("greeting_workflow.TestKey")
         );
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Bool Result"), ResultTypeEnum::Text);
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.BoolKey")
+        );
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Int Result"), ResultTypeEnum::Numeric);
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.IntKey")
+        );
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Float Result"), ResultTypeEnum::Numeric);
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.FloatKey")
+        );
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Array Result"), ResultTypeEnum::Text);
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.ArrayKey")
+        );
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Object Result"), ResultTypeEnum::Text);
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
+            &conn,
+            template_id,
+            test_result.result_id,
+            String::from("greeting_workflow.ObjectKey")
+        );
+        let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(
             &conn,
             test_test.test_id.clone(),
@@ -1849,7 +1885,14 @@ mod tests {
         // Create results map
         let results_map = json!({
             "greeting_workflow.TestKey": "TestVal",
-            "greeting_workflow.UnimportantKey": "Who Cares?"
+            "greeting_workflow.UnimportantKey": "Who Cares?",
+            "greeting_workflow.BoolKey": true,
+            "greeting_workflow.IntKey": 4,
+            "greeting_workflow.FloatKey": 4.19,
+            "greeting_workflow.ArrayKey": [12, 1, 2, 6],
+            "greeting_workflow.ObjectKey": {
+                "random_key": "hello"
+            }
         });
         let results_map = results_map.as_object().unwrap().to_owned();
         // Fill results
@@ -1857,8 +1900,13 @@ mod tests {
         // Query for run to make sure data was filled properly
         let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results.get("Kevin's Result").unwrap(), "TestVal");
+        assert_eq!(results.len(), 6);
+        assert_eq!(results.get("Text Result").unwrap(), "TestVal");
+        assert_eq!(results.get("Bool Result").unwrap(), "true");
+        assert_eq!(results.get("Int Result").unwrap(), "4");
+        assert_eq!(results.get("Float Result").unwrap(), "4.19");
+        assert_eq!(results.get("Array Result").unwrap(), "[12,1,2,6]");
+        assert_eq!(results.get("Object Result").unwrap(), "{\"random_key\":\"hello\"}");
     }
 
     #[actix_rt::test]
@@ -1870,12 +1918,13 @@ mod tests {
         let email_dir = setup_test_email_dir("Kevin");
         // Insert test, run, result, and template_result we'll use for testing
         let template = insert_test_template(&conn);
-        let test_result = insert_test_result(&conn);
+        let test_result = insert_test_result_with_name_and_type(&conn, String::from("Kevin's Result"), ResultTypeEnum::Text);
         let test_test = insert_test_test_with_template_id(&conn, template.template_id.clone());
-        insert_test_template_result_with_template_id_and_result_id(
+        insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template.template_id,
             test_result.result_id,
+            String::from("greeting_workflow.TestKey")
         );
         let test_run = insert_test_run_with_test_id_and_status_test_submitted(
             &conn,
