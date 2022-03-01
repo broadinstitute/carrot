@@ -87,15 +87,23 @@ fn initialize_pubsub(gcloud_sa_key_file_location: &String) -> PubsubClient {
             "Failed to load service account key from file at: {}",
             gcloud_sa_key_file_location
         ));
-    // Create hyper client for connecting to GCloud
-    let auth_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
+    // Create hyper client for authenticating with GCloud
+    let mut auth_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
         hyper_rustls::TlsClient::new(),
     ));
+    // Give it a ten-minute timeout because occasionally it seems to hang forever if we don't
+    auth_client.set_read_timeout(Some(Duration::new(600, 0)));
+    auth_client.set_write_timeout(Some(Duration::new(600, 0)));
+    // Create another one for executing requests
+    let mut request_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
+        hyper_rustls::TlsClient::new(),
+    ));
+    // Give it a ten-minute timeout because occasionally it seems to hang forever if we don't
+    request_client.set_read_timeout(Some(Duration::new(600, 0)));
+    request_client.set_write_timeout(Some(Duration::new(600, 0)));
     // Create pubsub instance we'll use for connecting to GCloud pubsub
     Pubsub::new(
-        hyper::Client::with_connector(hyper::net::HttpsConnector::new(
-            hyper_rustls::TlsClient::new(),
-        )),
+        request_client,
         yup_oauth2::ServiceAccountAccess::new(client_secret, auth_client),
     )
 }
