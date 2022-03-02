@@ -7,7 +7,7 @@ use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
 use crate::manager::test_runner::TestRunner;
-use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultData};
+use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultsAndErrorsData};
 use crate::routes::error_handling::{default_500, ErrorBody};
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
@@ -91,7 +91,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultData::find_by_id(&conn, id) {
+        match RunWithResultsAndErrorsData::find_by_id(&conn, id) {
             Ok(run) => Ok(run),
             Err(e) => {
                 error!("{}", e);
@@ -172,7 +172,7 @@ async fn find_for_test(
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultData::find(&conn, query) {
+        match RunWithResultsAndErrorsData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -258,7 +258,7 @@ async fn find_for_template(
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultData::find(&conn, query) {
+        match RunWithResultsAndErrorsData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -344,7 +344,7 @@ async fn find_for_pipeline(
     web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultData::find(&conn, query) {
+        match RunWithResultsAndErrorsData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -576,9 +576,11 @@ mod tests {
     use rand::prelude::*;
     use serde_json::json;
     use std::fs::read_to_string;
+    use chrono::format::StrftimeItems;
     use uuid::Uuid;
+    use crate::models::run_error::{NewRunError, RunErrorData};
 
-    fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
+    fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultsAndErrorsData {
         let new_pipeline = NewPipeline {
             name: String::from("Kevin's Pipeline 2"),
             description: Some(String::from("Kevin made this pipeline for testing 2")),
@@ -618,12 +620,14 @@ mod tests {
     fn create_test_run_with_results_and_test_id(
         conn: &PgConnection,
         test_id: Uuid,
-    ) -> RunWithResultData {
+    ) -> RunWithResultsAndErrorsData {
         let test_run = create_test_run_with_test_id(conn, test_id);
 
         let test_results = create_test_results_with_run_id(&conn, &test_run.run_id);
 
-        RunWithResultData {
+        let test_errors = insert_test_run_errors_with_run_id(&conn, test_run.run_id);
+
+        RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
             name: test_run.name,
@@ -638,7 +642,31 @@ mod tests {
             created_by: test_run.created_by,
             finished_at: test_run.finished_at,
             results: Some(test_results),
+            errors: Some(test_errors)
         }
+    }
+
+    fn insert_test_run_errors_with_run_id(conn: &PgConnection, id: Uuid) -> Value {
+        let new_run_error = NewRunError {
+            run_id: id,
+            error: String::from("A bad thing happened, but not too bad")
+        };
+
+        let new_run_error = RunErrorData::create(conn, new_run_error).unwrap();
+
+        let another_run_error = NewRunError {
+            run_id: id,
+            error: String::from("You botched it")
+        };
+
+        let another_run_error = RunErrorData::create(conn, another_run_error).unwrap();
+
+        let fmt = StrftimeItems::new("%Y-%m-%d %H:%M:%S%.3f");
+
+        return json!([
+            format!("{}: {}", new_run_error.created_at.format_with_items(fmt.clone()).to_string(), new_run_error.error),
+            format!("{}: {}", another_run_error.created_at.format_with_items(fmt.clone()).to_string(), another_run_error.error)
+        ])
     }
 
     fn create_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
@@ -696,7 +724,7 @@ mod tests {
 
     fn create_run_with_test_and_template(
         conn: &PgConnection,
-    ) -> (TemplateData, TestData, RunWithResultData) {
+    ) -> (TemplateData, TestData, RunWithResultsAndErrorsData) {
         let new_template = create_test_template(conn);
         let new_test = create_test_test_with_template_id(conn, new_template.template_id);
         let new_run = create_test_run_with_results_and_test_id(conn, new_test.test_id);
@@ -878,7 +906,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_run: RunWithResultData = serde_json::from_slice(&result).unwrap();
+        let test_run: RunWithResultsAndErrorsData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run, new_run);
     }
@@ -943,7 +971,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunWithResultData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<RunWithResultsAndErrorsData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
@@ -1014,7 +1042,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunWithResultData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<RunWithResultsAndErrorsData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
@@ -1085,7 +1113,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunWithResultData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<RunWithResultsAndErrorsData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);

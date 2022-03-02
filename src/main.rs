@@ -9,6 +9,7 @@ mod models;
 mod notifications;
 mod requests;
 mod routes;
+mod run_error_logger;
 mod schema;
 mod storage;
 mod util;
