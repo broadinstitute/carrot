@@ -5,7 +5,7 @@ use crate::config::ReportingConfig;
 use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
 use crate::manager::util;
 use crate::models::report::ReportData;
-use crate::models::run::{RunData, RunWithResultData};
+use crate::models::run::{RunData, RunWithResultsAndErrorsData};
 use crate::models::run_report::{NewRunReport, RunReportData};
 use crate::models::template::TemplateData;
 use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
@@ -393,7 +393,7 @@ impl ReportBuilder {
         // Check if we already have a run report for this run and report
         ReportBuilder::verify_no_existing_run_report(conn, run_id, report_id, delete_failed)?;
         // Retrieve run and report
-        let run = RunWithResultData::find_by_id(conn, run_id)?;
+        let run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
         let report = ReportData::find_by_id(conn, report_id)?;
         // Build the notebook we will submit from the notebook specified in the report and the run data
         let report_json = ReportBuilder::create_report_template(&report.notebook, &run)?;
@@ -486,7 +486,7 @@ impl ReportBuilder {
     /// control block if not provided, metadata header and footer cells, and a cell for downloading data
     /// related to the run) and returns the Jupyter Notebook (in json form) that will be used as a
     /// template for the report
-    fn create_report_template(notebook: &Value, run: &RunWithResultData) -> Result<Value, Error> {
+    fn create_report_template(notebook: &Value, run: &RunWithResultsAndErrorsData) -> Result<Value, Error> {
         // Build a cells array for the notebook
         let mut cells: Vec<Value> = Vec::new();
         // We want to keep track of whether the user supplied a control block
@@ -713,7 +713,7 @@ impl ReportBuilder {
 
     /// Assembles and returns an ipynb json cell that defines a python dictionary containing data for
     /// `run`
-    fn create_run_data_cell(run: &RunWithResultData) -> Result<Value, Error> {
+    fn create_run_data_cell(run: &RunWithResultsAndErrorsData) -> Result<Value, Error> {
         // Convert run into a python dict
         let run_as_json = json!(run);
         let run_as_dict = python_dict_formatter::get_python_dict_string_from_json(
@@ -822,7 +822,7 @@ impl ReportBuilder {
     /// size to use based on that
     async fn get_disk_size_based_on_inputs_and_results(
         &self,
-        run_data: &RunWithResultData,
+        run_data: &RunWithResultsAndErrorsData,
         include_inputs: bool,
         include_results: bool,
     ) -> Result<u64, Error> {
@@ -923,7 +923,7 @@ mod tests {
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::result::{NewResult, ResultData};
-    use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
@@ -1537,7 +1537,7 @@ mod tests {
 
         let test_report = insert_test_report(&conn);
         let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run_with_results = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
             ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results)
@@ -1580,6 +1580,7 @@ mod tests {
                         "carrot_run_data = {\n",
                         format!("    \"created_at\" : \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
                         "    \"created_by\" : \"Kevin@example.com\",\n",
+                        "    \"errors\" : None,\n",
                         "    \"eval_cromwell_job_id\" : \"12345678902\",\n",
                         "    \"eval_input\" : {\n",
                         "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
@@ -1659,7 +1660,7 @@ mod tests {
 
         let test_report = insert_test_report_with_control_block(&conn);
         let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run_with_results = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
             ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results)
@@ -1702,6 +1703,7 @@ mod tests {
                         "carrot_run_data = {\n",
                         format!("    \"created_at\" : \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
                         "    \"created_by\" : \"Kevin@example.com\",\n",
+                        "    \"errors\" : None,\n",
                         "    \"eval_cromwell_job_id\" : \"12345678902\",\n",
                         "    \"eval_input\" : {\n",
                         "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
@@ -1781,7 +1783,7 @@ mod tests {
 
         let test_report = insert_test_report_with_bad_notebook_and_bad_config(&conn);
         let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run_with_results = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
             ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results);
@@ -1830,7 +1832,7 @@ mod tests {
     #[actix_rt::test]
     async fn get_disk_size_based_on_inputs_and_results_success() {
         let test_report_builder = create_test_report_builder();
-        let test_run = RunWithResultData {
+        let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
             name: "Test run".to_string(),
@@ -1863,6 +1865,9 @@ mod tests {
                 "File Result": "gs://result_bucket/file.vcf",
                 "String Result": "hi"
             })),
+            errors: Some(json!([
+                "2004-10-19 10:23:54+02: Failed to do an unimportant thing"
+            ]))
         };
 
         let disk_size = test_report_builder

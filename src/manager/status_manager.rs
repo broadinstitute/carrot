@@ -37,6 +37,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use crate::run_error_logger;
 
 /// Enum of cromwell statuses that can map to different statues in status updates for runs, reports,
 /// and builds
@@ -352,7 +353,8 @@ impl StatusManager {
                             .check_and_update_run_status(&run, &self.db_pool.get().unwrap())
                             .await
                         {
-                            error!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
+                            let error_message = format!("Encountered error while trying to update status for run with id {}: {}", run.run_id, e);
+                            run_error_logger::log_error(&self.db_pool.get().unwrap(), run.run_id, error_message);
                             self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                         }
                     }
@@ -1316,7 +1318,7 @@ mod tests {
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::result::{NewResult, ResultData};
-    use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
@@ -1898,7 +1900,7 @@ mod tests {
         // Fill results
         StatusManager::fill_results(&results_map, &test_run, &conn).unwrap();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
         assert_eq!(results.len(), 6);
         assert_eq!(results.get("Text Result").unwrap(), "TestVal");
@@ -1974,7 +1976,7 @@ mod tests {
         mock.assert();
         cromwell_mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::EvalSubmitted);
         assert!(matches!(result_run.finished_at, Option::None));
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
@@ -2039,7 +2041,7 @@ mod tests {
             .unwrap();
         mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::Succeeded);
         assert_eq!(
             result_run.finished_at.unwrap(),
@@ -2122,7 +2124,7 @@ mod tests {
         assert!(matches!(error, super::UpdateStatusError::Results(_)));
         mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::CarrotFailed);
         let results = result_run.results.unwrap().as_object().unwrap().to_owned();
         assert_eq!(results.len(), 1);
@@ -2172,7 +2174,7 @@ mod tests {
             .unwrap();
         mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::TestFailed);
         assert_eq!(
             result_run.finished_at.unwrap(),
@@ -2216,7 +2218,7 @@ mod tests {
             .unwrap();
         mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::TestRunning);
     }
 
@@ -2255,7 +2257,7 @@ mod tests {
             .unwrap();
         mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::EvalRunning);
     }
 
@@ -2303,7 +2305,7 @@ mod tests {
             .unwrap();
         mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::BuildFailed);
     }
 
@@ -2362,7 +2364,7 @@ mod tests {
         ));
         cromwell_mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::CarrotFailed);
     }
 
@@ -2416,7 +2418,7 @@ mod tests {
             .unwrap();
         cromwell_mock.assert();
         // Query for run to make sure data was filled properly
-        let result_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let result_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
         assert_eq!(result_run.status, RunStatusEnum::TestSubmitted);
         assert_eq!(
             result_run.test_cromwell_job_id.unwrap(),

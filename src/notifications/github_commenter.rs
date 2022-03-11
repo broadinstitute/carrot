@@ -2,7 +2,7 @@
 //! comment should go and what data should be included, and handles formatting the comment and
 //! posting it
 
-use crate::models::run::{RunData, RunWithResultData};
+use crate::models::run::{RunData, RunWithResultsAndErrorsData};
 use crate::models::run_report::RunReportData;
 use crate::requests::github_requests;
 use crate::storage::gcloud_storage;
@@ -106,7 +106,7 @@ impl GithubCommenter {
         owner: &str,
         repo: &str,
         issue_number: i32,
-        run: &RunWithResultData,
+        run: &RunWithResultsAndErrorsData,
     ) -> Result<(), Error> {
         let run_as_string = serde_json::to_string_pretty(run)?;
         let comment_body = format!(
@@ -179,7 +179,7 @@ impl GithubCommenter {
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
-    use crate::models::run::{RunData, RunWithResultData};
+    use crate::models::run::{RunData, RunWithResultsAndErrorsData};
     use crate::models::run_report::RunReportData;
     use crate::notifications::github_commenter::GithubCommenter;
     use crate::requests::github_requests::GithubClient;
@@ -275,7 +275,7 @@ mod tests {
         let github_commenter = GithubCommenter::new(github_client);
 
         // Create a run to test with
-        let test_run = RunWithResultData {
+        let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
             name: String::from("TestRun"),
@@ -290,6 +290,7 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
             results: Some(json!({"result":5})),
+            errors: None
         };
         let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
 

@@ -108,10 +108,24 @@ table! {
 
 table! {
     use diesel::sql_types::*;
+    use crate::custom_sql_types::Run_status_enum;
 
-    run_id_with_results(run_id) {
+    run_with_results_and_errors (run_id) {
         run_id -> Uuid,
-        results -> Json,
+        test_id -> Uuid,
+        name -> Text,
+        status -> Run_status_enum,
+        test_input -> Jsonb,
+        test_options -> Nullable<Jsonb>,
+        eval_input -> Jsonb,
+        eval_options -> Nullable<Jsonb>,
+        test_cromwell_job_id -> Nullable<Text>,
+        eval_cromwell_job_id -> Nullable<Text>,
+        created_at -> Timestamptz,
+        created_by -> Nullable<Text>,
+        finished_at -> Nullable<Timestamptz>,
+        results -> Nullable<Jsonb>,
+        errors -> Nullable<Jsonb>,
     }
 }
 
@@ -240,7 +254,17 @@ table! {
     }
 }
 
-joinable!(run -> run_id_with_results(run_id));
+table! {
+    use diesel::sql_types::*;
+
+    run_error(run_error_id) {
+        run_error_id -> Uuid,
+        run_id -> Uuid,
+        error -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
 
@@ -252,7 +276,7 @@ allow_tables_to_appear_in_same_query!(
     template,
     template_result,
     test,
-    run_id_with_results,
+    run_with_results_and_errors,
     software,
     software_version,
     software_build,
@@ -262,4 +286,5 @@ allow_tables_to_appear_in_same_query!(
     report,
     template_report,
     run_report,
+    run_error,
 );

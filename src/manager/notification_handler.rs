@@ -1,6 +1,6 @@
 //! Contains functions for sending notifications to users
 
-use crate::models::run::{RunData, RunWithResultData};
+use crate::models::run::{RunData, RunWithResultsAndErrorsData};
 use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::run_report::RunReportData;
 use crate::models::subscription::SubscriptionData;
@@ -248,7 +248,7 @@ impl NotificationHandler {
         match &self.emailer {
             Some(emailer) => {
                 // Get run with result data
-                let run = RunWithResultData::find_by_id(conn, run_id)?;
+                let run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
                 // Get test
                 let test = TestData::find_by_id(conn, run.test_id.clone())?;
                 // Get subscriptions
@@ -387,7 +387,7 @@ impl NotificationHandler {
                 match RunIsFromGithubData::find_by_run_id(conn, run_id) {
                     Ok(data_from_github) => {
                         // If the run was triggered from github, retrieve its data and post to github
-                        let run_data = RunWithResultData::find_by_id(conn, run_id)?;
+                        let run_data = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
                         github_commenter
                             .post_run_finished_comment(
                                 &data_from_github.owner,
@@ -466,7 +466,7 @@ mod tests {
     use crate::manager::notification_handler::{Error, NotificationHandler};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
-    use crate::models::run::{NewRun, RunData, RunWithResultData};
+    use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
@@ -671,7 +671,7 @@ mod tests {
             &new_run.name, &new_test.name, &new_run.status
         );
         let new_run_with_results =
-            RunWithResultData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
+            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
         // Make temporary directory for the email
@@ -806,7 +806,7 @@ mod tests {
         );
 
         let new_run_with_results =
-            RunWithResultData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
+            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
 
         // Send email
         let result = test_handler
@@ -1150,7 +1150,7 @@ mod tests {
         let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
-        let test_run = RunWithResultData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
 

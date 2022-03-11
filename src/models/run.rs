@@ -8,7 +8,7 @@ use crate::models::run_result::RunResultData;
 use crate::models::run_software_version::RunSoftwareVersionData;
 use crate::schema::run;
 use crate::schema::run::dsl::*;
-use crate::schema::run_id_with_results;
+use crate::schema::run_with_results_and_errors;
 use crate::schema::template;
 use crate::schema::test;
 use crate::util;
@@ -19,6 +19,7 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+use crate::models::run_error::RunErrorData;
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -40,12 +41,13 @@ pub struct RunData {
     pub finished_at: Option<NaiveDateTime>,
 }
 
-/// Mapping to a run as it exists in the RUN table in the database, joined on the
-/// RUN_ID_WITH_RESULTS view with assembles data from the run_result table into a json
+/// Mapping to a run as viewed through the RUN_WITH_RESULTS_AND_ERRORS view, which assembles data
+/// from the RUN table with aggregated result and error data from RUN_RESULT and RUN_ERROR
+/// respectively
 ///
-/// An instance of this struct will be returned by any queries for runs with results.
+/// An instance of this struct will be returned by any queries for runs with results and errors.
 #[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
-pub struct RunWithResultData {
+pub struct RunWithResultsAndErrorsData {
     pub run_id: Uuid,
     pub test_id: Uuid,
     pub name: String,
@@ -60,6 +62,7 @@ pub struct RunWithResultData {
     pub created_by: Option<String>,
     pub finished_at: Option<NaiveDateTime>,
     pub results: Option<Value>,
+    pub errors: Option<Value>,
 }
 
 /// Represents all possible parameters for a query of the RUN table
@@ -422,10 +425,12 @@ impl RunData {
         }
         // Do all the actual deleting in a closure so we can run it in a transaction
         let delete_closure = || {
-            // Delete run_software_version, run_result, and run_is_from_github rows tied to this run
+            // Delete run_software_version, run_result, run_error, and run_is_from_github rows tied
+            // to this run
             RunSoftwareVersionData::delete_by_run_id(conn, id)?;
             RunResultData::delete_by_run_id(conn, id)?;
             RunIsFromGithubData::delete_by_run_id(conn, id)?;
+            RunErrorData::delete_by_run_id(conn, id)?;
 
             // Delete and return result
             Ok(diesel::delete(run.filter(run_id.eq(id))).execute(conn)?)
@@ -443,31 +448,31 @@ impl RunData {
     }
 }
 
-impl RunWithResultData {
+impl RunWithResultsAndErrorsData {
     /// Queries the DB for a run with the specified id
     ///
     /// Queries the DB using `conn` to retrieve the first row with a run_id value of `id`
     /// Returns a result containing either the retrieved run as a RunData instance or an error if
     /// the query fails for some reason or if no run is found matching the criteria
     pub fn find_by_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
-        run::table
-            .left_join(run_id_with_results::table)
-            .filter(run_id.eq(id))
+        run_with_results_and_errors::table
+            .filter(run_with_results_and_errors::dsl::run_id.eq(id))
             .select((
-                run_id,
-                test_id,
-                name,
-                status,
-                test_input,
-                test_options,
-                eval_input,
-                eval_options,
-                test_cromwell_job_id,
-                eval_cromwell_job_id,
-                created_at,
-                created_by,
-                finished_at,
-                run_id_with_results::results.nullable(),
+                run_with_results_and_errors::dsl::run_id,
+                run_with_results_and_errors::dsl::test_id,
+                run_with_results_and_errors::dsl::name,
+                run_with_results_and_errors::dsl::status,
+                run_with_results_and_errors::dsl::test_input,
+                run_with_results_and_errors::dsl::test_options,
+                run_with_results_and_errors::dsl::eval_input,
+                run_with_results_and_errors::dsl::eval_options,
+                run_with_results_and_errors::dsl::test_cromwell_job_id,
+                run_with_results_and_errors::dsl::eval_cromwell_job_id,
+                run_with_results_and_errors::dsl::created_at,
+                run_with_results_and_errors::dsl::created_by,
+                run_with_results_and_errors::dsl::finished_at,
+                run_with_results_and_errors::dsl::results,
+                run_with_results_and_errors::dsl::errors
             ))
             .first::<Self>(conn)
     }
@@ -478,8 +483,8 @@ impl RunWithResultData {
     /// Returns result containing either a vector of the retrieved runs as RunData
     /// instances or an error if the query fails for some reason
     pub fn find(conn: &PgConnection, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {
-        // Put the query into a box (pointer) so it can be built dynamically and filter by test_id
-        let mut query = run.into_boxed().left_join(run_id_with_results::table);
+        // Put the query into a box (pointer) so it can be built dynamically
+        let mut query = run_with_results_and_errors::dsl::run_with_results_and_errors.into_boxed();
 
         // Adding filters for template_id and pipeline_id requires subqueries
         if let Some(param) = params.pipeline_id {
@@ -492,7 +497,7 @@ impl RunWithResultData {
                 .filter(test::dsl::template_id.eq_any(pipeline_subquery))
                 .select(test::dsl::test_id);
             // Filter by the results of the template subquery
-            query = query.filter(test_id.eq_any(template_subquery));
+            query = query.filter(run_with_results_and_errors::dsl::test_id.eq_any(template_subquery));
         }
         if let Some(param) = params.template_id {
             // Subquery for getting all test_ids for test belonging the to specified template
@@ -500,51 +505,51 @@ impl RunWithResultData {
                 .filter(test::dsl::template_id.eq(param))
                 .select(test::dsl::test_id);
             // Filter by the results of the template subquery
-            query = query.filter(test_id.eq_any(template_subquery));
+            query = query.filter(run_with_results_and_errors::dsl::test_id.eq_any(template_subquery));
         }
 
         // Add filters for each of the other params if they have values
         if let Some(param) = params.test_id {
-            query = query.filter(test_id.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::test_id.eq(param));
         }
         if let Some(param) = params.name {
-            query = query.filter(name.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::name.eq(param));
         }
         if let Some(param) = params.status {
-            query = query.filter(status.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::status.eq(param));
         }
         if let Some(param) = params.test_input {
-            query = query.filter(test_input.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::test_input.eq(param));
         }
         if let Some(param) = params.test_options {
-            query = query.filter(test_options.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::test_options.eq(param));
         }
         if let Some(param) = params.eval_input {
-            query = query.filter(eval_input.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::eval_input.eq(param));
         }
         if let Some(param) = params.eval_options {
-            query = query.filter(eval_options.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::eval_options.eq(param));
         }
         if let Some(param) = params.test_cromwell_job_id {
-            query = query.filter(test_cromwell_job_id.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::test_cromwell_job_id.eq(param));
         }
         if let Some(param) = params.eval_cromwell_job_id {
-            query = query.filter(eval_cromwell_job_id.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::eval_cromwell_job_id.eq(param));
         }
         if let Some(param) = params.created_before {
-            query = query.filter(created_at.lt(param));
+            query = query.filter(run_with_results_and_errors::dsl::created_at.lt(param));
         }
         if let Some(param) = params.created_after {
-            query = query.filter(created_at.gt(param));
+            query = query.filter(run_with_results_and_errors::dsl::created_at.gt(param));
         }
         if let Some(param) = params.created_by {
-            query = query.filter(created_by.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::created_by.eq(param));
         }
         if let Some(param) = params.finished_before {
-            query = query.filter(finished_at.lt(param));
+            query = query.filter(run_with_results_and_errors::dsl::finished_at.lt(param));
         }
         if let Some(param) = params.finished_after {
-            query = query.filter(finished_at.gt(param));
+            query = query.filter(run_with_results_and_errors::dsl::finished_at.gt(param));
         }
 
         // If there is a sort param, parse it and add to the order by clause accordingly
@@ -554,93 +559,93 @@ impl RunWithResultData {
                 match &sort_clause.key[..] {
                     "run_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_id.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::run_id.asc());
                         } else {
-                            query = query.then_order_by(run_id.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::run_id.desc());
                         }
                     }
                     "test_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(test_id.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_id.asc());
                         } else {
-                            query = query.then_order_by(test_id.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_id.desc());
                         }
                     }
                     "name" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(name.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::name.asc());
                         } else {
-                            query = query.then_order_by(name.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::name.desc());
                         }
                     }
                     "status" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(status.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::status.asc());
                         } else {
-                            query = query.then_order_by(status.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::status.desc());
                         }
                     }
                     "test_input" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(test_input.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_input.asc());
                         } else {
-                            query = query.then_order_by(test_input.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_input.desc());
                         }
                     }
                     "test_options" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(test_options.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_options.asc());
                         } else {
-                            query = query.then_order_by(test_options.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_options.desc());
                         }
                     }
                     "eval_input" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(eval_input.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_input.asc());
                         } else {
-                            query = query.then_order_by(eval_input.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_input.desc());
                         }
                     }
                     "eval_options" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(eval_options.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_options.asc());
                         } else {
-                            query = query.then_order_by(eval_options.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_options.desc());
                         }
                     }
                     "test_cromwell_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(test_cromwell_job_id.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_cromwell_job_id.asc());
                         } else {
-                            query = query.then_order_by(test_cromwell_job_id.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::test_cromwell_job_id.desc());
                         }
                     }
                     "eval_cromwell_job_id" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(eval_cromwell_job_id.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_cromwell_job_id.asc());
                         } else {
-                            query = query.then_order_by(eval_cromwell_job_id.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::eval_cromwell_job_id.desc());
                         }
                     }
                     "created_at" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(created_at.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::created_at.asc());
                         } else {
-                            query = query.then_order_by(created_at.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::created_at.desc());
                         }
                     }
                     "finished_at" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(finished_at.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::finished_at.asc());
                         } else {
-                            query = query.then_order_by(finished_at.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::finished_at.desc());
                         }
                     }
                     "created_by" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(created_by.asc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::created_by.asc());
                         } else {
-                            query = query.then_order_by(created_by.desc());
+                            query = query.then_order_by(run_with_results_and_errors::dsl::created_by.desc());
                         }
                     }
                     // Don't add to the order by clause of the sort key isn't recognized
@@ -659,20 +664,21 @@ impl RunWithResultData {
         // Perform the query
         query
             .select((
-                run_id,
-                test_id,
-                name,
-                status,
-                test_input,
-                test_options,
-                eval_input,
-                eval_options,
-                test_cromwell_job_id,
-                eval_cromwell_job_id,
-                created_at,
-                created_by,
-                finished_at,
-                run_id_with_results::results.nullable(),
+                run_with_results_and_errors::dsl::run_id,
+                run_with_results_and_errors::dsl::test_id,
+                run_with_results_and_errors::dsl::name,
+                run_with_results_and_errors::dsl::status,
+                run_with_results_and_errors::dsl::test_input,
+                run_with_results_and_errors::dsl::test_options,
+                run_with_results_and_errors::dsl::eval_input,
+                run_with_results_and_errors::dsl::eval_options,
+                run_with_results_and_errors::dsl::test_cromwell_job_id,
+                run_with_results_and_errors::dsl::eval_cromwell_job_id,
+                run_with_results_and_errors::dsl::created_at,
+                run_with_results_and_errors::dsl::created_by,
+                run_with_results_and_errors::dsl::finished_at,
+                run_with_results_and_errors::dsl::results,
+                run_with_results_and_errors::dsl::errors,
             ))
             .load::<Self>(conn)
     }
@@ -680,7 +686,7 @@ impl RunWithResultData {
 
 #[cfg(test)]
 mod tests {
-
+    use chrono::format::StrftimeItems;
     use super::*;
     use crate::custom_sql_types::ResultTypeEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
@@ -702,13 +708,16 @@ mod tests {
     use rand::prelude::*;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::run_error::{NewRunError, RunErrorQuery};
 
-    fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultData {
+    fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultsAndErrorsData {
         let test_run = insert_test_run(&conn);
 
         let test_results = insert_test_results_with_run_id(&conn, &test_run.run_id);
 
-        RunWithResultData {
+        let test_errors = insert_test_run_errors_with_run_id(&conn, test_run.run_id);
+
+        RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
             name: test_run.name,
@@ -723,6 +732,7 @@ mod tests {
             created_by: test_run.created_by,
             finished_at: test_run.finished_at,
             results: Some(test_results),
+            errors: Some(test_errors),
         }
     }
 
@@ -777,6 +787,29 @@ mod tests {
             new_result.name: new_run_result.value,
             new_result2.name: new_run_result2.value
         });
+    }
+
+    fn insert_test_run_errors_with_run_id(conn: &PgConnection, id: Uuid) -> Value {
+        let new_run_error = NewRunError {
+            run_id: id,
+            error: String::from("A bad thing happened, but not too bad")
+        };
+
+        let new_run_error = RunErrorData::create(conn, new_run_error).unwrap();
+
+        let another_run_error = NewRunError {
+            run_id: id,
+            error: String::from("You botched it")
+        };
+
+        let another_run_error = RunErrorData::create(conn, another_run_error).unwrap();
+
+        let fmt = StrftimeItems::new("%Y-%m-%d %H:%M:%S%.3f");
+
+        return json!([
+            format!("{}: {}", new_run_error.created_at.format_with_items(fmt.clone()).to_string(), new_run_error.error),
+            format!("{}: {}", another_run_error.created_at.format_with_items(fmt.clone()).to_string(), another_run_error.error)
+        ])
     }
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
@@ -1090,6 +1123,19 @@ mod tests {
             .expect("Failed inserting test run_is_from_github")
     }
 
+    fn insert_test_run_error_with_run_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunErrorData {
+        let new_run_error = NewRunError {
+            run_id: id,
+            error: String::from("A bad thing happened"),
+        };
+
+        RunErrorData::create(conn, new_run_error)
+            .expect("Failed inserting test run_error")
+    }
+
     #[test]
     fn find_by_id_exists() {
         let conn = get_test_db_connection();
@@ -1120,7 +1166,7 @@ mod tests {
 
         let test_run = insert_test_run_with_results(&conn);
 
-        let found_run = RunWithResultData::find_by_id(&conn, test_run.run_id)
+        let found_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id)
             .expect("Failed to retrieve test run by id.");
 
         assert_eq!(found_run, test_run);
@@ -1776,6 +1822,7 @@ mod tests {
             insert_test_run_software_versions_with_run_id(&conn, test_run.run_id);
         let results = insert_test_results_with_run_id(&conn, &test_run.run_id);
         let run_is_from_github = insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
+        let run_error = insert_test_run_error_with_run_id(&conn, test_run.run_id);
 
         let delete_result = RunData::delete(&conn, test_run.run_id).unwrap();
 
@@ -1822,6 +1869,20 @@ mod tests {
         let deleted_run_is_from_github =
             RunIsFromGithubData::find(&conn, deleted_rows_query).unwrap();
         assert!(deleted_run_is_from_github.is_empty());
+
+        let deleted_rows_query = RunErrorQuery {
+            run_error_id: None,
+            run_id: Some(test_run.run_id),
+            error: None,
+            created_before: None,
+            created_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let delete_run_error =
+            RunErrorData::find(&conn, deleted_rows_query).unwrap();
+        assert!(delete_run_error.is_empty());
 
         let deleted_run = RunData::find_by_id(&conn, test_run.run_id);
         assert!(matches!(deleted_run, Err(diesel::result::Error::NotFound)));
