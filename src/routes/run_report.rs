@@ -908,13 +908,11 @@ mod tests {
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
-        //assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(resp.status(), http::StatusCode::OK);
 
-        //cromwell_mock.assert();
+        cromwell_mock.assert();
 
         let result = test::read_body(resp).await;
-
-        print!("{}", std::str::from_utf8(&result).unwrap());
 
         let result_run_report: RunReportData = serde_json::from_slice(&result).unwrap();
 
