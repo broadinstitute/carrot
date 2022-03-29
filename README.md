@@ -1,4 +1,4 @@
-![CARROT](https://github.com/broadinstitute/carrot/blob/master/logo.png?raw=true)
+![CARROT](logo.png)
 # CARROT
 
 This repository contains the Cromwell Automated Runner for Regression and Automation Testing.  This is a tool for configuring, running, and comparing the results of tests run in the [Cromwell Workflow Engine](https://github.com/broadinstitute/cromwell).
@@ -13,6 +13,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
 * [Style](#style)
 * [Using CARROT](#using_carrot)
 * [License](#license)
+* [Versioning](#versioning)
 
 ## <a name="requirements">Requirements</a>
 
@@ -90,3 +91,21 @@ There is also an [example test repo](https://github.com/broadinstitute/carrot-ex
 ## <a name="license">License</a>
 
 Licensed under Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE)) AND MIT License ([LICENSE-MIT](LICENSE-MIT))
+
+### <a name="versioning">Versioning</a>
+
+We use `bumpversion.sh` to maintain version numbers.
+DO NOT MANUALLY EDIT ANY VERSION NUMBERS.
+
+Our versions are specified by a 3 number semantic version system (https://semver.org/):
+
+	major.minor.patch
+
+To update the version do the following:
+
+`./bumpversion.sh PART` where PART is one of:
+- major
+- minor
+- patch
+
+This will increase the corresponding version number by 1.

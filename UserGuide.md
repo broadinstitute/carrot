@@ -5,7 +5,7 @@
 ## Cromwell Automated Runner for Regression and Optimization Testing (CARROT) User Guide
 
 
-### _v0.3.3-gamma_
+### _v0.4.0_
 
 
 ## **Table of Contents**
@@ -69,7 +69,7 @@ This document is only applicable to the following version of CARROT:
 
 
 ```
-v0.3.3-gamma
+v0.4.0
 ```
 
 
@@ -161,7 +161,7 @@ Alternatively you can leave the structure of your original tool WDL as-is, using
 
 ##### <a name="permissions-access"/> **Permissions / Access**
 
-The CARROT service account must have access to the WDLs and WDL resources to run for your test.  Because of this, <span style="text-decoration:underline;">you must make your WDLs and all associated required resources public or accessible by the service account that CARROT uses to retrieve and run WDLs</span>.
+If you supply any of the test resources (WDLs or their dependencies) via http/https/gs URI, the CARROT service account must have access to the WDLs and WDL resources to run for your test.  Because of this, <span style="text-decoration:underline;">you must make your WDLs and all associated required resources public or accessible by the service account that CARROT uses to retrieve and run WDLs</span>.
 
 
 #### <a name="input-requirements"/> **Input Requirements**
@@ -187,12 +187,12 @@ CARROT can generate a docker image to supply as an input to your test WDL or eva
 
 ### <a name="setting-up-tests-in-carrot"/> **Setting Up Tests in CARROT**
 
-Tests should be set up in CARROT using the [CARROT CLI](https://github.com/broadinstitute/carrot_cli).
+Tests should be set up in CARROT using the [CARROT CLI](https://github.com/broadinstitute/carrot/tree/master/carrot_cli).
 
 
 #### <a name="carrot-cli"/> **CARROT CLI**
 
-Get the CARROT CLI by downloading the [latest release](https://github.com/broadinstitute/carrot_cli/releases) or cloning the [git repository.](https://github.com/broadinstitute/carrot_cli)  After downloading the CLI program, you must configure it to connect to the CARROT server:
+Get the CARROT CLI by downloading the CLI archive from the [latest release](https://github.com/broadinstitute/carrot/releases) or cloning this git repository.  After downloading the CLI program, you must configure it to connect to the CARROT server:
 
 
 ```
@@ -263,13 +263,13 @@ To add a template to CARROT, do the following:
 
 
 ```
-> carrot_cli template create --pipeline_id "<PIPELINE_ID>" --name "<TEMPLATE NAME>" --description "<DESCRIPTION>" --test_wdl "<URL OR URI OF TEST WDL>" --eval_wdl "<URL OR URI OF EVAL WDL>" [--created_by EMAIL]
+> carrot_cli template create --pipeline "<PIPELINE ID OR NAME>" --name "<TEMPLATE NAME>" --description "<DESCRIPTION>" --test_wdl "<PATH OR URI OF TEST WDL>" --eval_wdl "<PATH OR URI OF EVAL WDL>" [--created_by EMAIL]
 ```
 
 
-The` pipeline_ID` is the CARROT ID of the pipeline to which this template belongs.  If you just added a pipeline, this should still be visible at the command-line terminal as the result of `carrot_cli pipeline create … `.  If not, this can be found as the ID field when querying for pipelines (`carrot_cli pipeline find`).
+The` pipeline` is the CARROT ID or name of the pipeline to which this template belongs.  If you just added a pipeline, the ID should still be visible at the command-line terminal as the result of `carrot_cli pipeline create … `.  If not, this can be found as the ID field when querying for pipelines (`carrot_cli pipeline find`).
 
-The test and evaluation WDLs are specified here as URLs or gs URIs to those WDLs.  These WDLs must either be public or be accessible by the service account being used with your instance of CARROT.
+The test and evaluation WDLs are specified here as local file paths or http/https/gs URIs to those WDLs.  If supplied via URIs, these WDLs must either be public or be accessible by the service account being used with your instance of CARROT.
 
 The `--created_by email` flag is optional and defaults to the email address in your carrot_cli configuration file.
 
@@ -280,13 +280,13 @@ For any output of a test or evaluation WDL to be tracked by CARROT, it must be m
 
 
 ```
-> carrot_cli template  map_to_result TEMPLATE_ID RESULT_ID RESULT_KEY
+> carrot_cli template  map_to_result TEMPLATE RESULT RESULT_KEY
 ```
 
 
-The  `TEMPLATE_ID` corresponds to the CARROT ID of the template containing the output you wish to map to a result type.  If you just added a template, this should still be visible at the command-line terminal as the result of `carrot_cli template create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli template find`).
+The  `TEMPLATE` corresponds to the CARROT ID or name of the template containing the output you wish to map to a result type.  If you just added a template, the ID should still be visible at the command-line terminal as the result of `carrot_cli template create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli template find`).
 
-The `RESULT_ID` corresponds to the CARROT ID of the result type which will be mapped to an output from the template.  This can be found as the ID field when querying for pipelines (`carrot_cli results find`).
+The `RESULT` corresponds to the CARROT ID or name of the result type which will be mapped to an output from the template.  The ID can be found as the ID field when querying for pipelines (`carrot_cli results find`).
 
 `RESULT_KEY` is the name of the output from one of the WDLs in your template that you wish to track as a result in CARROT.  You can find your outputs in the output section of either the test or evaluation WDLs used in this template.
 
@@ -297,11 +297,11 @@ A test can be thought of as an instance of a template - one specific evaluation 
 
 
 ```
-> carrot_cli test create --name "<TEST NAME>" --template_id <TEMPLATE_ID> --description "<TEXT>" --test_input_defaults <TEST_WDL_DEFAULT_JSON_FILE> --eval_input_defaults <EVAL_WDL_DEFAULT_JSON_FILE> [--created_by EMAIL]
+> carrot_cli test create --name "<TEST NAME>" --template <TEMPLATE ID OR NAME> --description "<TEXT>" --test_input_defaults <TEST_WDL_DEFAULT_JSON_FILE> --eval_input_defaults <EVAL_WDL_DEFAULT_JSON_FILE> [--created_by EMAIL]
 ```
 
 
-The  `TEMPLATE_ID` corresponds to the CARROT ID of the template containing the output you wish to map to a result type.  If you just added a template, this should still be visible at the command-line terminal as the result of `carrot_cli template create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli template find`).
+The  `TEMPLATE ID OR NAME` corresponds to the CARROT ID or name of the template containing the output you wish to map to a result type.  If you just added a template, the ID should still be visible at the command-line terminal as the result of `carrot_cli template create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli template find`).
 
 `<TEST_WDL_DEFAULT_JSON_FILE> `corresponds to the JSON file containing default values for the test WDL.  In general, all workflow inputs should be set here except for the docker container specification (this is required for the GitHub integration to function properly).
 
@@ -318,7 +318,7 @@ To run a particular test from the CARROT CLI, do the following:
 
 
 ```
-> carrot_cli test run [--name "<RUN NAME>"] --test_input <TEST_WDL_INPUT_JSON_FILE> --eval_input <EVAL_WDL_INPUT_JSON_FILE> [--created_by EMAIL] ID
+> carrot_cli test run [--name "<RUN NAME>"] --test_input <TEST_WDL_INPUT_JSON_FILE> --eval_input <EVAL_WDL_INPUT_JSON_FILE> [--created_by EMAIL] TEST
 ```
 
 
@@ -330,7 +330,7 @@ The` --name "<RUN NAME>"` flag is optional and will be populated by CARROT if a 
 
 The `--created_by email` flag is optional and defaults to the email address in your carrot_cli configuration file.
 
-The `ID` field corresponds to the ID of the test to run.  If you just added a test, this should still be visible at the command-line terminal as the result of `carrot_cli test create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli test find`).
+The `TEST` field corresponds to the ID or name of the test to run.  If you just added a test, the ID should still be visible at the command-line terminal as the result of `carrot_cli test create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli test find`).
 
 
 #### <a name="concise-example"/> **Concise Example:**
@@ -508,16 +508,16 @@ A report must be mapped to a template in order for filled reports to be generate
 
 
 ```
-carrot_cli template map_to_report [--created_by EMAIL] ID REPORT_ID
+carrot_cli template map_to_report [--created_by EMAIL] TEMPLATE REPORT
 ```
 
 
 The `--created_by email` flag is optional and defaults to the email address in your carrot_cli configuration file.
 
-`ID` is the ID of the template you wish to map.  If you need to find the ID of a specific template, you can get it using  `carrot_cli template find.`
+`TEMPLATE` is the ID or name of the template you wish to map.  If you need to find the ID of a specific template, you can get it using  `carrot_cli template find.`
 
 
-`REPORT_ID` is the ID of the report you wish to map.  If you just completed step 2 and created a report, the ID of that report should have been included in the results from that command.  If not, you can find the report using `carrot_cli report find`.
+`REPORT` is the ID or name of the report you wish to map.  If you just completed step 2 and created a report, the ID of that report should have been included in the results from that command.  If not, you can find the report using `carrot_cli report find`.
 
 
 
@@ -530,7 +530,7 @@ The second option, if you want to generate a report for a run that has already c
 
 
 ```
-carrot_cli run create_report [--created_by EMAIL] [--delete_failed] ID REPORT_ID
+carrot_cli run create_report [--created_by EMAIL] [--delete_failed] RUN REPORT
 ```
 
 
@@ -538,10 +538,10 @@ The `--created_by email` flag is optional and defaults to the email address in y
 
 The optional `--delete_failed `flag will overwrite an existing failed run_report record if there is one for the specified run and report.  Without this flag, the command will fail if there exists a record of a failed attempt at generating this report for this run.  Regardless of whether this flag is used, the command will fail if there is a non-failed run_report record for the specified run and report.
 
-`ID` is the ID of the run for which you wish to generate a report.  If you need to find the ID of a specific run, you can get it using any of the following commands:  `carrot_cli pipeline find_runs, carrot_cli template find_runs, or carrot_cli test find_runs`.
+`RUN` is the ID or name of the run for which you wish to generate a report.  If you need to find the ID of a specific run, you can get it using any of the following commands:  `carrot_cli pipeline find_runs, carrot_cli template find_runs, or carrot_cli test find_runs`.
 
 
-`REPORT_ID` is the ID of the report you wish to generate for the run.  If you just completed step 2 above and created a report, the ID of that report should have been included in the results from that command.  If not, you can find the report using `carrot_cli report find`.
+`REPORT` is the ID or name of the report you wish to generate for the run.  If you just completed step 2 above and created a report, the ID of that report should have been included in the results from that command.  If not, you can find the report using `carrot_cli report find`.
 
 Once the report has been generated, it will be available in 3 forms: the Jupyter notebook that is produced by CARROT before being run, the filled Jupyter notebook that is created once all the cells are run, and a static HTML representation of the filled notebook.
 
@@ -614,7 +614,7 @@ Once the GitHub action processes the comment and sends the message, it will be p
 *   [Cromwell](https://cromwell.readthedocs.io/en/stable/)
 *   [WDL](https://openwdl.org/)
 *   [CARROT GitHub Repo](https://github.com/broadinstitute/carrot)
-*   [CARROT CLI GitHub Repo](https://github.com/broadinstitute/carrot_cli)
+*   [CARROT CLI](https://github.com/broadinstitute/carrot/tree/master/carrot_cli)
 
 
 ## Notes
