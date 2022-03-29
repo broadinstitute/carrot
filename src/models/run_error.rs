@@ -51,7 +51,6 @@ pub struct NewRunError {
 }
 
 impl RunErrorData {
-
     /// Queries the DB for a run_error with the specified run_error_id
     ///
     /// Queries the DB using `conn` to retrieve the first row with a run_id value of `id`
@@ -164,10 +163,7 @@ impl RunErrorData {
     /// `params`
     /// Returns a result containing either the new run_error that was created or an error
     /// if the insert fails for some reason
-    pub fn create(
-        conn: &PgConnection,
-        params: NewRunError,
-    ) -> Result<Self, diesel::result::Error> {
+    pub fn create(conn: &PgConnection, params: NewRunError) -> Result<Self, diesel::result::Error> {
         diesel::insert_into(run_error)
             .values(&params)
             .get_result(conn)
@@ -224,7 +220,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing2")),
             test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
@@ -265,13 +263,12 @@ mod tests {
             error: String::from("A bad thing happened"),
         };
 
-        RunErrorData::create(conn, new_run_error)
-            .expect("Failed inserting test run_error")
+        RunErrorData::create(conn, new_run_error).expect("Failed inserting test run_error")
     }
 
     fn insert_test_run_errors(conn: &PgConnection) -> Vec<RunErrorData> {
         let mut run_errors: Vec<RunErrorData> = Vec::new();
-        
+
         let new_pipeline = NewPipeline {
             name: String::from("Kevin's Pipeline 3"),
             description: Some(String::from("Kevin made this pipeline for testing 2")),
@@ -286,7 +283,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing2")),
             test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
@@ -327,8 +326,8 @@ mod tests {
             error: String::from("A not good thing happened"),
         };
 
-        run_errors.push(RunErrorData::create(conn, new_run_error)
-            .expect("Failed inserting test run_error")
+        run_errors.push(
+            RunErrorData::create(conn, new_run_error).expect("Failed inserting test run_error"),
         );
 
         let new_run = NewRun {
@@ -352,8 +351,8 @@ mod tests {
             error: String::from("A worse thing happened"),
         };
 
-        run_errors.push(RunErrorData::create(conn, new_run_error)
-            .expect("Failed inserting test run_error")
+        run_errors.push(
+            RunErrorData::create(conn, new_run_error).expect("Failed inserting test run_error"),
         );
 
         let new_run_error = NewRunError {
@@ -361,10 +360,10 @@ mod tests {
             error: String::from("The worst thing happened"),
         };
 
-        run_errors.push(RunErrorData::create(conn, new_run_error)
-            .expect("Failed inserting test run_error")
+        run_errors.push(
+            RunErrorData::create(conn, new_run_error).expect("Failed inserting test run_error"),
         );
-        
+
         run_errors
     }
 
@@ -374,9 +373,8 @@ mod tests {
 
         let test_run_error = insert_test_run_error(&conn);
 
-        let found_run_error =
-            RunErrorData::find_by_id(&conn, test_run_error.run_error_id)
-                .expect("Failed to retrieve test run_error by id.");
+        let found_run_error = RunErrorData::find_by_id(&conn, test_run_error.run_error_id)
+            .expect("Failed to retrieve test run_error by id.");
 
         assert_eq!(found_run_error, test_run_error);
     }
@@ -385,8 +383,7 @@ mod tests {
     fn find_by_id_not_exists() {
         let conn = get_test_db_connection();
 
-        let nonexistent_run_error =
-            RunErrorData::find_by_id(&conn, Uuid::new_v4());
+        let nonexistent_run_error = RunErrorData::find_by_id(&conn, Uuid::new_v4());
 
         assert!(matches!(
             nonexistent_run_error,
@@ -400,9 +397,8 @@ mod tests {
 
         let test_run_error = insert_test_run_error(&conn);
 
-        let found_run_error =
-            RunErrorData::find_by_run_id(&conn, test_run_error.run_id)
-                .expect("Failed to retrieve test run_error by id.");
+        let found_run_error = RunErrorData::find_by_run_id(&conn, test_run_error.run_id)
+            .expect("Failed to retrieve test run_error by id.");
 
         assert_eq!(found_run_error, test_run_error);
     }
@@ -411,8 +407,7 @@ mod tests {
     fn find_by_run_id_not_exists() {
         let conn = get_test_db_connection();
 
-        let nonexistent_run_error =
-            RunErrorData::find_by_run_id(&conn, Uuid::new_v4());
+        let nonexistent_run_error = RunErrorData::find_by_run_id(&conn, Uuid::new_v4());
 
         assert!(matches!(
             nonexistent_run_error,
@@ -438,8 +433,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 1);
         assert_eq!(found_run_errors[0], test_run_error);
@@ -463,8 +458,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 1);
         assert_eq!(found_run_errors[0], test_run_error);
@@ -488,8 +483,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 1);
         assert_eq!(found_run_errors[0], test_run_error);
@@ -512,8 +507,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 2);
         assert_eq!(found_run_errors[0], test_run_errors[2]);
@@ -530,8 +525,8 @@ mod tests {
             offset: Some(2),
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 1);
         assert_eq!(found_run_errors[0], test_run_errors[0]);
@@ -554,8 +549,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 0);
 
@@ -570,8 +565,8 @@ mod tests {
             offset: None,
         };
 
-        let found_run_errors = RunErrorData::find(&conn, test_query)
-            .expect("Failed to find run_errors");
+        let found_run_errors =
+            RunErrorData::find(&conn, test_query).expect("Failed to find run_errors");
 
         assert_eq!(found_run_errors.len(), 3);
     }
@@ -591,13 +586,11 @@ mod tests {
 
         let test_run_error = insert_test_run_error(&conn);
 
-        let delete_result =
-            RunErrorData::delete(&conn, test_run_error.run_error_id).unwrap();
+        let delete_result = RunErrorData::delete(&conn, test_run_error.run_error_id).unwrap();
 
         assert_eq!(delete_result, 1);
 
-        let test_run_error2 =
-            RunErrorData::find_by_id(&conn, test_run_error.run_error_id);
+        let test_run_error2 = RunErrorData::find_by_id(&conn, test_run_error.run_error_id);
 
         assert!(matches!(
             test_run_error2,
@@ -611,13 +604,11 @@ mod tests {
 
         let test_run_error = insert_test_run_error(&conn);
 
-        let delete_result =
-            RunErrorData::delete_by_run_id(&conn, test_run_error.run_id).unwrap();
+        let delete_result = RunErrorData::delete_by_run_id(&conn, test_run_error.run_id).unwrap();
 
         assert_eq!(delete_result, 1);
 
-        let test_run_error2 =
-            RunErrorData::find_by_run_id(&conn, test_run_error.run_id);
+        let test_run_error2 = RunErrorData::find_by_run_id(&conn, test_run_error.run_id);
 
         assert!(matches!(
             test_run_error2,

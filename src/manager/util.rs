@@ -16,6 +16,7 @@ use std::time::Duration;
 pub async fn start_job_from_file(
     cromwell_client: &CromwellClient,
     wdl_file_path: &Path,
+    wdl_deps_file_path: Option<&Path>,
     inputs_file_path: &Path,
     options_file_path: Option<&Path>,
 ) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
@@ -23,10 +24,14 @@ pub async fn start_job_from_file(
         Some(file_path) => Some(PathBuf::from(file_path)),
         None => None,
     };
+    let wdl_deps_file_path: Option<PathBuf> = match wdl_deps_file_path {
+        Some(file_path) => Some(PathBuf::from(file_path)),
+        None => None,
+    };
     // Build request parameters
     let cromwell_params = cromwell_requests::StartJobParams {
         labels: None,
-        workflow_dependencies: None,
+        workflow_dependencies: wdl_deps_file_path,
         workflow_inputs: Some(PathBuf::from(inputs_file_path)),
         workflow_inputs_2: None,
         workflow_inputs_3: None,
@@ -93,7 +98,8 @@ mod tests {
         let cromwell_client: CromwellClient =
             CromwellClient::new(Client::default(), &mockito::server_url());
         // Create job data with simple test workflow
-        let test_path = PathBuf::from("testdata/requests/cromwell_requests/test_workflow.wdl");
+        let test_path = PathBuf::from("testdata/routes/template/valid_wdl_with_deps.wdl");
+        let test_deps_path = Some(PathBuf::from("testdata/routes/template/valid_wdl_deps.zip"));
         // Make fake params
         let params: Value = json!({
             "myWorkflow.test":"test"
@@ -120,6 +126,7 @@ mod tests {
         let response = start_job_from_file(
             &cromwell_client,
             test_path.as_path(),
+            test_deps_path.as_deref(),
             test_json_file.path(),
             Some(test_json_file.path()),
         )

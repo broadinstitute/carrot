@@ -71,7 +71,9 @@ table! {
         name -> Text,
         description -> Nullable<Text>,
         test_wdl -> Text,
+        test_wdl_dependencies -> Nullable<Text>,
         eval_wdl -> Text,
+        eval_wdl_dependencies -> Nullable<Text>,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,
     }

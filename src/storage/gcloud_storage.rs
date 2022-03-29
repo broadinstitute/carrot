@@ -125,11 +125,11 @@ impl GCloudClient {
         }
     }
 
-    /// Retrieves the media at the specified gs `address` as a String
+    /// Retrieves the media at the specified gs `address` as bytes
     ///
     /// Uses `self.storage_hub` to place a GET request to the object at `address` using the Google
     /// Cloud Storage JSON API, specifically to retrieve the file contents as a String
-    pub async fn retrieve_object_media_with_gs_uri(&self, address: &str) -> Result<String, Error> {
+    pub async fn retrieve_object_media_with_gs_uri(&self, address: &str) -> Result<Vec<u8>, Error> {
         // Parse address to get bucket and object name
         let (bucket_name, object_name) = parse_bucket_and_object_name(address)?;
         // Percent encode the object name because the Google Cloud Storage JSON API, which the
@@ -146,13 +146,15 @@ impl GCloudClient {
             .doit()?;
 
         // Read body from response
-        let mut response_body = String::new();
-        response.read_to_string(&mut response_body)?;
+        let mut response_body: Vec<u8> = Vec::new();
+        response.read_to_end(&mut response_body)?;
         // If it didn't return a success status code, that's an error
         if !response.status.is_success() {
             return Err(Error::Failed(format!(
-                "Resource request to {} returned {}",
-                address, response_body
+                "Resource request to {} returned {} with body {}",
+                address,
+                response.status,
+                String::from_utf8_lossy(&response_body)
             )));
         }
         // Return the response body as a string
@@ -287,7 +289,7 @@ impl GCloudClient {
 #[cfg(test)]
 #[derive(Clone)]
 pub struct GCloudClient {
-    retrieve_media: Option<Arc<Box<dyn Fn(&str) -> Result<String, Error>>>>,
+    retrieve_media: Option<Arc<Box<dyn Fn(&str) -> Result<Vec<u8>, Error>>>>,
     retrieve_object: Option<Arc<Box<dyn Fn(&str) -> Result<Object, Error>>>>,
     upload_file: Option<Arc<Box<dyn Fn(&File, &str, &str) -> Result<String, Error>>>>,
     upload_data: Option<Arc<Box<dyn Fn(&[u8], &str, &str) -> Result<String, Error>>>>,
@@ -307,7 +309,7 @@ impl GCloudClient {
     }
     pub fn set_retrieve_media(
         &mut self,
-        retrieve_media_fn: Box<dyn Fn(&str) -> Result<String, Error>>,
+        retrieve_media_fn: Box<dyn Fn(&str) -> Result<Vec<u8>, Error>>,
     ) {
         self.retrieve_media = Some(Arc::new(retrieve_media_fn));
     }
@@ -329,7 +331,7 @@ impl GCloudClient {
     ) {
         self.upload_data = Some(Arc::new(upload_data_fn));
     }
-    pub async fn retrieve_object_media_with_gs_uri(&self, address: &str) -> Result<String, Error> {
+    pub async fn retrieve_object_media_with_gs_uri(&self, address: &str) -> Result<Vec<u8>, Error> {
         match &self.retrieve_media {
             Some(function) => function(address),
             None => panic!("No function set for retrieve_media"),

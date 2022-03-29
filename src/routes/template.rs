@@ -14,7 +14,6 @@ use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::multipart_handling;
 use crate::routes::util::parse_id;
 use crate::storage::gcloud_storage;
-use crate::util::temp_storage;
 use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool;
 use crate::validation::womtool::WomtoolRunner;
@@ -26,8 +25,9 @@ use log::{debug, error};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
-use tempfile::NamedTempFile;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use tempfile::{NamedTempFile, TempDir};
 use uuid::Uuid;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
@@ -225,26 +225,30 @@ async fn create_from_json(
     let conn = pool.get().expect("Failed to get DB connection from pool");
 
     // Store and validate the WDLs
-    let test_wdl_location = validate_and_store_wdl(
-        &test_resource_client,
-        &wdl_storage_client,
-        &womtool_runner,
-        &conn,
-        &new_template.test_wdl,
-        WdlType::Test,
-        &new_template.name,
-    )
-    .await?;
-    let eval_wdl_location = validate_and_store_wdl(
-        &test_resource_client,
-        &wdl_storage_client,
-        &womtool_runner,
-        &conn,
-        &new_template.eval_wdl,
-        WdlType::Eval,
-        &new_template.name,
-    )
-    .await?;
+    let (test_wdl_location, test_wdl_dependencies_location): (String, Option<String>) =
+        validate_and_store_wdl(
+            &test_resource_client,
+            &wdl_storage_client,
+            &womtool_runner,
+            &conn,
+            &new_template.test_wdl,
+            new_template.test_wdl_dependencies.as_deref(),
+            WdlType::Test,
+            &new_template.name,
+        )
+        .await?;
+    let (eval_wdl_location, eval_wdl_dependencies_location): (String, Option<String>) =
+        validate_and_store_wdl(
+            &test_resource_client,
+            &wdl_storage_client,
+            &womtool_runner,
+            &conn,
+            &new_template.eval_wdl,
+            new_template.eval_wdl_dependencies.as_deref(),
+            WdlType::Eval,
+            &new_template.name,
+        )
+        .await?;
 
     // Create a new NewTemplate with the new locations of the WDLs
     let new_new_template = NewTemplate {
@@ -252,7 +256,9 @@ async fn create_from_json(
         pipeline_id: new_template.pipeline_id,
         description: new_template.description,
         test_wdl: test_wdl_location,
+        test_wdl_dependencies: test_wdl_dependencies_location,
         eval_wdl: eval_wdl_location,
+        eval_wdl_dependencies: eval_wdl_dependencies_location,
         created_by: new_template.created_by,
     };
 
@@ -331,6 +337,7 @@ async fn update_from_multipart(
     let template_changes: TemplateChangeset = get_template_changeset_from_multipart(
         payload,
         &id_param,
+        id,
         &test_resource_client,
         &womtool_runner,
         &wdl_storage_client,
@@ -366,9 +373,14 @@ async fn update_from_json(
 ) -> Result<HttpResponse, actix_web::Error> {
     //Parse ID into Uuid
     let id = parse_id(&*id_param)?;
-    // If either WDL is a gs uri, make sure those are allowed
+    // If either WDL or dependencies use a gs uri, make sure those are allowed
     if let Some(test_wdl) = &template_changes.test_wdl {
         if test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
+        }
+    }
+    if let Some(test_wdl_dependencies) = &template_changes.test_wdl_dependencies {
+        if test_wdl_dependencies.starts_with(gcloud_storage::GS_URI_PREFIX) {
             is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
         }
     }
@@ -377,38 +389,71 @@ async fn update_from_json(
             is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
         }
     }
+    if let Some(eval_wdl_dependencies) = &template_changes.eval_wdl_dependencies {
+        if eval_wdl_dependencies.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
+        }
+    }
     // Make a mutable version of the changeset in case we need to update the wdl values
     let mut processed_template_changes: TemplateChangeset = template_changes.clone();
 
     let conn = pool.get().expect("Failed to get DB connection from pool");
 
-    // If the user wants to update either of the WDLs, store and validate them
-    if let Some(test_wdl) = &template_changes.test_wdl {
-        let test_wdl_location = validate_and_store_wdl(
-            &test_resource_client,
-            &wdl_storage_client,
-            &womtool_runner,
-            &conn,
-            test_wdl,
+    // If the user wants to update either of the WDLs or their dependencies, retrieve them, then
+    // validate and store them
+    let test_wdl_data: Option<Vec<u8>> = match &template_changes.test_wdl {
+        Some(test_wdl) => Some(retrieve_resource(&test_resource_client, test_wdl).await?),
+        None => None,
+    };
+    let test_wdl_dependency_data: Option<Vec<u8>> = match &template_changes.test_wdl_dependencies {
+        Some(test_wdl_dependencies) => {
+            Some(retrieve_resource(&test_resource_client, test_wdl_dependencies).await?)
+        }
+        None => None,
+    };
+    // Attempt to validate and store test wdl and dependency data
+    let (test_wdl_location, test_wdl_dependency_location): (Option<String>, Option<String>) =
+        validate_and_store_wdl_and_dependencies_for_update(
+            test_wdl_data.as_deref(),
+            test_wdl_dependency_data.as_deref(),
             WdlType::Test,
-            &id_param,
-        )
-        .await?;
-        processed_template_changes.test_wdl = Some(test_wdl_location);
-    }
-    if let Some(eval_wdl) = &template_changes.eval_wdl {
-        let eval_wdl_location = validate_and_store_wdl(
-            &test_resource_client,
-            &wdl_storage_client,
+            id,
             &womtool_runner,
+            &wdl_storage_client,
+            &test_resource_client,
             &conn,
-            eval_wdl,
-            WdlType::Eval,
             &id_param,
         )
         .await?;
-        processed_template_changes.eval_wdl = Some(eval_wdl_location);
-    }
+    processed_template_changes.test_wdl = test_wdl_location;
+    processed_template_changes.test_wdl_dependencies = test_wdl_dependency_location;
+    // Same for eval wdl and dependencies
+    let eval_wdl_data: Option<Vec<u8>> = match &template_changes.eval_wdl {
+        Some(eval_wdl) => Some(retrieve_resource(&test_resource_client, eval_wdl).await?),
+        None => None,
+    };
+    let eval_wdl_dependency_data: Option<Vec<u8>> = match &template_changes.eval_wdl_dependencies {
+        Some(eval_wdl_dependencies) => {
+            Some(retrieve_resource(&test_resource_client, eval_wdl_dependencies).await?)
+        }
+        None => None,
+    };
+    // Attempt to validate and store eval wdl and dependency data
+    let (eval_wdl_location, eval_wdl_dependency_location): (Option<String>, Option<String>) =
+        validate_and_store_wdl_and_dependencies_for_update(
+            eval_wdl_data.as_deref(),
+            eval_wdl_dependency_data.as_deref(),
+            WdlType::Eval,
+            id,
+            &womtool_runner,
+            &wdl_storage_client,
+            &test_resource_client,
+            &conn,
+            &id_param,
+        )
+        .await?;
+    processed_template_changes.eval_wdl = eval_wdl_location;
+    processed_template_changes.eval_wdl_dependencies = eval_wdl_dependency_location;
 
     update(req, id, processed_template_changes, conn).await
 }
@@ -562,7 +607,7 @@ async fn download_eval_wdl(
 /// that are REST endpoints.
 ///
 /// Parses `id_param` as a UUID, connects to the db via a connection from `pool`, attempts to
-/// look up the specified template, retrieves the wdl from where it is located based on wdl_tyoe,
+/// look up the specified template, retrieves the wdl from where it is located based on wdl_type,
 /// and returns it
 ///
 /// # Panics
@@ -629,6 +674,143 @@ async fn download_wdl(
     }
 }
 
+/// Handles GET requests to /templates/{id}/test_wdl_dependencies for retrieving test wdl by template_id
+///
+/// This function is called by Actix-Web when a get request is made to the
+/// /templates/{id}/test_wdl_dependencies mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
+/// look up the specified template, retrieves the test_wdl dependencies zip from where it is
+/// located, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_test_wdl_dependencies(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<TestResourceClient>,
+) -> impl Responder {
+    download_wdl_dependencies(id_param, pool, &client, WdlType::Test).await
+}
+
+/// Handles GET requests to /templates/{id}/eval_wdl_dependencies for retrieving eval wdl by
+/// template_id
+///
+/// This function is called by Actix-Web when a get request is made to the /templates/{id}/eval_wdl
+/// mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
+/// look up the specified template, retrieves the eval_wdl dependencies zip from where it is
+/// located, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_eval_wdl_dependencies(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<TestResourceClient>,
+) -> impl Responder {
+    download_wdl_dependencies(id_param, pool, &client, WdlType::Eval).await
+}
+
+/// Handlers requests for downloading WDL dependencies for a template.  Meant to be called by other
+/// functions that are REST endpoints.
+///
+/// Parses `id_param` as a UUID, connects to the db via a connection from `pool`, attempts to
+/// look up the specified template, retrieves the wdl dependency zip from where it is located based
+/// on wdl_type, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_wdl_dependencies(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: &TestResourceClient,
+    wdl_type: WdlType,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&id_param) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+
+    // Get the template first so we can get the wdl from it
+    let template = match web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match TemplateData::find_by_id(&conn, id) {
+            Ok(template) => Ok(template),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await
+    {
+        Ok(template) => template,
+        Err(e) => {
+            error!("{:?}", e);
+            return match e {
+                // If no template is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No template found".to_string(),
+                        status: 404,
+                        detail: "No template found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: "Error while attempting to retrieve requested template from DB"
+                        .to_string(),
+                }),
+            };
+        }
+    };
+
+    // Get the location of the wdl from the template
+    let wdl_deps_location = match wdl_type {
+        WdlType::Test => template.test_wdl_dependencies,
+        WdlType::Eval => template.eval_wdl_dependencies,
+    };
+
+    // If there isn't a value for the deps location, return a 404
+    let wdl_deps_location = match wdl_deps_location {
+        Some(location) => location,
+        None => {
+            return HttpResponse::NotFound().json(ErrorBody {
+                title: format!(
+                    "No {} dependencies found for the specified template",
+                    wdl_type
+                ),
+                status: 404,
+                detail: format!(
+                    "The template with id {} does not have a value for {}_dependencies",
+                    id, wdl_type
+                ),
+            });
+        }
+    };
+
+    // Attempt to retrieve the WDL
+    match client.get_resource_as_bytes(&wdl_deps_location).await {
+        // If we retrieved it successfully, return it
+        Ok(wdl_bytes) => HttpResponse::Ok()
+            .content_type("application/zip")
+            .body(wdl_bytes),
+        // Otherwise, let the user know of the error
+        Err(e) => HttpResponse::InternalServerError().json(ErrorBody {
+            title: "Server error".to_string(),
+            status: 500,
+            detail: format!(
+                "Encountered the following error while trying to retrieve the {} wdl: {}",
+                wdl_type, e
+            ),
+        }),
+    }
+}
+
 /// Attempts to create a NewTemplate instance from the fields in `payload`.  Returns an error in the
 /// form of an HttpResponse if there are missing or unexpected fields, or some other error occurs
 async fn get_new_template_from_multipart(
@@ -640,15 +822,22 @@ async fn get_new_template_from_multipart(
     conn: &PgConnection,
 ) -> Result<NewTemplate, HttpResponse> {
     // The fields we expect from the multipart payload
-    const EXPECTED_TEXT_FIELDS: [&'static str; 6] = [
+    const EXPECTED_TEXT_FIELDS: [&'static str; 8] = [
         "name",
         "description",
         "pipeline_id",
         "created_by",
         "test_wdl",
+        "test_wdl_dependencies",
         "eval_wdl",
+        "eval_wdl_dependencies",
     ];
-    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl_file", "eval_wdl_file"];
+    const EXPECTED_FILE_FIELDS: [&'static str; 4] = [
+        "test_wdl_file",
+        "test_wdl_dependencies_file",
+        "eval_wdl_file",
+        "eval_wdl_dependencies_file",
+    ];
     // The fields that are required from the multipart payload
     const REQUIRED_TEXT_FIELDS: [&'static str; 2] = ["name", "pipeline_id"];
     // Get the data from the multipart payload
@@ -660,18 +849,28 @@ async fn get_new_template_from_multipart(
         &[].to_vec(),
     )
     .await?;
-    // If either the test or eval wdl is specified via a text field and is a gs uri, make sure
-    // that's allowed
-    if let Some(test_wdl_location) = text_data_map.get("test_wdl") {
-        if test_wdl_location.starts_with(gcloud_storage::GS_URI_PREFIX) {
-            is_gs_uris_for_wdls_enabled(gcloud_config)?;
-        }
-    }
-    if let Some(eval_wdl_location) = text_data_map.get("eval_wdl") {
-        if eval_wdl_location.starts_with(gcloud_storage::GS_URI_PREFIX) {
-            is_gs_uris_for_wdls_enabled(gcloud_config)?;
-        }
-    }
+    // If either the test or eval wdl or their dependencies is specified via a text field and is a
+    // gs uri, make sure that's allowed
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "test_wdl",
+        gcloud_config,
+    )?;
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "test_wdl_dependencies",
+        gcloud_config,
+    )?;
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "eval_wdl",
+        gcloud_config,
+    )?;
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "eval_wdl_dependencies",
+        gcloud_config,
+    )?;
     // Convert pipeline_id to a UUID
     let pipeline_id: Uuid = {
         let pipeline_id_str = text_data_map
@@ -684,52 +883,82 @@ async fn get_new_template_from_multipart(
         .remove("name")
         .expect("Failed to retrieve name from text_data_map.  This should not happen.");
     // Make sure we have values for test wdl and eval wdl
-    let (test_wdl_file, test_wdl_contents): (NamedTempFile, Vec<u8>) =
-        match get_wdl_data_from_multipart_maps(
-            &mut text_data_map,
-            &mut file_data_map,
-            WdlType::Test,
-            test_resource_client,
-        )
-        .await?
-        {
-            Some(test_wdl_data) => test_wdl_data,
-            None => {
-                return Err(HttpResponse::BadRequest().json(ErrorBody {
-                    title: "Missing required field".to_string(),
-                    status: 400,
-                    detail: String::from(
-                        "Payload must contain a value for either \"test_wdl\" or \"test_wdl_file\"",
-                    ),
-                }));
-            }
-        };
-    let (eval_wdl_file, eval_wdl_contents): (NamedTempFile, Vec<u8>) =
-        match get_wdl_data_from_multipart_maps(
-            &mut text_data_map,
-            &mut file_data_map,
-            WdlType::Eval,
-            test_resource_client,
-        )
-        .await?
-        {
-            Some(eval_wdl_data) => eval_wdl_data,
-            None => {
-                return Err(HttpResponse::BadRequest().json(ErrorBody {
-                    title: "Missing required field".to_string(),
-                    status: 400,
-                    detail: String::from(
-                        "Payload must contain a value for either \"eval_wdl\" or \"eval_wdl_file\"",
-                    ),
-                }));
-            }
-        };
-
+    let test_wdl_contents: Vec<u8> = match get_wdl_data_from_multipart_maps(
+        &mut text_data_map,
+        &mut file_data_map,
+        "test_wdl",
+        "test_wdl_file",
+        test_resource_client,
+    )
+    .await?
+    {
+        Some(test_wdl_data) => test_wdl_data,
+        None => {
+            return Err(HttpResponse::BadRequest().json(ErrorBody {
+                title: "Missing required field".to_string(),
+                status: 400,
+                detail: String::from(
+                    "Payload must contain a value for either \"test_wdl\" or \"test_wdl_file\"",
+                ),
+            }));
+        }
+    };
+    let eval_wdl_contents: Vec<u8> = match get_wdl_data_from_multipart_maps(
+        &mut text_data_map,
+        &mut file_data_map,
+        "eval_wdl",
+        "eval_wdl_file",
+        test_resource_client,
+    )
+    .await?
+    {
+        Some(eval_wdl_data) => eval_wdl_data,
+        None => {
+            return Err(HttpResponse::BadRequest().json(ErrorBody {
+                title: "Missing required field".to_string(),
+                status: 400,
+                detail: String::from(
+                    "Payload must contain a value for either \"eval_wdl\" or \"eval_wdl_file\"",
+                ),
+            }));
+        }
+    };
+    // Get dependencies if they're present
+    let test_wdl_dependency_data: Option<Vec<u8>> = get_wdl_data_from_multipart_maps(
+        &mut text_data_map,
+        &mut file_data_map,
+        "test_wdl_dependencies",
+        "test_wdl_dependencies_file",
+        test_resource_client,
+    )
+    .await?;
+    let eval_wdl_dependency_data: Option<Vec<u8>> = get_wdl_data_from_multipart_maps(
+        &mut text_data_map,
+        &mut file_data_map,
+        "eval_wdl_dependencies",
+        "eval_wdl_dependencies_file",
+        test_resource_client,
+    )
+    .await?;
     // Validate the wdls
-    validate_wdl(womtool_runner, test_wdl_file.path(), WdlType::Test, &name).await?;
-    validate_wdl(womtool_runner, eval_wdl_file.path(), WdlType::Eval, &name).await?;
+    validate_wdl(
+        womtool_runner,
+        &test_wdl_contents,
+        test_wdl_dependency_data.as_deref(),
+        WdlType::Test,
+        &name,
+    )
+    .await?;
+    validate_wdl(
+        womtool_runner,
+        &eval_wdl_contents,
+        eval_wdl_dependency_data.as_deref(),
+        WdlType::Eval,
+        &name,
+    )
+    .await?;
     // Store them
-    let test_wdl_location = store_wdl(
+    let test_wdl_location: String = store_wdl(
         wdl_storage_client,
         conn,
         &test_wdl_contents,
@@ -737,6 +966,12 @@ async fn get_new_template_from_multipart(
         &name,
     )
     .await?;
+    let test_wdl_dependencies_location: Option<String> = match &test_wdl_dependency_data {
+        Some(data) => Some(
+            store_wdl_dependencies(wdl_storage_client, conn, data, WdlType::Test, &name).await?,
+        ),
+        None => None,
+    };
     let eval_wdl_location = store_wdl(
         wdl_storage_client,
         conn,
@@ -745,6 +980,12 @@ async fn get_new_template_from_multipart(
         &name,
     )
     .await?;
+    let eval_wdl_dependencies_location: Option<String> = match &eval_wdl_dependency_data {
+        Some(data) => Some(
+            store_wdl_dependencies(wdl_storage_client, conn, data, WdlType::Eval, &name).await?,
+        ),
+        None => None,
+    };
 
     // Put the data in a NewTemplate and return
     Ok(NewTemplate {
@@ -752,9 +993,27 @@ async fn get_new_template_from_multipart(
         pipeline_id,
         description: text_data_map.remove("description"),
         test_wdl: test_wdl_location,
+        test_wdl_dependencies: test_wdl_dependencies_location,
         eval_wdl: eval_wdl_location,
+        eval_wdl_dependencies: eval_wdl_dependencies_location,
         created_by: text_data_map.remove("created_by"),
     })
+}
+
+/// Attempts to retrieve the value for `key` from `data_map`. If the value exists and starts with
+/// gs:// checks if that is allowed according to `gcloud_config`. If not, returns an error response.
+/// Otherwise, returns Ok(())
+fn verify_value_for_key_is_allowed_based_on_gcloud_config(
+    data_map: &HashMap<String, String>,
+    key: &str,
+    gcloud_config: Option<&GCloudConfig>,
+) -> Result<(), HttpResponse> {
+    if let Some(value) = data_map.get(key) {
+        if value.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            is_gs_uris_for_wdls_enabled(gcloud_config)?
+        }
+    }
+    Ok(())
 }
 
 /// Attempts to create a TemplateChangeset instance from the fields in `payload`.  Uses `identifier`
@@ -763,6 +1022,7 @@ async fn get_new_template_from_multipart(
 async fn get_template_changeset_from_multipart(
     payload: Multipart,
     identifier: &str,
+    template_id: Uuid,
     test_resource_client: &TestResourceClient,
     womtool_runner: &WomtoolRunner,
     wdl_storage_client: &WdlStorageClient,
@@ -770,8 +1030,20 @@ async fn get_template_changeset_from_multipart(
     conn: &PgConnection,
 ) -> Result<TemplateChangeset, HttpResponse> {
     // The fields we expect from the multipart payload
-    const EXPECTED_TEXT_FIELDS: [&'static str; 4] = ["name", "description", "test_wdl", "eval_wdl"];
-    const EXPECTED_FILE_FIELDS: [&'static str; 2] = ["test_wdl_file", "eval_wdl_file"];
+    const EXPECTED_TEXT_FIELDS: [&'static str; 6] = [
+        "name",
+        "description",
+        "test_wdl",
+        "test_wdl_dependencies",
+        "eval_wdl",
+        "eval_wdl_dependencies",
+    ];
+    const EXPECTED_FILE_FIELDS: [&'static str; 4] = [
+        "test_wdl_file",
+        "test_wdl_dependencies_file",
+        "eval_wdl_file",
+        "eval_wdl_dependencies_file",
+    ];
     // Get the data from the multipart payload
     let (mut text_data_map, mut file_data_map) = multipart_handling::extract_data_from_multipart(
         payload,
@@ -781,168 +1053,415 @@ async fn get_template_changeset_from_multipart(
         &[].to_vec(),
     )
     .await?;
-    // If either a test or eval wdl is specified via a text field and is a gs uri, make sure that's
-    // allowed
-    if let Some(test_wdl_location) = text_data_map.get("test_wdl") {
-        if test_wdl_location.starts_with(gcloud_storage::GS_URI_PREFIX) {
-            is_gs_uris_for_wdls_enabled(gcloud_config)?;
-        }
-    }
-    if let Some(eval_wdl_location) = text_data_map.get("eval_wdl") {
-        if eval_wdl_location.starts_with(gcloud_storage::GS_URI_PREFIX) {
-            is_gs_uris_for_wdls_enabled(gcloud_config)?;
-        }
-    }
+    // If either the test or eval wdl or their dependencies is specified via a text field and is a
+    // gs uri, make sure that's allowed
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "test_wdl",
+        gcloud_config,
+    )?;
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "test_wdl_dependencies",
+        gcloud_config,
+    )?;
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "eval_wdl",
+        gcloud_config,
+    )?;
+    verify_value_for_key_is_allowed_based_on_gcloud_config(
+        &text_data_map,
+        "eval_wdl_dependencies",
+        gcloud_config,
+    )?;
 
-    let test_wdl: Option<String> = match get_wdl_data_from_multipart_maps(
+    // Get test wdl and dependency data if present
+    let test_wdl_data: Option<Vec<u8>> = get_wdl_data_from_multipart_maps(
         &mut text_data_map,
         &mut file_data_map,
-        WdlType::Test,
+        "test_wdl",
+        "test_wdl_file",
         test_resource_client,
     )
-    .await?
-    {
-        // If we do find a test wdl, validate and store it and get the new location
-        Some((test_wdl_file, test_wdl_contents)) => {
-            validate_wdl(
-                womtool_runner,
-                test_wdl_file.path(),
-                WdlType::Test,
-                identifier,
-            )
-            .await?;
-            Some(
-                store_wdl(
-                    wdl_storage_client,
-                    conn,
-                    &test_wdl_contents,
-                    WdlType::Test,
-                    identifier,
-                )
-                .await?,
-            )
-        }
-        None => None,
-    };
-    let eval_wdl: Option<String> = match get_wdl_data_from_multipart_maps(
+    .await?;
+    let test_wdl_dependency_data: Option<Vec<u8>> = get_wdl_data_from_multipart_maps(
         &mut text_data_map,
         &mut file_data_map,
-        WdlType::Eval,
+        "test_wdl_dependencies",
+        "test_wdl_dependencies_file",
         test_resource_client,
     )
-    .await?
-    {
-        // If we do find a eval wdl, validate and store it and get the new location
-        Some((eval_wdl_file, eval_wdl_contents)) => {
-            validate_wdl(
-                womtool_runner,
-                eval_wdl_file.path(),
-                WdlType::Eval,
-                identifier,
-            )
-            .await?;
-            Some(
-                store_wdl(
-                    wdl_storage_client,
-                    conn,
-                    &eval_wdl_contents,
-                    WdlType::Eval,
-                    identifier,
-                )
-                .await?,
-            )
-        }
-        None => None,
-    };
+    .await?;
+    // Attempt to validate and store test wdl and dependency data
+    let (test_wdl_location, test_wdl_dependency_location): (Option<String>, Option<String>) =
+        validate_and_store_wdl_and_dependencies_for_update(
+            test_wdl_data.as_deref(),
+            test_wdl_dependency_data.as_deref(),
+            WdlType::Test,
+            template_id,
+            womtool_runner,
+            wdl_storage_client,
+            test_resource_client,
+            conn,
+            identifier,
+        )
+        .await?;
+    // Do the same for eval wdl and dependency data if provided
+    let eval_wdl_data: Option<Vec<u8>> = get_wdl_data_from_multipart_maps(
+        &mut text_data_map,
+        &mut file_data_map,
+        "eval_wdl",
+        "eval_wdl_file",
+        test_resource_client,
+    )
+    .await?;
+    let eval_wdl_dependency_data: Option<Vec<u8>> = get_wdl_data_from_multipart_maps(
+        &mut text_data_map,
+        &mut file_data_map,
+        "eval_wdl_dependencies",
+        "eval_wdl_dependencies_file",
+        test_resource_client,
+    )
+    .await?;
+    let (eval_wdl_location, eval_wdl_dependency_location): (Option<String>, Option<String>) =
+        validate_and_store_wdl_and_dependencies_for_update(
+            eval_wdl_data.as_deref(),
+            eval_wdl_dependency_data.as_deref(),
+            WdlType::Eval,
+            template_id,
+            womtool_runner,
+            wdl_storage_client,
+            test_resource_client,
+            conn,
+            identifier,
+        )
+        .await?;
 
     // Put the data in a NewTemplate and return
     Ok(TemplateChangeset {
         name: text_data_map.remove("name"),
         description: text_data_map.remove("description"),
-        test_wdl,
-        eval_wdl,
+        test_wdl: test_wdl_location,
+        test_wdl_dependencies: test_wdl_dependency_location,
+        eval_wdl: eval_wdl_location,
+        eval_wdl_dependencies: eval_wdl_dependency_location,
     })
 }
 
-/// Attempts to get the wdl of type `wdl_type` from either `text_data_map` (if it was supplied as a
-/// uri) or `file_data_map` (if it was supplied as a file).  If it was supplied as a URI, the wdl
-/// will be downloaded to a temp file. Returns the wdl as a temp file nad its contents as a byte
-/// vector. If it is not present, None will be returned
+/// Takes optional wdl and dependency data (`wdl_data_opt` and `wdl_dependency_data_opt`,
+/// respectively) provided as part of an update request and attempts to validate and store them.
+/// This function works a little bit differently depending on the combination of wdl and dependency
+/// provided:
+/// 1. If `wdl_data_opt` and `wdl_dependency_data_opt` are provided, they are validated together and
+///    stored, and their new locations are returned
+///    (e.g. `Ok((Some(wdl_location), Some(dependency_location))`)
+/// 2. If only `wdl_data_opt` is provided, we retrieve the template corresponding to `template_id`,
+///    check for dependency data corresponding to `wdl_type` in that template, and use that
+///    dependency data in the validation for the wdl data.  Then, stores the wdl data and returns
+///    its new location
+///    (e.g. `Ok((Some(wdl_location), None))`)
+/// 3. If only `wdl_dependency_data_opt` is provided, we retrieve the template corresponding to
+///    `template_id`, get the wdl data from it corresponding to `wdl_type`, and validate the wdl
+///    data together with that dependency data.  Then, stores the dependency data and returns its
+///    new location
+///    (e.g. `Ok((None, Some(dependency_location))`)
+/// 4. If neither `wdl_data_opt` nor `wdl_dependency_data_opt` is provided, returns None for both
+///    locations
+///    (e.g. `Ok((None, None))`)
+/// In the case of any step in this process resulting in an error, an HttpResponse with an
+/// appropriate error message is returned
+async fn validate_and_store_wdl_and_dependencies_for_update(
+    wdl_data_opt: Option<&[u8]>,
+    wdl_dependency_data_opt: Option<&[u8]>,
+    wdl_type: WdlType,
+    template_id: Uuid,
+    womtool_runner: &WomtoolRunner,
+    wdl_storage_client: &WdlStorageClient,
+    test_resource_client: &TestResourceClient,
+    conn: &PgConnection,
+    identifier: &str,
+) -> Result<(Option<String>, Option<String>), HttpResponse> {
+    // Attempt to validate and store whatever wdl and dependency data is provided. The process is
+    // different depending on what combination of those two things we have
+    let wdl_and_dependencies_locations: (Option<String>, Option<String>) = match wdl_data_opt {
+        Some(wdl_data) => {
+            match wdl_dependency_data_opt {
+                Some(wdl_dependency_data) => {
+                    // If we have a wdl and dependencies, we can just validate and store them
+                    validate_wdl(
+                        womtool_runner,
+                        wdl_data,
+                        Some(wdl_dependency_data),
+                        wdl_type,
+                        identifier,
+                    )
+                    .await?;
+                    let wdl_location: Option<String> = Some(
+                        store_wdl(wdl_storage_client, conn, wdl_data, wdl_type, identifier).await?,
+                    );
+                    let wdl_dependencies_location: Option<String> = Some(
+                        store_wdl_dependencies(
+                            wdl_storage_client,
+                            conn,
+                            wdl_dependency_data,
+                            wdl_type,
+                            identifier,
+                        )
+                        .await?,
+                    );
+                    (wdl_location, wdl_dependencies_location)
+                }
+                None => {
+                    // If we have a wdl and no dependencies, we have to check if this template
+                    // already has dependencies that we'll need to use during validation
+                    let template = match TemplateData::find_by_id(conn, template_id) {
+                        Ok(template) => template,
+                        Err(e) => {
+                            return Err(default_500(&format!("Failed to retrieve template data for wdl validation with error: {}", e)));
+                        }
+                    };
+                    let wdl_dependency_data: Option<Vec<u8>> = match wdl_type {
+                        WdlType::Test => match &template.test_wdl_dependencies {
+                            Some(wdl_dependency_location) => Some(
+                                retrieve_resource(test_resource_client, wdl_dependency_location)
+                                    .await?,
+                            ),
+                            None => None,
+                        },
+                        WdlType::Eval => match &template.eval_wdl_dependencies {
+                            Some(wdl_dependency_location) => Some(
+                                retrieve_resource(test_resource_client, wdl_dependency_location)
+                                    .await?,
+                            ),
+                            None => None,
+                        },
+                    };
+                    // Now that we have the wdl and its dependencies (if they exist), let's validate
+                    // and store
+                    validate_wdl(
+                        womtool_runner,
+                        wdl_data,
+                        wdl_dependency_data.as_deref(),
+                        wdl_type,
+                        identifier,
+                    )
+                    .await?;
+                    let wdl_location: Option<String> = Some(
+                        store_wdl(wdl_storage_client, conn, wdl_data, wdl_type, identifier).await?,
+                    );
+                    (wdl_location, None)
+                }
+            }
+        }
+        None => {
+            match wdl_dependency_data_opt {
+                Some(wdl_dependency_data) => {
+                    // If we have wdl dependencies but no wdl, get the wdl from the template so we
+                    // can use that in the validation
+                    let template = match TemplateData::find_by_id(conn, template_id) {
+                        Ok(template) => template,
+                        Err(e) => {
+                            return Err(default_500(&format!("Failed to retrieve template data for wdl validation with error: {}", e)));
+                        }
+                    };
+                    let wdl_data: Vec<u8> = match wdl_type {
+                        WdlType::Test => {
+                            retrieve_resource(test_resource_client, &template.test_wdl).await?
+                        }
+                        WdlType::Eval => {
+                            retrieve_resource(test_resource_client, &template.eval_wdl).await?
+                        }
+                    };
+                    // Now that we have the template's wdl, let's use it for validation
+                    validate_wdl(
+                        womtool_runner,
+                        &wdl_data,
+                        Some(wdl_dependency_data),
+                        wdl_type,
+                        identifier,
+                    )
+                    .await?;
+                    // And store the dependencies
+                    let wdl_dependencies_location: Option<String> = Some(
+                        store_wdl_dependencies(
+                            wdl_storage_client,
+                            conn,
+                            wdl_dependency_data,
+                            wdl_type,
+                            identifier,
+                        )
+                        .await?,
+                    );
+                    (None, wdl_dependencies_location)
+                }
+                None => {
+                    // If we have no wdl and no dependencies, then we don't have to do anything
+                    (None, None)
+                }
+            }
+        }
+    };
+
+    Ok(wdl_and_dependencies_locations)
+}
+
+/// Attempts to get the wdl identified by `text_data_key` in `text_data_map` or by `file_data_key`
+/// in `file_data_map`.  If it was supplied as a URI, the wdl will be downloaded. Returns the wdl's
+/// contents as a byte vector. If it is not present, None will be returned.  In the case of any
+/// errors retrieving the wdl, an HttpResponse is returned with an appropriate error message
 async fn get_wdl_data_from_multipart_maps(
     text_data_map: &mut HashMap<String, String>,
     file_data_map: &mut HashMap<String, NamedTempFile>,
-    wdl_type: WdlType,
+    text_data_key: &str,
+    file_data_key: &str,
     test_resource_client: &TestResourceClient,
-) -> Result<Option<(NamedTempFile, Vec<u8>)>, HttpResponse> {
-    // Set the keys based on the wdl type
-    let (text_key, file_key): (&str, &str) = match wdl_type {
-        WdlType::Test => ("test_wdl", "test_wdl_file"),
-        WdlType::Eval => ("eval_wdl", "eval_wdl_file"),
-    };
-    if let Some(wdl_uri) = text_data_map.remove(text_key) {
-        // If it's been supplied as a uri, retrieve and return it
-        match retrieve_wdl_and_contents(test_resource_client, &wdl_uri).await {
-            Ok((wdl_file, wdl_contents)) => Ok(Some((wdl_file, wdl_contents))),
-            Err(e) => Err(e),
+) -> Result<Option<Vec<u8>>, HttpResponse> {
+    // Get the wdl contents
+    let wdl_contents: Vec<u8> = if let Some(wdl_uri) = text_data_map.remove(text_data_key) {
+        // If it's been supplied as a uri, retrieve it
+        match retrieve_resource(test_resource_client, &wdl_uri).await {
+            Ok(wdl_contents) => wdl_contents,
+            Err(e) => return Err(e),
         }
-    } else if let Some(wdl_file) = file_data_map.remove(file_key) {
-        // If it's been supplied as a file, read its contents and return both, along with a name for
-        // the location
-        let wdl_contents: Vec<u8> = match std::fs::read(wdl_file.path()) {
+    } else if let Some(wdl_file) = file_data_map.remove(file_data_key) {
+        // If it's been supplied as a file, read its contents
+        match std::fs::read(wdl_file.path()) {
             Ok(contents) => contents,
             Err(e) => return Err(default_500(&e)),
-        };
-        Ok(Some((wdl_file, wdl_contents)))
+        }
     } else {
         // If it's not in either, return None
-        Ok(None)
+        return Ok(None);
+    };
+
+    Ok(Some(wdl_contents))
+}
+
+/// Creates and returns a TempDir containing a file called "wdl.wdl" containing `wdl_data` and, if
+/// `wdl_dependency_data` is provided, the TempDir will also contain a file called "wdl_dep.zip"
+/// containing `wdl_dependency_data`.  Also returns the path to that wdl file as PathBuf.  In the
+/// case of any i/o errors, an HttpResponse is returned with an appropriate error message.
+/// It should be noted that the temporary directory represented by the returned TempDir is deleted
+/// when the TempDir goes out of scope, so make sure it is still in scope wherever you plan to
+/// access its contents
+fn write_wdl_data_to_temp_dir(
+    wdl_data: &[u8],
+    wdl_dependency_data: Option<&[u8]>,
+) -> Result<(TempDir, PathBuf), HttpResponse> {
+    let wdl_temp_dir: TempDir = create_wdl_temp_dir()?;
+    // Write the wdl contents to a new file inside the temporary directory
+    let mut wdl_file_path: PathBuf = PathBuf::from(wdl_temp_dir.path());
+    wdl_file_path.push("wdl.wdl");
+    write_wdl_data_to_file(&wdl_file_path, &wdl_data)?;
+    // Do the same for dependency data if present
+    if let Some(dependency_data) = wdl_dependency_data {
+        // Unzip the dependencies so we can validate them
+        let dep_cursor = Cursor::new(dependency_data);
+        let mut dep_zip = match zip::ZipArchive::new(dep_cursor) {
+            Ok(dep_zip) => dep_zip,
+            Err(e) => {
+                debug!(
+                    "Encountered error trying to extract wdl dependency zip: {}",
+                    e
+                );
+                return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Failed to extract dependency zip".to_string(),
+                    status: 500,
+                    detail: format!(
+                        "Attempt to extract wdl dependencies from zip failed with error: {}",
+                        e
+                    ),
+                }));
+            }
+        };
+        if let Err(e) = dep_zip.extract(wdl_temp_dir.path()) {
+            debug!(
+                "Encountered error trying to extract wdl dependency zip: {}",
+                e
+            );
+            return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to extract dependency zip".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to extract wdl dependencies from zip failed with error: {}",
+                    e
+                ),
+            }));
+        }
+    }
+    let paths = std::fs::read_dir(wdl_temp_dir.path()).unwrap();
+
+    for path in paths {
+        println!("Name: {}", path.unwrap().path().display())
+    }
+    // Return the temp dir we created and the wdl path
+    Ok((wdl_temp_dir, wdl_file_path))
+}
+
+/// Convenience wrapper for creating a tempdir and returning an appropriate error response if that
+/// fails
+fn create_wdl_temp_dir() -> Result<TempDir, HttpResponse> {
+    match tempfile::tempdir() {
+        Ok(temp_dir) => Ok(temp_dir),
+        Err(e) => {
+            debug!("Encountered error trying to create wdl temp dir: {}", e);
+            Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to create temp dir".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to create temporary directory for processing wdls resulted in error: {}",
+                    e
+                ),
+            }))
+        }
     }
 }
 
-/// Retrieves the contents of the wdl at `wdl_location` using `test_resource_client` and writes it
-/// to a temp file to return.  If any of this fails, returns an appropriate http error response
-async fn retrieve_wdl_and_contents(
+/// Convenience wrapper for writing wdl (of wdl dependency) data to a file and returning an
+/// appropriate error response if that fails
+fn write_wdl_data_to_file(file_path: &Path, wdl_data: &[u8]) -> Result<(), HttpResponse> {
+    match std::fs::write(file_path, wdl_data) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            debug!(
+                "Encountered error trying to temporarily store wdl for validation: {}",
+                e
+            );
+            Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to write wdl data".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to write wdl data to temporary file for processing wdls resulted in error: {}",
+                    e
+                ),
+            }))
+        }
+    }
+}
+
+/// Wrapper function for retrieving a resource from a specific location with the added functionality
+/// that it will return an http error response in place of an error
+async fn retrieve_resource(
     test_resource_client: &TestResourceClient,
-    wdl_location: &str,
-) -> Result<(NamedTempFile, Vec<u8>), HttpResponse> {
-    // Get the wdl from wherever it's stored
-    let wdl_contents: Vec<u8> = match test_resource_client
-        .get_resource_as_string(wdl_location)
-        .await
-    {
-        Ok(wdl_string) => wdl_string.into_bytes(),
+    location: &str,
+) -> Result<Vec<u8>, HttpResponse> {
+    match test_resource_client.get_resource_as_bytes(location).await {
+        Ok(wdl_bytes) => Ok(wdl_bytes),
         // If we failed to get it, return an error response
         Err(e) => {
             debug!(
                 "Encountered error trying to retrieve at {}: {}",
-                wdl_location, e
+                location, e
             );
             return Err(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Failed to retrieve WDL".to_string(),
+                title: "Failed to retrieve resource".to_string(),
                 status: 500,
                 detail: format!(
-                    "Attempt to retrieve WDL at {} resulted in error: {}",
-                    wdl_location, e
+                    "Attempt to retrieve resource at {} resulted in error: {}",
+                    location, e
                 ),
             }));
-        }
-    };
-    // Put the contents of a the wdl in a temp file
-    match temp_storage::get_temp_file(&wdl_contents) {
-        Ok(wdl_temp_file) => Ok((wdl_temp_file, wdl_contents)),
-        Err(e) => {
-            debug!(
-                "Encountered error trying to temporarily store wdl from {} for validation: {}",
-                wdl_location, e
-            );
-            Err(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Failed to validate WDL".to_string(),
-                status: 500,
-                detail: format!(
-                    "Attempt to temporarily store WDL from {} resulted in error: {}",
-                    wdl_location, e
-                ),
-            }))
         }
     }
 }
@@ -957,63 +1476,95 @@ async fn validate_and_store_wdl(
     womtool_runner: &WomtoolRunner,
     conn: &PgConnection,
     wdl_location: &str,
+    wdl_dependencies_location: Option<&str>,
     wdl_type: WdlType,
     identifier: &str,
-) -> Result<String, HttpResponse> {
-    // Get the wdl and stick it in a temp file first so we can validate it
-    let (wdl_temp_file, wdl_contents): (NamedTempFile, Vec<u8>) =
-        retrieve_wdl_and_contents(test_resource_client, wdl_location).await?;
+) -> Result<(String, Option<String>), HttpResponse> {
+    // Get the wdl contents from their location
+    let wdl_data: Vec<u8> = retrieve_resource(test_resource_client, wdl_location).await?;
+    // Do the same for dependencies if provided
+    let wdl_dependencies_data: Option<Vec<u8>> = match wdl_dependencies_location {
+        Some(wdl_dep_location) => {
+            Some(retrieve_resource(test_resource_client, wdl_dep_location).await?)
+        }
+        None => None,
+    };
     // Validate the wdl
-    validate_wdl(womtool_runner, wdl_temp_file.path(), wdl_type, identifier).await?;
-    // Store it
-    store_wdl(
-        wdl_storage_client,
-        conn,
-        &wdl_contents,
+    validate_wdl(
+        womtool_runner,
+        &wdl_data,
+        wdl_dependencies_data.as_deref(),
         wdl_type,
         identifier,
     )
-    .await
+    .await?;
+    // Store the wdl and dependencies
+    let new_wdl_location =
+        store_wdl(wdl_storage_client, conn, &wdl_data, wdl_type, identifier).await?;
+    let new_wdl_dependency_location: Option<String> = match wdl_dependencies_data {
+        Some(data) => Some(
+            store_wdl_dependencies(wdl_storage_client, conn, &data, wdl_type, identifier).await?,
+        ),
+        None => None,
+    };
+    // Now return them both
+    Ok((new_wdl_location, new_wdl_dependency_location))
 }
 
 /// Validates the specified WDL and returns either the unit type if it's valid or an appropriate
 /// http response if it's invalid or there is some error
 ///
-/// Retrieves the wdl located at `wdl_path` and then validates it.  If it is a valid wdl, returns
-/// the unit type.  If it's invalid, returns a 400 response with a message explaining that the
-/// `wdl_type` WDL is invalid for the template identified by `identifier` (e.g. Submitted test
-/// WDL failed WDL validation).  If the validation errors out for some reason, returns a 500
-/// response with a message explaining that the validation failed
+/// Writes `wdl_data` and `wdl_dependency_data` to a temp dir and runs womtool validate on it.  If
+/// it is a valid wdl, returns the unit type.  If it's invalid, returns a 400 response with a
+/// message explaining that the `wdl_type` WDL is invalid for the template identified by
+/// `identifier` (e.g. Submitted test WDL failed WDL validation).  If the validation errors out for
+/// some reason, returns a 500 response with a message explaining that the validation failed. Also
+/// returns an appropriate error response if writing the wdl data to a temp dir fails
 async fn validate_wdl(
     womtool_runner: &WomtoolRunner,
-    wdl_path: &Path,
+    wdl_data: &[u8],
+    wdl_dependency_data: Option<&[u8]>,
     wdl_type: WdlType,
     identifier: &str,
 ) -> Result<(), HttpResponse> {
+    // Write the wdl and dependencies (if provided) to a temp dir to validate
+    let (wdl_validation_dir, wdl_validation_file_path): (TempDir, PathBuf) =
+        write_wdl_data_to_temp_dir(wdl_data, wdl_dependency_data)?;
     // Validate the wdl
-    womtool_runner.womtool_validate(&wdl_path).map_err(|e| {
-        // If it's not a valid WDL, return an error to inform the user
-        match e {
-            womtool::Error::Invalid(msg) => {
-                debug!(
-                    "Invalid {} WDL submitted for template {} with womtool msg {}",
-                    wdl_type, identifier, msg
-                );
-                HttpResponse::BadRequest().json(ErrorBody {
-                    title: "Invalid WDL".to_string(),
-                    status: 400,
-                    detail: format!(
-                        "Submitted {} WDL failed WDL validation with womtool message: {}",
-                        wdl_type, msg
-                    ),
-                })
+    womtool_runner
+        .womtool_validate(&wdl_validation_file_path)
+        .map_err(|e| {
+            // If it's not a valid WDL, return an error to inform the user
+            match e {
+                womtool::Error::Invalid(msg) => {
+                    debug!(
+                        "Invalid {} WDL submitted for template {} with womtool msg {}",
+                        wdl_type, identifier, msg
+                    );
+                    HttpResponse::BadRequest().json(ErrorBody {
+                        title: "Invalid WDL".to_string(),
+                        status: 400,
+                        detail: format!(
+                            "Submitted {} WDL failed WDL validation with womtool message: {}",
+                            wdl_type, msg
+                        ),
+                    })
+                }
+                _ => {
+                    error!("{:?}", e);
+                    default_500(&e)
+                }
             }
-            _ => {
-                error!("{:?}", e);
-                default_500(&e)
-            }
-        }
-    })
+        })?;
+    // Close the temp dir
+    if let Err(e) = wdl_validation_dir.close() {
+        error!(
+            "Encountered an error while trying to close a wdl validation temp dir: {}",
+            e
+        )
+    }
+
+    Ok(())
 }
 
 /// Stores `wdl_contents` according to the wdl storage configuration. Returns a string containing
@@ -1051,6 +1602,41 @@ async fn store_wdl(
     }
 }
 
+/// Stores `wdl_dep_contents` according to the wdl storage configuration. Returns a string
+/// containing its local or gs path, or an HttpResponse with an error message if it fails
+///
+/// This function is basically a wrapper for [`crate::util::wdl_storage::store_wdl`] that converts
+/// the output into a format that can be more easily used by the routes functions within this module
+async fn store_wdl_dependencies(
+    client: &WdlStorageClient,
+    conn: &PgConnection,
+    wdl_dep_contents: &[u8],
+    wdl_type: WdlType,
+    identifier: &str,
+) -> Result<String, HttpResponse> {
+    // Attempt to store the wdl
+    match client
+        .store_wdl(conn, wdl_dep_contents, &format!("{}_dep.zip", wdl_type))
+        .await
+    {
+        Ok(wdl_local_path) => Ok(wdl_local_path),
+        Err(e) => {
+            debug!(
+                "Encountered error trying to store {} wdl dependencies for template {}: {}",
+                wdl_type, identifier, e
+            );
+            Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to store WDL dependencies".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to store {} wdl dependencies for template {} resulted in error: {}",
+                    wdl_type, identifier, e
+                ),
+            }))
+        }
+    }
+}
+
 /// Replaces the values for test_wdl and eval_wdl in `template` with URIs for the user to use to
 /// retrieve them (either keeping them the same if they are gs://, http://, or https://; or
 /// replacing with the download REST mapping based on the host value on `req`)
@@ -1059,6 +1645,24 @@ fn fill_uris_for_wdl_location(req: &HttpRequest, template: &mut TemplateData) {
         get_uri_for_wdl_location(req, &template.test_wdl, template.template_id, WdlType::Test);
     template.eval_wdl =
         get_uri_for_wdl_location(req, &template.eval_wdl, template.template_id, WdlType::Eval);
+    template.test_wdl_dependencies = match &template.test_wdl_dependencies {
+        Some(dep_location) => Some(get_uri_for_wdl_deps_location(
+            req,
+            dep_location,
+            template.template_id,
+            WdlType::Test,
+        )),
+        None => None,
+    };
+    template.eval_wdl_dependencies = match &template.eval_wdl_dependencies {
+        Some(dep_location) => Some(get_uri_for_wdl_deps_location(
+            req,
+            dep_location,
+            template.template_id,
+            WdlType::Eval,
+        )),
+        None => None,
+    };
 }
 
 /// Returns a URI that the user can use to retrieve the wdl at wdl_location.  For gs: and
@@ -1081,6 +1685,32 @@ fn get_uri_for_wdl_location(
     // Otherwise, we assume it's a file, so we build the REST mapping the user can use to access it
     format!(
         "{}/api/v1/templates/{}/{}_wdl",
+        req.connection_info().host(),
+        template_id,
+        wdl_type
+    )
+}
+
+/// Returns a URI that the user can use to retrieve the wdl dependency zip at wdl_dep_location.
+/// For gs: and http/https: locations, it just returns the location.  For local file locations,
+/// returns a REST URI for accessing it
+fn get_uri_for_wdl_deps_location(
+    req: &HttpRequest,
+    wdl_deps_location: &str,
+    template_id: Uuid,
+    wdl_type: WdlType,
+) -> String {
+    // If the location starts with gs://, http://, or https://, we'll just return it, since the
+    // user can use that to retrieve the wdl
+    if wdl_deps_location.starts_with("gs://")
+        || wdl_deps_location.starts_with("http://")
+        || wdl_deps_location.starts_with("https://")
+    {
+        return String::from(wdl_deps_location);
+    }
+    // Otherwise, we assume it's a file, so we build the REST mapping the user can use to access it
+    format!(
+        "{}/api/v1/templates/{}/{}_wdl_dependencies",
         req.connection_info().host(),
         template_id,
         wdl_type
@@ -1113,6 +1743,14 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     );
     cfg.service(web::resource("/templates/{id}/test_wdl").route(web::get().to(download_test_wdl)));
     cfg.service(web::resource("/templates/{id}/eval_wdl").route(web::get().to(download_eval_wdl)));
+    cfg.service(
+        web::resource("/templates/{id}/test_wdl_dependencies")
+            .route(web::get().to(download_test_wdl_dependencies)),
+    );
+    cfg.service(
+        web::resource("/templates/{id}/eval_wdl_dependencies")
+            .route(web::get().to(download_eval_wdl_dependencies)),
+    );
     cfg.service(
         web::resource("/templates")
             .route(web::get().to(find))
@@ -1171,7 +1809,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtesttest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evalevaleval"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1181,16 +1821,29 @@ mod tests {
     fn create_test_template_wdl_locations(
         conn: &PgConnection,
         test_wdl_location: &str,
+        test_wdl_dependencies: Option<&str>,
         eval_wdl_location: &str,
+        eval_wdl_dependencies: Option<&str>,
     ) -> TemplateData {
         let pipeline = insert_test_pipeline(conn);
+
+        let test_wdl_dependencies = match test_wdl_dependencies {
+            Some(deps_location) => Some(String::from(deps_location)),
+            None => None,
+        };
+        let eval_wdl_dependencies = match eval_wdl_dependencies {
+            Some(deps_location) => Some(String::from(deps_location)),
+            None => None,
+        };
 
         let new_template = NewTemplate {
             name: String::from("Kevin's Template"),
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from(test_wdl_location),
+            test_wdl_dependencies,
             eval_wdl: String::from(eval_wdl_location),
+            eval_wdl_dependencies,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1211,6 +1864,32 @@ mod tests {
         (format!("{}/test/resource", mockito::server_url()), mock)
     }
 
+    fn setup_valid_wdl_and_deps_addresses() -> ((String, Mock), (String, Mock)) {
+        // Get wdl file and dep zip
+        let wdl = std::fs::read("testdata/routes/template/valid_wdl_with_deps.wdl").unwrap();
+        let deps = std::fs::read("testdata/routes/template/valid_wdl_deps.zip").unwrap();
+
+        // Define mockito mappings for responses
+        let wdl_mock = mockito::mock("GET", "/test/resource")
+            .with_status(201)
+            .with_header("content_type", "application/octet-stream")
+            .with_body(wdl)
+            .create();
+        let deps_mock = mockito::mock("GET", "/test/resource_deps")
+            .with_status(201)
+            .with_header("content_type", "application/octet-stream")
+            .with_body(deps)
+            .create();
+
+        (
+            (format!("{}/test/resource", mockito::server_url()), wdl_mock),
+            (
+                format!("{}/test/resource_deps", mockito::server_url()),
+                deps_mock,
+            ),
+        )
+    }
+
     fn setup_different_valid_wdl_address() -> (String, Mock) {
         // Get valid wdl test file
         let test_wdl = read_to_string("testdata/routes/template/different_valid_wdl.wdl").unwrap();
@@ -1223,6 +1902,36 @@ mod tests {
             .create();
 
         (format!("{}/test/resource2", mockito::server_url()), mock)
+    }
+
+    fn setup_different_valid_wdl_and_deps_addresses() -> ((String, Mock), (String, Mock)) {
+        // Get wdl file and dep zip
+        let wdl =
+            std::fs::read("testdata/routes/template/different_valid_wdl_with_deps.wdl").unwrap();
+        let deps = std::fs::read("testdata/routes/template/different_valid_wdl_deps.zip").unwrap();
+
+        // Define mockito mappings for responses
+        let wdl_mock = mockito::mock("GET", "/test/resource2")
+            .with_status(201)
+            .with_header("content_type", "application/octet-stream")
+            .with_body(wdl)
+            .create();
+        let deps_mock = mockito::mock("GET", "/test/resource2_deps")
+            .with_status(201)
+            .with_header("content_type", "application/octet-stream")
+            .with_body(deps)
+            .create();
+
+        (
+            (
+                format!("{}/test/resource2", mockito::server_url()),
+                wdl_mock,
+            ),
+            (
+                format!("{}/test/resource2_deps", mockito::server_url()),
+                deps_mock,
+            ),
+        )
     }
 
     fn setup_invalid_wdl_address() -> (String, Mock) {
@@ -1383,7 +2092,9 @@ mod tests {
         let new_template = create_test_template_wdl_locations(
             &pool.get().unwrap(),
             &valid_wdl_address,
+            None,
             eval_wdl_path,
+            None,
         );
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1472,7 +2183,9 @@ mod tests {
         let new_template = create_test_template_wdl_locations(
             &pool.get().unwrap(),
             &valid_wdl_address,
+            None,
             eval_wdl_path,
+            None,
         );
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
@@ -1554,16 +2267,21 @@ mod tests {
 
         let pipeline = insert_test_pipeline(&pool.get().unwrap());
 
-        let (valid_wdl_address, valid_wdl_mock) = setup_valid_wdl_address();
-        let (different_valid_wdl_address, different_valid_wdl_mock) =
-            setup_different_valid_wdl_address();
+        let ((valid_wdl_address, valid_wdl_mock), (valid_wdl_deps_address, valid_wdl_deps_mock)) =
+            setup_valid_wdl_and_deps_addresses();
+        let (
+            (different_valid_wdl_address, different_valid_wdl_mock),
+            (different_valid_wdl_deps_address, different_valid_wdl_deps_mock),
+        ) = setup_different_valid_wdl_and_deps_addresses();
 
         let new_template = NewTemplate {
             name: String::from("Kevin's test"),
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin's test description")),
             test_wdl: valid_wdl_address,
+            test_wdl_dependencies: Some(valid_wdl_deps_address),
             eval_wdl: different_valid_wdl_address,
+            eval_wdl_dependencies: Some(different_valid_wdl_deps_address),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1574,11 +2292,17 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
 
         valid_wdl_mock.assert();
+        valid_wdl_deps_mock.assert();
         different_valid_wdl_mock.assert();
+        different_valid_wdl_deps_mock.assert();
 
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
+
+        let result_json: Value = serde_json::from_slice(&result).unwrap();
+
+        println!("Result: {}", result_json.to_string());
 
         let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
 
@@ -1602,6 +2326,20 @@ mod tests {
             test_template.eval_wdl,
             format!(
                 "localhost:8080/api/v1/templates/{}/eval_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.test_wdl_dependencies.unwrap(),
+            format!(
+                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl_dependencies.unwrap(),
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
                 test_template.template_id
             )
         );
@@ -1869,7 +2607,9 @@ mod tests {
             pipeline_id: template.pipeline_id,
             description: Some(String::from("Kevin's test description")),
             test_wdl: valid_wdl_address.clone(),
+            test_wdl_dependencies: None,
             eval_wdl: valid_wdl_address,
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1919,7 +2659,9 @@ mod tests {
             pipeline_id: Uuid::new_v4(),
             description: Some(String::from("Kevin's test description")),
             test_wdl: invalid_wdl_address.clone(),
+            test_wdl_dependencies: None,
             eval_wdl: invalid_wdl_address,
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -2150,13 +2892,20 @@ mod tests {
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
         insert_failed_test_runs_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
-        let (valid_wdl_address, _mock) = setup_valid_wdl_address();
+        let ((valid_wdl_address, valid_wdl_mock), (valid_wdl_deps_address, valid_wdl_deps_mock)) =
+            setup_valid_wdl_and_deps_addresses();
+        let (
+            (different_valid_wdl_address, different_valid_wdl_mock),
+            (different_valid_wdl_deps_address, different_valid_wdl_deps_mock),
+        ) = setup_different_valid_wdl_and_deps_addresses();
 
         let template_change = TemplateChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_wdl: Some(valid_wdl_address),
-            eval_wdl: None,
+            test_wdl_dependencies: Some(valid_wdl_deps_address),
+            eval_wdl: Some(different_valid_wdl_address),
+            eval_wdl_dependencies: Some(different_valid_wdl_deps_address),
         };
 
         let req = test::TestRequest::put()
@@ -2181,6 +2930,27 @@ mod tests {
             test_template.test_wdl,
             format!(
                 "localhost:8080/api/v1/templates/{}/test_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.test_wdl_dependencies.unwrap(),
+            format!(
+                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl_dependencies.unwrap(),
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
                 test_template.template_id
             )
         );
@@ -2313,7 +3083,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_wdl: None,
+            test_wdl_dependencies: None,
             eval_wdl: None,
+            eval_wdl_dependencies: None,
         };
 
         let req = test::TestRequest::put()
@@ -2422,7 +3194,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_wdl: Some(valid_wdl_address),
+            test_wdl_dependencies: None,
             eval_wdl: None,
+            eval_wdl_dependencies: None,
         };
 
         let req = test::TestRequest::put()
@@ -2533,7 +3307,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_wdl: None,
+            test_wdl_dependencies: None,
             eval_wdl: None,
+            eval_wdl_dependencies: None,
         };
 
         let req = test::TestRequest::put()
@@ -2642,7 +3418,9 @@ mod tests {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
             test_wdl: Some(valid_wdl_address),
+            test_wdl_dependencies: None,
             eval_wdl: Some(invalid_wdl_address),
+            eval_wdl_dependencies: None,
         };
 
         let req = test::TestRequest::put()
@@ -2900,8 +3678,13 @@ mod tests {
         let eval_wdl = get_temp_file(&not_expected_wdl);
         let eval_wdl_path = eval_wdl.path().to_str().unwrap();
 
-        let template =
-            create_test_template_wdl_locations(&pool.get().unwrap(), test_wdl_path, eval_wdl_path);
+        let template = create_test_template_wdl_locations(
+            &pool.get().unwrap(),
+            test_wdl_path,
+            None,
+            eval_wdl_path,
+            None,
+        );
 
         let mut app = test::init_service(
             App::new()
@@ -2940,7 +3723,9 @@ mod tests {
         let template = create_test_template_wdl_locations(
             &pool.get().unwrap(),
             &test_wdl_address,
+            None,
             eval_wdl_path,
+            None,
         );
 
         let mut app = test::init_service(
@@ -3008,8 +3793,13 @@ mod tests {
         let eval_wdl = get_temp_file(&expected_wdl);
         let eval_wdl_path = eval_wdl.path().to_str().unwrap();
 
-        let template =
-            create_test_template_wdl_locations(&pool.get().unwrap(), test_wdl_path, eval_wdl_path);
+        let template = create_test_template_wdl_locations(
+            &pool.get().unwrap(),
+            test_wdl_path,
+            None,
+            eval_wdl_path,
+            None,
+        );
 
         let mut app = test::init_service(
             App::new()
@@ -3047,7 +3837,9 @@ mod tests {
         let template = create_test_template_wdl_locations(
             &pool.get().unwrap(),
             &test_wdl_address,
+            None,
             &eval_wdl_address,
+            None,
         );
 
         let mut app = test::init_service(
@@ -3088,6 +3880,256 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/eval_wdl", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No template found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No template found with the specified ID");
+    }
+
+    #[actix_rt::test]
+    async fn download_test_wdl_dependencies_file_path() {
+        let pool = get_test_db_pool();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
+
+        let test_wdl_path: &Path = Path::new("./testdata/routes/template/valid_wdl_with_deps.wdl");
+        let test_wdl_dependencies_path: &Path =
+            Path::new("./testdata/routes/template/valid_wdl_with_deps.wdl");
+
+        let eval_wdl_path: &Path =
+            Path::new("./testdata/routes/template/different_valid_wdl_with_deps.wdl");
+        let eval_wdl_dependencies_path: &Path =
+            Path::new("./testdata/routes/template/different_valid_wdl_with_deps.wdl");
+
+        let template = create_test_template_wdl_locations(
+            &pool.get().unwrap(),
+            test_wdl_path.to_str().unwrap(),
+            Some(test_wdl_dependencies_path.to_str().unwrap()),
+            eval_wdl_path.to_str().unwrap(),
+            Some(eval_wdl_dependencies_path.to_str().unwrap()),
+        );
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/templates/{}/test_wdl", template.template_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let wdl_dependencies: &[u8] = result.as_ref();
+        let expected_wdl_dependencies: Vec<u8> = std::fs::read(test_wdl_dependencies_path).unwrap();
+
+        assert_eq!(wdl_dependencies, &expected_wdl_dependencies);
+    }
+
+    #[actix_rt::test]
+    async fn download_test_wdl_dependencies_http() {
+        let pool = get_test_db_pool();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
+
+        let (
+            (test_wdl_address, test_wdl_mock),
+            (test_wdl_dependencies_address, test_wdl_dependencies_address_mock),
+        ) = setup_valid_wdl_and_deps_addresses();
+
+        let eval_wdl_path: &Path = Path::new("./testdata/routes/template/different_valid_wdl.wdl");
+
+        let template = create_test_template_wdl_locations(
+            &pool.get().unwrap(),
+            &test_wdl_address,
+            Some(&test_wdl_dependencies_address),
+            eval_wdl_path.to_str().unwrap(),
+            None,
+        );
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/test_wdl_dependencies",
+                template.template_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        test_wdl_dependencies_address_mock.assert();
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let wdl_dependencies: &[u8] = result.as_ref();
+        let expected_wdl_dependencies: Vec<u8> =
+            std::fs::read(Path::new("./testdata/routes/template/valid_wdl_deps.zip")).unwrap();
+
+        assert_eq!(wdl_dependencies, &expected_wdl_dependencies);
+    }
+
+    #[actix_rt::test]
+    async fn download_test_wdl_dependencies_failure_no_template() {
+        let pool = get_test_db_pool();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/test_wdl_dependencies",
+                Uuid::new_v4()
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No template found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No template found with the specified ID");
+    }
+
+    #[actix_rt::test]
+    async fn download_eval_wdl_dependencies_file_path() {
+        let pool = get_test_db_pool();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
+
+        let test_wdl_path: &Path = Path::new("./testdata/routes/template/valid_wdl_with_deps.wdl");
+        let test_wdl_dependencies_path: &Path =
+            Path::new("./testdata/routes/template/valid_wdl_with_deps.wdl");
+
+        let eval_wdl_path: &Path =
+            Path::new("./testdata/routes/template/different_valid_wdl_with_deps.wdl");
+        let eval_wdl_dependencies_path: &Path =
+            Path::new("./testdata/routes/template/different_valid_wdl_with_deps.wdl");
+
+        let template = create_test_template_wdl_locations(
+            &pool.get().unwrap(),
+            test_wdl_path.to_str().unwrap(),
+            Some(test_wdl_dependencies_path.to_str().unwrap()),
+            eval_wdl_path.to_str().unwrap(),
+            Some(eval_wdl_dependencies_path.to_str().unwrap()),
+        );
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/eval_wdl_dependencies",
+                template.template_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let wdl_dependencies: &[u8] = result.as_ref();
+        let expected_wdl_dependencies: Vec<u8> = std::fs::read(eval_wdl_dependencies_path).unwrap();
+
+        assert_eq!(wdl_dependencies, &expected_wdl_dependencies);
+    }
+
+    #[actix_rt::test]
+    async fn download_eval_wdl_dependencies_http() {
+        let pool = get_test_db_pool();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
+
+        let test_wdl_path: &Path = Path::new("./testdata/routes/template/valid_wdl.wdl");
+        let (
+            (eval_wdl_address, eval_wdl_mock),
+            (eval_wdl_dependencies_address, eval_wdl_dependencies_mock),
+        ) = setup_different_valid_wdl_and_deps_addresses();
+
+        let template = create_test_template_wdl_locations(
+            &pool.get().unwrap(),
+            test_wdl_path.to_str().unwrap(),
+            None,
+            &eval_wdl_address,
+            Some(&eval_wdl_dependencies_address),
+        );
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/eval_wdl_dependencies",
+                template.template_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        eval_wdl_dependencies_mock.assert();
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let wdl_dependencies: &[u8] = result.as_ref();
+        let expected_wdl_dependencies: Vec<u8> = std::fs::read(Path::new(
+            "./testdata/routes/template/different_valid_wdl_deps.zip",
+        ))
+        .unwrap();
+
+        assert_eq!(wdl_dependencies, &expected_wdl_dependencies);
+    }
+
+    #[actix_rt::test]
+    async fn download_eval_wdl_dependencies_failure_no_template() {
+        let pool = get_test_db_pool();
+        let test_resource_client = TestResourceClient::new(Client::new(), None);
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_resource_client)
+                .configure(init_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/eval_wdl_dependencies",
+                Uuid::new_v4()
+            ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 

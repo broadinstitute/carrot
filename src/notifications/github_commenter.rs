@@ -290,7 +290,7 @@ mod tests {
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: Some(Utc::now().naive_utc()),
             results: Some(json!({"result":5})),
-            errors: None
+            errors: None,
         };
         let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
 

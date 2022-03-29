@@ -601,7 +601,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtesttest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evalevaleval"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -623,7 +625,9 @@ mod tests {
             pipeline_id: pipeline.pipeline_id,
             description: Some(String::from("Kevin made this template for testing")),
             test_wdl: String::from("testtesttest"),
+            test_wdl_dependencies: None,
             eval_wdl: String::from("evalevaleval"),
+            eval_wdl_dependencies: None,
             created_by: Some(String::from("Kevin@example.com")),
         };
 

@@ -459,7 +459,9 @@ mod tests {
             pipeline_id: id,
             description: None,
             test_wdl: format!("{}/test_software_params", mockito::server_url()),
+            test_wdl_dependencies: None,
             eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 

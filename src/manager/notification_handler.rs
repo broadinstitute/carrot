@@ -557,7 +557,9 @@ mod tests {
             pipeline_id: id,
             description: None,
             test_wdl: String::from(""),
+            test_wdl_dependencies: None,
             eval_wdl: String::from(""),
+            eval_wdl_dependencies: None,
             created_by: None,
         };
 
@@ -671,7 +673,8 @@ mod tests {
             &new_run.name, &new_test.name, &new_run.status
         );
         let new_run_with_results =
-            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
+            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone())
+                .unwrap();
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
         // Make temporary directory for the email
@@ -806,7 +809,8 @@ mod tests {
         );
 
         let new_run_with_results =
-            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone()).unwrap();
+            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone())
+                .unwrap();
 
         // Send email
         let result = test_handler

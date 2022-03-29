@@ -481,7 +481,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_get_metadata_simple() {
-        //Get client
+        // Get client
         let client = Client::default();
         let test_cromwell_client: CromwellClient =
             CromwellClient::new(client, &mockito::server_url());

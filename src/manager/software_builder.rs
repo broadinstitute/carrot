@@ -128,6 +128,7 @@ impl SoftwareBuilder {
         let start_job_response = util::start_job_from_file(
             &self.cromwell_client,
             wdl_file_path,
+            None,
             &json_file.path(),
             None,
         )

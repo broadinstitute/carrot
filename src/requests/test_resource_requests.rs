@@ -7,7 +7,7 @@ use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
 use actix_web::client::Client;
 use std::fmt;
-use std::fs::read_to_string;
+use std::fs::{read, read_to_string};
 use std::str::Utf8Error;
 
 /// Struct for handling retrieving test data from http, gcs, and local locations
@@ -85,6 +85,15 @@ impl TestResourceClient {
     /// Reads resource at `address` and returns it as a String.  `address` can be an http(s) url, gs
     /// uri (if `self` has a value for `gcs_client`), or a local file path
     pub async fn get_resource_as_string(&self, address: &str) -> Result<String, Error> {
+        let resource_as_bytes = self.get_resource_as_bytes(address).await?;
+        Ok(String::from(std::str::from_utf8(&resource_as_bytes)?))
+    }
+
+    /// Returns body of resource at `address` as a bytes
+    ///
+    /// Reads resource at `address` and returns it as a String.  `address` can be an http(s) url, gs
+    /// uri (if `self` has a value for `gcs_client`), or a local file path
+    pub async fn get_resource_as_bytes(&self, address: &str) -> Result<Vec<u8>, Error> {
         // If the address is a gs address and retrieving from gs addresses is enabled, retrieve the data
         // using the gcloud storage api
         if self.gcs_client.is_some() && address.starts_with(gcloud_storage::GS_URI_PREFIX) {
@@ -96,16 +105,16 @@ impl TestResourceClient {
         }
         // If it's an http/https url, make an http request
         else if address.starts_with("http://") || address.starts_with("https://") {
-            self.get_resource_as_string_from_http_url(address).await
+            self.get_resource_from_http_url(address).await
         }
         // Otherwise, we'll assume it's a local file
         else {
-            Ok(read_to_string(address)?)
+            Ok(read(address)?)
         }
     }
 
-    /// Attempts to retrieve and return the resource at `address` as a String
-    async fn get_resource_as_string_from_http_url(&self, address: &str) -> Result<String, Error> {
+    /// Attempts to retrieve and return the resource at `address` as a byte vec
+    async fn get_resource_from_http_url(&self, address: &str) -> Result<Vec<u8>, Error> {
         let request = self.http_client.get(format!("{}", address));
 
         // Make the request
@@ -113,17 +122,18 @@ impl TestResourceClient {
 
         // Get response body and convert it into a string
         let response_body = response.body().await?;
-        let result = std::str::from_utf8(response_body.as_ref())?;
 
         // If it didn't return a success status code, that's an error
         if !response.status().is_success() {
             return Err(Error::Failed(format!(
-                "Resource request to {} returned {}",
-                address, result
+                "Resource request to {} returned {} with body {}",
+                address,
+                response.status(),
+                String::from_utf8_lossy(&response_body)
             )));
         }
 
-        Ok(String::from(result))
+        Ok(response_body.to_vec())
     }
 }
 
@@ -222,8 +232,8 @@ mod tests {
         let client = Client::default();
         let mut gcloud_client = GCloudClient::new(&String::from("test"));
         gcloud_client.set_retrieve_media(Box::new(
-            |address: &str| -> Result<String, crate::storage::gcloud_storage::Error> {
-                Ok(String::from("Test contents"))
+            |address: &str| -> Result<Vec<u8>, crate::storage::gcloud_storage::Error> {
+                Ok(b"Test contents".to_vec())
             },
         ));
         let test_resource_client: TestResourceClient =
@@ -245,7 +255,7 @@ mod tests {
         let client = Client::default();
         let mut gcloud_client = GCloudClient::new(&String::from("test"));
         gcloud_client.set_retrieve_media(Box::new(
-            |address: &str| -> Result<String, crate::storage::gcloud_storage::Error> {
+            |address: &str| -> Result<Vec<u8>, crate::storage::gcloud_storage::Error> {
                 Err(crate::storage::gcloud_storage::Error::Failed(String::from(
                     "Failed to retrieve",
                 )))
