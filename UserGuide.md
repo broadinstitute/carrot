@@ -284,7 +284,7 @@ For any output of a test or evaluation WDL to be tracked by CARROT, it must be m
 ```
 
 
-The  `TEMPLATE` corresponds to the CARROT ID or name of the template containing the output you wish to map to a result type.  If you just added a template, the ID should still be visible at the command-line terminal as the result of `carrot_cli template create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli template find`).
+The `TEMPLATE` corresponds to the CARROT ID or name of the template containing the output you wish to map to a result type.  If you just added a template, the ID should still be visible at the command-line terminal as the result of `carrot_cli template create …` .  If not, this can be found as the ID field when querying for pipelines (`carrot_cli template find`).
 
 The `RESULT` corresponds to the CARROT ID or name of the result type which will be mapped to an output from the template.  The ID can be found as the ID field when querying for pipelines (`carrot_cli results find`).
 

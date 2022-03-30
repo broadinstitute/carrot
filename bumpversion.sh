@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 current_version="0.4.0"
 new_version=$current_version
 
@@ -35,13 +37,35 @@ set -euo pipefail
 
 __set_new_version $1
 
-# Replace only the first instance in Cargo.toml (because there might be others that are for other libraries)
-sed -i '' -e "1,6s/version = \"$current_version\"/version = \"$new_version\"/" Cargo.toml
-# Update in the user guide
-sed -i '' -e "s/v$current_version/v$new_version/" UserGuide.md
-# Do it in the places we need to update in carrot_cli
-sed -i '' -e "s/version = \"$current_version\"/version = \"$new_version\"/" carrot_cli/setup.py
-sed -i '' -e "s/Current version: $current_version/Current version: $new_version/" carrot_cli/README.md
-sed -i '' -e "s/__version__ = \"$current_version\"/__version = \"$new_version\"/" carrot_cli/src/carrot_cli/__main__.py
-# Finally update it in this script
-sed -i '' -e "s/current_version=\"$current_version\"/current_version=\"$new_version\"/" bumpversion.sh
+# OSX and Linux sed are different, so we need to account for that with regard to the -i option
+os_string=$(uname)
+case $os_string in
+  "Darwin")
+    # Replace only the first instance in Cargo.toml (because there might be others that are for other libraries)
+    sed -i '' -e "1,6s#version = \"$current_version\"#version = \"$new_version\"#" Cargo.toml
+    # Update in the user guide
+    sed -i '' -e "s#v$current_version#v$new_version#" UserGuide.md
+    # Do it in the places we need to update in carrot_cli
+    sed -i '' -e "s#version = \"$current_version\"#version = \"$new_version\"#" carrot_cli/setup.py
+    sed -i '' -e "s#Current version: $current_version#Current version: $new_version#" carrot_cli/README.md
+    sed -i '' -e "s#__version__ = \"$current_version\"#__version = \"$new_version\"#" carrot_cli/src/carrot_cli/__main__.py
+    # Finally update it in this script
+    sed -i '' -e "s#current_version=\"$current_version\"#current_version=\"$new_version\"#" bumpversion.sh
+    ;;
+  "Linux")
+    # Replace only the first instance in Cargo.toml (because there might be others that are for other libraries)
+    sed -i -e "1,6s#version = \"$current_version\"#version = \"$new_version\"#" Cargo.toml
+    # Update in the user guide
+    sed -i -e "s#v$current_version#v$new_version#" UserGuide.md
+    # Do it in the places we need to update in carrot_cli
+    sed -i -e "s#version = \"$current_version\"#version = \"$new_version\"#" carrot_cli/setup.py
+    sed -i -e "s#Current version: $current_version#Current version: $new_version#" carrot_cli/README.md
+    sed -i -e "s#__version__ = \"$current_version\"#__version = \"$new_version\"#" carrot_cli/src/carrot_cli/__main__.py
+    # Finally update it in this script
+    sed -i -e "s#current_version=\"$current_version\"#current_version=\"$new_version\"#" bumpversion.sh
+    ;;
+  *)
+    echo "Unsupported operating system"
+    exit 1
+    ;;
+esac
