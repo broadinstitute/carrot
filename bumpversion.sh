@@ -48,7 +48,7 @@ case $os_string in
     # Do it in the places we need to update in carrot_cli
     sed -i '' -e "s#version = \"$current_version\"#version = \"$new_version\"#" carrot_cli/setup.py
     sed -i '' -e "s#Current version: $current_version#Current version: $new_version#" carrot_cli/README.md
-    sed -i '' -e "s#__version__ = \"$current_version\"#__version = \"$new_version\"#" carrot_cli/src/carrot_cli/__main__.py
+    sed -i '' -e "s#__version = \"$current_version\"#__version = \"$new_version\"#" carrot_cli/src/carrot_cli/__main__.py
     # Finally update it in this script
     sed -i '' -e "s#current_version=\"$current_version\"#current_version=\"$new_version\"#" bumpversion.sh
     ;;
@@ -60,7 +60,7 @@ case $os_string in
     # Do it in the places we need to update in carrot_cli
     sed -i -e "s#version = \"$current_version\"#version = \"$new_version\"#" carrot_cli/setup.py
     sed -i -e "s#Current version: $current_version#Current version: $new_version#" carrot_cli/README.md
-    sed -i -e "s#__version__ = \"$current_version\"#__version = \"$new_version\"#" carrot_cli/src/carrot_cli/__main__.py
+    sed -i -e "s#__version = \"$current_version\"#__version = \"$new_version\"#" carrot_cli/src/carrot_cli/__main__.py
     # Finally update it in this script
     sed -i -e "s#current_version=\"$current_version\"#current_version=\"$new_version\"#" bumpversion.sh
     ;;
