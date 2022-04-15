@@ -188,7 +188,7 @@ async fn create(
     web::Json(run_report_inputs): web::Json<NewRunReportIncomplete>,
     query_params: Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
-    report_builder: web::Data<ReportBuilder>,
+    report_builder: web::Data<Option<ReportBuilder>>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
@@ -226,17 +226,34 @@ async fn create(
     };
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
-    // Create run report
-    match report_builder
-        .create_run_report(
-            &conn,
-            id,
-            report_id,
-            &run_report_inputs.created_by,
-            delete_failed,
-        )
-        .await
-    {
+    // Get the report_builder and create the run report or return an error if we don't have one
+    match {
+        match report_builder.as_ref() {
+            Some(report_builder) => {
+                report_builder
+                    .create_run_report(
+                        &conn,
+                        id,
+                        report_id,
+                        &run_report_inputs.created_by,
+                        delete_failed,
+                    )
+                    .await
+            },
+            None => {
+                return Ok(HttpResponse::InternalServerError().json(ErrorBody{
+                    title: String::from("No report builder"),
+                    status: 500,
+                    detail: String::from(
+                        "Reporting is configured but no report builder was constructed.  \
+                          This is a bug.  \
+                          Please complain about it on the carrot github: \
+                          https://github.com/broadinstitute/carrot/issues"
+                    )
+                }))
+            }
+        }
+    } {
         Ok(run_report) => Ok(HttpResponse::Ok().json(run_report)),
         Err(err) => {
             error!("{}", err);
@@ -789,7 +806,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -845,7 +862,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_disabled),
         )
         .await;
@@ -892,7 +909,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -947,7 +964,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -992,7 +1009,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -1036,7 +1053,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -1081,7 +1098,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
@@ -1130,7 +1147,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(test_report_builder)
+                .data(Some(test_report_builder))
                 .configure(init_routes_reporting_enabled),
         )
         .await;
