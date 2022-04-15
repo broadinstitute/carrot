@@ -244,7 +244,12 @@ async fn create(
                 return Ok(HttpResponse::InternalServerError().json(ErrorBody{
                     title: String::from("No report builder"),
                     status: 500,
-                    detail: String::from("Reporting is configured but no report builder was constructed.  This is a bug.  Please complain about it on the carrot github.")
+                    detail: String::from(
+                        "Reporting is configured but no report builder was constructed.  \
+                          This is a bug.  \
+                          Please complain about it on the carrot github: \
+                          https://github.com/broadinstitute/carrot/issues"
+                    )
                 }))
             }
         }
