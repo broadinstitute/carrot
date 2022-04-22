@@ -146,7 +146,7 @@ impl NotificationHandler {
         match &self.github_commenter {
             Some(github_commenter) => {
                 github_commenter
-                    .post_run_started_comment(owner, repo, issue_number, run)
+                    .post_run_started_comment(owner, repo, issue_number, run, test_name)
                     .await?;
             }
             None => {}
@@ -182,7 +182,7 @@ impl NotificationHandler {
         match &self.github_commenter {
             Some(github_commenter) => {
                 github_commenter
-                    .post_run_failed_to_start_comment(owner, repo, issue_number, error_message)
+                    .post_run_failed_to_start_comment(owner, repo, issue_number, error_message, test_name)
                     .await?;
             }
             None => {}
@@ -388,12 +388,14 @@ impl NotificationHandler {
                     Ok(data_from_github) => {
                         // If the run was triggered from github, retrieve its data and post to github
                         let run_data = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
+                        let test_data = TestData::find_by_id(conn, run_data.test_id)?;
                         github_commenter
                             .post_run_finished_comment(
                                 &data_from_github.owner,
                                 &data_from_github.repo,
                                 data_from_github.issue_number.clone(),
                                 &run_data,
+                                &test_data.name,
                             )
                             .await?;
                         Ok(())
@@ -1161,7 +1163,13 @@ mod tests {
         let request_body = json!({
             "body":
                 format!(
-                    "<details><summary>CARROT test run finished</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
+                    "### 🥕CARROT🥕 run finished\n\
+                    \n\
+                    ### Test: Kevin's test test | Status: test_submitted\n\
+                    Run: Kevin's Run\
+                    \n\
+                    \n\
+                    <details><summary>Full details</summary> <pre lang=\"json\"> \n {} \n </pre> </details>",
                     test_run_string
                 )
         });
@@ -1271,15 +1279,15 @@ mod tests {
         let expected_results = vec![
             "| Report | URI |",
             "| --- | --- |",
-            "| empty_notebook | gs://test_bucket/empty_report.ipynb |",
-            "| html_report | gs://test_bucket/report.html |",
-            "| populated_notebook | gs://test_bucket/filled_report.ipynb |",
+            "| empty_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/empty_report.ipynb) |",
+            "| html_report | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/report.html) |",
+            "| populated_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/filled_report.ipynb) |",
         ]
         .join("\n");
         let request_body = json!({
             "body":
                 format!(
-                    "CARROT run report Kevin's Report finished for run Kevin's Run ({})\n{}",
+                    "### 🥕CARROT🥕 run report Kevin's Report finished\nfor run Kevin's Run ({})\n{}",
                     new_run_report.run_id, expected_results
                 )
         });
