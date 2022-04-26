@@ -231,7 +231,7 @@ async fn create(
         match report_builder.as_ref() {
             Some(report_builder) => {
                 report_builder
-                    .create_run_report(
+                    .create_run_report_for_ids(
                         &conn,
                         id,
                         report_id,
@@ -239,17 +239,17 @@ async fn create(
                         delete_failed,
                     )
                     .await
-            },
+            }
             None => {
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody{
+                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
                     title: String::from("No report builder"),
                     status: 500,
                     detail: String::from(
                         "Reporting is configured but no report builder was constructed.  \
                           This is a bug.  \
                           Please complain about it on the carrot github: \
-                          https://github.com/broadinstitute/carrot/issues"
-                    )
+                          https://github.com/broadinstitute/carrot/issues",
+                    ),
                 }))
             }
         }
@@ -315,10 +315,10 @@ async fn create(
                     status: 500,
                     detail: format!("{}", e),
                 },
-                report_builder::Error::PythonDictFormatter(e) => ErrorBody {
-                    title: "PythonDictFormatter error".to_string(),
+                report_builder::Error::CSV(e) => ErrorBody {
+                    title: "CSV error".to_string(),
                     status: 500,
-                    detail: format!("Error while attempting to convert run data into python dictionary to include in report: {}", e),
+                    detail: format!("Error while attempting to convert run data into CSV to include in report: {}", e),
                 },
             };
             Ok(HttpResponseBuilder::new(

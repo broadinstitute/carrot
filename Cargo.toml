@@ -71,6 +71,8 @@ sha2 = "0.9"
 clap = "2.33"
 # For extracting wdl dependency archives for validation
 zip = "0.5"
+# For generating csv files from model data
+csv = "^1.1"
 
 [dev-dependencies]
 # For generating random values in test data

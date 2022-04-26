@@ -1,0 +1,5 @@
+run_id,test_workflow.array,test_workflow.number,test_workflow.string
+67e55044-10b1-426f-9247-bb680e5fe0c8,"[1,2,3]",4,hello
+4f27abe7-2cfa-42c3-acc2-ce5344b0e471,"[1,2,5,8]",4,bonjour
+4b2d5150-7d86-4a11-888c-b78dc030ba4f,"[1,2,5,9]",6,hello
+cf4b5cb2-976e-4f9c-91ba-2b421d61199b,,6,hello

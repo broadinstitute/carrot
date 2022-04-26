@@ -12,12 +12,16 @@ use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
-use crate::util::{python_dict_formatter, temp_storage};
+use crate::util::{run_csv, temp_storage};
 use core::fmt;
+use std::fs::File;
+use std::path::PathBuf;
 use diesel::PgConnection;
 use log::{debug, error, warn};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
+use tempfile::TempDir;
 use uuid::Uuid;
+use crate::models::test::TestData;
 
 /// Struct for assembling reports from runs and submitting jobs to cromwell to fill them
 #[derive(Clone)]
@@ -40,7 +44,7 @@ pub enum Error {
     Cromwell(CromwellRequestError),
     Prohibited(String),
     Autosize(String),
-    PythonDictFormatter(python_dict_formatter::Error),
+    CSV(run_csv::Error)
 }
 
 impl std::error::Error for Error {}
@@ -57,9 +61,7 @@ impl fmt::Display for Error {
             Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e),
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
             Error::Autosize(e) => write!(f, "report_builder Error Autosize {}", e),
-            Error::PythonDictFormatter(e) => {
-                write!(f, "report_builder Error PythonDictFormatter {}", e)
-            }
+            Error::CSV(e) => write!(f, "report_builder Error CSV {}", e),
         }
     }
 }
@@ -100,189 +102,10 @@ impl From<CromwellRequestError> for Error {
     }
 }
 
-impl From<python_dict_formatter::Error> for Error {
-    fn from(e: python_dict_formatter::Error) -> Error {
-        Error::PythonDictFormatter(e)
+impl From<run_csv::Error> for Error {
+    fn from(e: run_csv::Error) -> Error {
+        Error::CSV(e)
     }
-}
-
-lazy_static! {
-    /// The metadata we'll use for a notebook so we can make sure it uses the correct python kernel
-    static ref DEFAULT_REPORT_METADATA: Value = json!({
-        "metadata": {
-            "language_info": {
-                "codemirror_mode": {
-                    "name": "ipython",
-                    "version": 3
-                },
-                "file_extension": ".py",
-                "mimetype": "text/x-python",
-                "name": "python",
-                "nbconvert_exporter": "python",
-                "pygments_lexer": "ipython3",
-                "version": "3.8.5-final"
-            },
-            "orig_nbformat": 2,
-            "kernelspec": {
-                "name": "python3",
-                "display_name": "Python 3.8.5 64-bit",
-                "metadata": {
-                    "interpreter": {
-                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                    }
-                }
-            }
-        },
-        "nbformat": 4,
-        "nbformat_minor": 2
-    });
-
-    /// A cell for displaying run metadata at the top of a report
-    static ref RUN_METADATA_CELL: Value = json!({
-        "cell_type": "code",
-        "execution_count": null,
-        "metadata": {},
-        "outputs": [],
-        "source": [
-            "# Print metadata\n",
-            "from IPython.display import Markdown\n",
-            "# Start with name and id\n",
-            "md_string = f\"# {carrot_run_data['name']}\\n### ID: {carrot_run_data['run_id']}\\n\"\n",
-            "# Status\n",
-            "md_string += f\"#### Status: {carrot_run_data['status']}\\n\"\n",
-            "# Start and end time\n",
-            "md_string += f\"#### Start time: {carrot_run_data['created_at']}\\n#### End time: {carrot_run_data['finished_at']}\\n\"\n",
-            "# Cromwell ids\n",
-            "md_string += f\"#### Test Cromwell ID: {carrot_run_data['test_cromwell_job_id']}\\n\"\n",
-            "md_string += f\"#### Eval Cromwell ID: {carrot_run_data['eval_cromwell_job_id']}\\n\"\n",
-            "# Display the metadata string\n",
-            "Markdown(md_string)"
-        ]
-    });
-
-    /// A cell for displaying run inputs and results at the bottom of a report
-    static ref RUN_INPUTS_AND_RESULTS_CELL: Value = json!({
-        "cell_type": "code",
-        "execution_count": null,
-        "metadata": {},
-        "outputs": [],
-        "source": [
-            "# Print metadata\n",
-            "from IPython.display import Markdown\n",
-            "# Display inputs and results for reference\n",
-            "# Inputs\n",
-            "md_string = \"### Test Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
-            "for key, value in carrot_run_data['test_input'].items():\n",
-            "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
-            "md_string += \"### Eval Inputs:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
-            "for key, value in carrot_run_data['eval_input'].items():\n",
-            "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
-            "# Results\n",
-            "md_string += \"### Results:\\n| Name | Value |\\n| :--- | :--- |\\n\"\n",
-            "for key, value in carrot_run_data['results'].items():\n",
-            "    md_string += f\"| {key.replace('|', '&#124;')} | {str(value).replace('|', '&#124;')} |\\n\"\n",
-            "# Display the metadata string\n",
-            "Markdown(md_string)"
-        ]
-    });
-
-    /// The default control block cell that will be used if the user does not include a control
-    /// block cell in the notebook for their report
-    static ref DEFAULT_CONTROL_BLOCK_CELL: Value = json!({
-        "cell_type": "code",
-        "execution_count": null,
-        "metadata": {},
-        "outputs": [],
-        "source": [
-            "# Control block\n",
-            "carrot_download_results = True\n",
-            "carrot_download_inputs = False\n",
-        ]
-    });
-
-    /// The download cell which will be inserted to allow automatic downloading of result and input
-    /// files
-    static ref FILE_DOWNLOAD_CELL: Value = json!({
-        "cell_type": "code",
-        "execution_count": null,
-        "metadata": {},
-        "outputs": [],
-        "source": [
-            "import os\n",
-            "import sys\n",
-            "import subprocess\n",
-            "\n",
-            "# Keep track of the local location of our downloaded files\n",
-            "carrot_downloads = {}\n",
-            "\n",
-            "# Downloads any gcs files in the section of run_data indicated by `key` into a directory called carrot_downloads/{key}\n",
-            "def mkdir_and_download_files(key):\n",
-            "    # Make a sub directory to put the files in\n",
-            "    os.makedirs(f'carrot_downloads/{key}', exist_ok=True)\n",
-            "    # Keep track of result files\n",
-            "    carrot_downloads[key] = {}\n",
-            "    # Loop through section and download any that are gcs uris\n",
-            "    for file_key, file_val in carrot_run_data[key].items():\n",
-            "        # If it's a string and starts with \"gs://\", download it\n",
-            "        downloaded_file = download_file_if_gs(file_val, key)\n",
-            "        # If we downloaded a file, add it to our list of downloaded files\n",
-            "        if downloaded_file is not None:\n",
-            "            carrot_downloads[key][file_key] = downloaded_file\n",
-            "        # If it's an array, check the array for strings\n",
-            "        elif isinstance(file_val, list):\n",
-            "            # We'll keep a list of the file locations\n",
-            "            carrot_downloads[key][file_key] = []\n",
-            "            for file_location in file_val:\n",
-            "                # Download if it's a gs uri\n",
-            "                downloaded_file = download_file_if_gs(file_location, key)\n",
-            "                # If we download a file, add it to our list of downloaded files\n",
-            "                if downloaded_file is not None:\n",
-            "                    carrot_downloads[key][file_key].append(downloaded_file)\n",
-            "            # If the list is empty (meaning the array didn't actually have any gcs files in it), delete it\n",
-            "            if len(carrot_downloads[key][file_key]) < 1:\n",
-            "                del carrot_downloads[key][file_key]\n",
-            "# Downloads the file specified by `uri` if `uri` is a gs uri to a subdirectory of carrot_downloads named with `key`\n",
-            "def download_file_if_gs(uri, key):\n",
-            "    if isinstance(uri, str) and uri.startswith('gs://'):\n",
-            "        # Get the filename from the uri and ensure we're not overwriting an existing file\n",
-            "        filename = ensure_unique_filename(uri, key)\n",
-            "        # Attempt to download with gsutil\n",
-            "        download_status = subprocess.Popen(['gsutil', 'cp', uri, f'carrot_downloads/{key}/{filename}'])\n",
-            "        # If it failed, print an error message and exit\n",
-            "        if download_status.wait() != 0:\n",
-            "            sys.exit(f'gsutil terminated with an non-zero exit code when attempting to download {uri}')\n",
-            "        # Return the location of the file\n",
-            "        return f'carrot_downloads/{key}/{filename}'\n",
-            "    # Return None if it's not a gs uri\n",
-            "    return None\n",
-            "# Extracts the filename from uri, and returns the filename, possibly prepended with a number if that is necessary\n",
-            "# for the filename to be unique within the carrot_downloads folder\n",
-            "def ensure_unique_filename(uri, key):\n",
-            "    # Get the filename from the uri\n",
-            "    base_filename = uri[uri.rfind(\"/\")+1:]\n",
-            "    filename = base_filename\n",
-            "    modifier_index = 0\n",
-            "    # Modify the filename, if necessary, until we have a unique one\n",
-            "    while os.path.exists(f'carrot_downloads/{key}/{filename}'):\n",
-            "        filename = f'{modifier_index}_{base_filename}'\n",
-            "        modifier_index += 1\n",
-            "    # Now that we have a unique filename, return it\n",
-            "    return filename\n",
-            "# If either download control variables are True, we'll do some downloading\n",
-            "if carrot_download_results or carrot_download_inputs:\n",
-            "    # Make a directory for any files we want to download\n",
-            "    os.makedirs('carrot_downloads', exist_ok=True)\n",
-            "    # If we're supposed to download results, do that\n",
-            "    if carrot_download_results:\n",
-            "        mkdir_and_download_files('results')\n",
-            "    # Do the same for inputs\n",
-            "    if carrot_download_inputs:\n",
-            "        # Test inputs\n",
-            "        mkdir_and_download_files('test_input')\n",
-            "        # Eval inputs\n",
-            "        mkdir_and_download_files('eval_input')"
-        ]
-    });
 }
 
 /// The name of the workflow in the jupyter_report_generator_template.wdl file
@@ -300,13 +123,6 @@ const GENERATOR_WORKFLOW_RUNTIME_ATTRS: [&'static str; 9] = [
     "bootDiskSizeGb",
     "docker",
 ];
-
-/// A list of all control variables that can be set in a control block of a notebook by the user to
-/// change the default functionality of the report
-const NOTEBOOK_CONTROL_VARIABLES: [&'static str; 2] =
-    ["carrot_download_results", "carrot_download_inputs"];
-
-const NOTEBOOK_CONTROL_VARIABLE_DEFAULT_VALUES: [bool; 2] = [true, false];
 
 impl ReportBuilder {
     /// Creates a new ReportBuilder that will use `cromwell_client` for communicating with cromwell,
@@ -349,6 +165,10 @@ impl ReportBuilder {
                 offset: None,
             },
         )?;
+        // Get run with results and errors to upload as csvs and to pass to create_run_report
+        let run_in_vec: Vec<RunWithResultsAndErrorsData> = vec![RunWithResultsAndErrorsData::find_by_id(conn, run.run_id)?];
+        // Write data to csvs and upload so the reports can use them
+        let run_csv_zip_location: String = self.create_and_upload_run_csvs(&run_in_vec).await?;
         // If there are reports to generate, generate them
         if template_reports.len() > 0 {
             // Loop through the mappings and create a report for each
@@ -357,13 +177,16 @@ impl ReportBuilder {
                     "Generating run_report for run_id {} and report_id {}",
                     run.run_id, mapping.report_id
                 );
+                // Check if we already have a run report for this run and report
+                ReportBuilder::verify_no_existing_run_report(conn, run.run_id, mapping.report_id, false)?;
+                // Create the run report
                 run_reports.push(
                     self.create_run_report(
                         conn,
-                        run.run_id,
+                        &run_in_vec[0],
+                        &run_csv_zip_location,
                         mapping.report_id,
                         &run.created_by,
-                        false,
                     )
                     .await?,
                 );
@@ -380,7 +203,7 @@ impl ReportBuilder {
     /// it does and it hasn't failed, returns an error.  If it has failed and `delete_failed` is true,
     /// it deletes the row and continues processing.  If it has failed and `delete_failed` is false,
     /// it returns an error.
-    pub async fn create_run_report(
+    pub async fn create_run_report_for_ids(
         &self,
         conn: &PgConnection,
         run_id: Uuid,
@@ -388,36 +211,51 @@ impl ReportBuilder {
         created_by: &Option<String>,
         delete_failed: bool,
     ) -> Result<RunReportData, Error> {
-        // Include the generator wdl file in the build
-        let generator_wdl = include_str!("../../scripts/wdl/jupyter_report_generator_template.wdl");
         // Check if we already have a run report for this run and report
         ReportBuilder::verify_no_existing_run_report(conn, run_id, report_id, delete_failed)?;
-        // Retrieve run and report
-        let run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
+        // Retrieve run data into a vec to use to convert to csvs
+        let run_in_vec = vec![RunWithResultsAndErrorsData::find_by_id(conn, run_id)?];
+        // Create and upload csv files for this run so we can use them as an input to the report wdl
+        let run_csv_zip_location: String = self.create_and_upload_run_csvs(&run_in_vec).await?;
+        // Create the run report
+        self.create_run_report(conn, &run_in_vec[0], &run_csv_zip_location, report_id, created_by).await
+    }
+
+    /// Assembles a report Jupyter Notebook from the data for the run specified by `run_id` and the
+    /// report configuration in the report specified by `report`, submits a job to cromwell for
+    /// processing it, and creates a run_report record (with created_by if set) for tracking it. Before
+    /// anything, checks if a run_report row already exists for the specified run_id and report_id.  If
+    /// it does and it hasn't failed, returns an error.  If it has failed and `delete_failed` is true,
+    /// it deletes the row and continues processing.  If it has failed and `delete_failed` is false,
+    /// it returns an error.
+    async fn create_run_report(
+        &self,
+        conn: &PgConnection,
+        run: &RunWithResultsAndErrorsData,
+        run_csv_zip_location: &str,
+        report_id: Uuid,
+        created_by: &Option<String>,
+    ) -> Result<RunReportData, Error> {
+        // Include the generator wdl file in the build
+        let generator_wdl = include_str!("../../scripts/wdl/jupyter_report_generator_template.wdl");
+        // Retrieve report, and test
         let report = ReportData::find_by_id(conn, report_id)?;
+        let test = TestData::find_by_id(conn, run.test_id)?;
         // Build the notebook we will submit from the notebook specified in the report and the run data
-        let report_json = ReportBuilder::create_report_template(&report.notebook, &run)?;
+        let report_json = ReportBuilder::create_report_template(&report.notebook, &run, &test.name)?;
         // Upload the report json as a file to a GCS location where cromwell will be able to read it
         let report_template_location = self
             .upload_report_template(&report_json, &report.name, &run.name)
             .await?;
-        // Get the values in the control block so we can use them for determining how much disk space
-        // we'll need
-        let control_block_values = ReportBuilder::get_control_block_values(&report_json)?;
         // Figure out how much disk space we need
-        let disk_space = self
-            .get_disk_size_based_on_inputs_and_results(
-                &run,
-                control_block_values[1],
-                control_block_values[0],
-            )
-            .await?;
+        let disk_space = self.get_disk_size_based_on_results(&run).await?;
         // Build the input json we'll include in the cromwell request, with the docker and report
         // locations and any config attributes from the report config
         let input_json = ReportBuilder::create_input_json(
             &report_template_location,
             &self.config.report_docker_location(),
             &format!("local-disk {} HDD", disk_space),
+            run_csv_zip_location,
             &report.config,
         )?;
         // Write it to a file
@@ -435,7 +273,7 @@ impl ReportBuilder {
         .await?;
         // Insert run_report into the DB
         let new_run_report = NewRunReport {
-            run_id,
+            run_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Submitted,
             cromwell_job_id: Some(start_job_response.id),
@@ -444,6 +282,26 @@ impl ReportBuilder {
             finished_at: None,
         };
         Ok(RunReportData::create(conn, new_run_report)?)
+    }
+
+    /// Creates csv files containing the data for the runs in `runs`, zips the csvs together, and
+    /// uploads them to google cloud storage, in the bucket specified in self.config.report_location
+    /// in a sub directory of "run_data" named with a uuid.  Returns the gs uri for the location of
+    /// the uploaded zip
+    async fn create_and_upload_run_csvs(&self, runs: &Vec<RunWithResultsAndErrorsData>) -> Result<String, Error> {
+        // First make the csvs
+        let runs_csvs_dir: TempDir = run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(runs)?;
+        // Upload the zip containing all the other files
+        let mut zip_file_path: PathBuf = PathBuf::from(runs_csvs_dir.path());
+        zip_file_path.push("run_csvs.zip");
+        let zip_file: File = File::open(&zip_file_path)?;
+        // Build a name for the file
+        let zip_location = format!("run_data/{}/run_csvs.zip", Uuid::new_v4());
+        // Upload the zip to GCS
+        Ok(self
+            .gcloud_client
+            .upload_file_to_gs_uri(&zip_file, &self.config.report_location(), &zip_location)
+            .await?)
     }
 
     /// Checks the DB for an existing run_report record with the specified `run_id` and `report_id`. If
@@ -483,209 +341,70 @@ impl ReportBuilder {
         Ok(())
     }
 
-    /// Starts with `notebook` (from a report), adds the necessary cells (a run data cell using `run`, a
-    /// control block if not provided, metadata header and footer cells, and a cell for downloading data
-    /// related to the run) and returns the Jupyter Notebook (in json form) that will be used as a
-    /// template for the report
+    /// Starts with `notebook` (from a report), adds a metadata header cell containing metadata from
+    /// `run` and the test name and returns the Jupyter Notebook (in json form) that will be used as
+    /// a template for the report
     fn create_report_template(
         notebook: &Value,
         run: &RunWithResultsAndErrorsData,
+        test_name: &str,
     ) -> Result<Value, Error> {
-        // Build a cells array for the notebook
-        let mut cells: Vec<Value> = Vec::new();
-        // We want to keep track of whether the user supplied a control block
-        let mut has_user_control_block: bool = false;
-        // Start with the run data cell
-        cells.push(ReportBuilder::create_run_data_cell(run)?);
-        // Get the cells array from the notebook
-        let notebook_cells = ReportBuilder::get_cells_array_from_notebook(notebook)?;
-        // Next, get the first cell in the report so we can check to see if it is a control block, and
-        // add one if not
-        let first_cell = match notebook_cells.get(0) {
-            Some(first_cell) => first_cell,
-            None => {
-                // Return an error if the cells array is empty
-                return Err(Error::Parse(String::from(
-                    "Notebook \"cells\" array is empty",
-                )));
+        // Get the metadata cell to add to the notebook
+        let metadata_cell: Value = ReportBuilder::build_run_metadata_cell(run, test_name);
+        // Make an owned copy of notebook so we can add that metadata cell to it
+        let mut report_template: Value = notebook.clone();
+        // Get a reference to the cells array from the template so we can add metadata cell to it
+        let notebook_cells = ReportBuilder::get_cells_array_from_notebook(&report_template)?;
+        // Our new cells array will contain the metadata cell followed by the current cells
+        let mut cells: Vec<Value> = vec![metadata_cell];
+        cells.extend(notebook_cells.to_owned());
+        // Add our new cells array back to report_template (we can unwrap here because we already
+        match report_template.as_object_mut() {
+            Some(report_as_map) => {
+                // Replace cells with our new cells
+                report_as_map.insert(String::from("cells"), Value::Array(cells));
             }
-        };
-        // If the first cell is a control block, add it to our cells array
-        if ReportBuilder::cell_is_a_control_block(first_cell)? {
-            has_user_control_block = true;
-            cells.push(first_cell.to_owned());
+            None => {
+                return Err(Error::Parse(String::from("Failed to parse notebook as JSON object")))
+            },
         }
-        // Otherwise, add a control block cell
-        else {
-            cells.push(DEFAULT_CONTROL_BLOCK_CELL.to_owned());
-        }
-        // Add the header cell which contains run metadata
-        cells.push(RUN_METADATA_CELL.to_owned());
-        // Add the data download cell
-        cells.push(FILE_DOWNLOAD_CELL.to_owned());
-        // Add the rest of the cells in the notebook (if there are any)
-        // Skip the first one if it's a control block since we already added it
-        let start_index = if has_user_control_block && notebook_cells.len() > 1 {
-            1
-        } else {
-            0
-        };
-        if start_index < notebook_cells.len() {
-            cells.extend(notebook_cells[start_index..].iter().cloned());
-        }
-        // Add the footer cell which contains a list of inputs and results for display
-        cells.push(RUN_INPUTS_AND_RESULTS_CELL.to_owned());
-        // We'll copy the default metadata object and give it the cells array we just assembled
-        let mut new_notebook_object: Map<String, Value> =
-            DEFAULT_REPORT_METADATA.as_object().unwrap().to_owned();
-        // Add our new cells array
-        new_notebook_object.insert(String::from("cells"), Value::Array(cells));
         // Wrap it in a Value and return it
-        Ok(Value::Object(new_notebook_object))
+        Ok(report_template)
     }
 
-    /// Returns true if `cell` is a control block (i.e. it is specifically for setting control values),
-    /// or false if not
-    fn cell_is_a_control_block(cell: &Value) -> Result<bool, Error> {
-        // Start by getting cell as object so we can look at its source array
-        let cell_as_object: &Map<String, Value> = match cell.as_object() {
-            Some(cell_as_object) => cell_as_object,
-            None => {
-                // If the cell isn't an object, return an error (this really shouldn't happen)
-                return Err(Error::Parse(String::from(
-                    "Failed to parse element in cells array of notebook as object",
-                )));
-            }
-        };
-        // Get the "source" array
-        let source_array: &Vec<Value> = match cell_as_object.get("source") {
-            Some(source_value) => {
-                // Now get it as an array
-                match source_value.as_array() {
-                    Some(source_array) => source_array,
-                    None => {
-                        // If "source" isn't an array, return an error (this really shouldn't happen)
-                        return Err(Error::Parse(String::from(
-                            "Failed to parse source value in cell as an array",
-                        )));
-                    }
-                }
-            }
-            None => {
-                // If there isn't a source value, we'll return false (because it could be a markdown cell)
-                return Ok(false);
-            }
-        };
-        // Loop through the source array to see if we can find instances of the control variables being
-        // set.  If we find one, we'll say this is a control block and return true. If, during our
-        // search, we find a line that is not that, whitespace, or a single-line comment, we'll return
-        // false
-        for line_value in source_array {
-            // Get the line as a string
-            let line_string = match line_value.as_str() {
-                Some(line_string) => line_string,
-                None => {
-                    // If this isn't a string, return an error (this really shouldn't happen)
-                    return Err(Error::Parse(String::from(
-                        "Failed to parse contents of cell's source array as strings",
-                    )));
-                }
-            };
-            // If it starts with the name of one of the control variables, it's a control block
-            for control_variable in &NOTEBOOK_CONTROL_VARIABLES {
-                if line_string.starts_with(control_variable) {
-                    return Ok(true);
-                }
-            }
-            // If not, then return false if this line is not whitespace or a comment
-            if !line_string.starts_with("#") && !line_string.trim().is_empty() {
-                return Ok(false);
-            }
-        }
-        // If we got through the whole block and didn't find the control variables, then this isn't a
-        // control block
-        return Ok(false);
-    }
+    /// Creates and returns a metadata Jupyter Notebook cell (as a json object) that will print
+    /// metadata for `run` along with `test_name` to the jupyter notebook
+    fn build_run_metadata_cell(run: &RunWithResultsAndErrorsData, test_name: &str) -> Value {
+        // Make a json string for the cell, filling in the info for the run
+        let json_string = format!(
+            "{{\n\
+                \"cell_type\": \"code\",\n\
+                \"execution_count\": null,\n\
+                \"metadata\": {{}},\n\
+                \"outputs\": [],\n\
+                \"source\": [\n\
+                    \"# Print metadata\\n\",\n\
+                    \"from IPython.display import Markdown\\n\",\n\
+                    \"# Start with name and id\\n\",\n\
+                    \"md_string = \\\"# Test: {}\\\\n### Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
+                    \"# Status\\n\",\n\
+                    \"md_string += \\\"#### Status: {}\\\\n\\\"\\n\",\n\
+                    \"# Start and end time\\n\",\n\
+                    \"md_string += \\\"#### Start time: {}\\\\n#### End time: {}\\\\n\\\"\\n\",\n\
+                    \"# Cromwell ids\\n\",\n\
+                    \"md_string += \\\"#### Test Cromwell ID: {}\\\\n\\\"\\n\",\n\
+                    \"md_string += f\\\"#### Eval Cromwell ID: {}\\\\n\\\"\\n\",\n\
+                    \"# Display the metadata string\\n\",\n\
+                    \"Markdown(md_string)\"\n\
+                ]\n\
+            }}",
+            test_name, run.run_id, run.name, run.status, run.created_at,
+            match &run.finished_at { Some(f) => f.to_string(), None => "None".to_string()},
+            match &run.test_cromwell_job_id { Some(t) => t, None => "None"},
+            match &run.eval_cromwell_job_id { Some(e) => e, None => "None"},
+        );
 
-    /// Returns vec of values for any control block values set in the control block of `notebook`, or
-    /// an error if parsing the block fails for some reason.  Any control variables not found will be
-    /// set with their default values
-    fn get_control_block_values(notebook: &Value) -> Result<Vec<bool>, Error> {
-        // Keep track of any control block values we find
-        let mut control_variable_values: Vec<bool> =
-            NOTEBOOK_CONTROL_VARIABLE_DEFAULT_VALUES.to_vec();
-        // Get the cells array from the notebook
-        let notebook_cells = ReportBuilder::get_cells_array_from_notebook(notebook)?;
-        // Next, get the first cell in the report so we can check it for control variables
-        let first_cell = match notebook_cells.get(0) {
-            Some(first_cell) => first_cell,
-            None => {
-                // Return an error if the cells array is empty
-                return Err(Error::Parse(String::from(
-                    "Notebook \"cells\" array is empty",
-                )));
-            }
-        };
-        // Start by getting cell as object so we can look at its source array
-        let cell_as_object: &Map<String, Value> = match first_cell.as_object() {
-            Some(cell_as_object) => cell_as_object,
-            None => {
-                // If the cell isn't an object, return an error (this really shouldn't happen)
-                return Err(Error::Parse(String::from(
-                    "Failed to parse element in cells array of notebook as object",
-                )));
-            }
-        };
-        // Get the "source" array
-        let source_array: &Vec<Value> = match cell_as_object.get("source") {
-            Some(source_value) => {
-                // Now get it as an array
-                match source_value.as_array() {
-                    Some(source_array) => source_array,
-                    None => {
-                        // If "source" isn't an array, return an error (this really shouldn't happen)
-                        return Err(Error::Parse(String::from(
-                            "Failed to parse source value in cell as an array",
-                        )));
-                    }
-                }
-            }
-            None => {
-                // If there isn't a source value, we'll return the default vec (because it could be a
-                // markdown cell) (this also shouldn't happen)
-                return Ok(control_variable_values);
-            }
-        };
-        // Loop through the source array to see if we can find instances of the control variables being
-        // set.  If we find one, we'll add it to our control_variables vec
-        for line_value in source_array {
-            // Get the line as a string
-            let line_string = match line_value.as_str() {
-                Some(line_string) => line_string,
-                None => {
-                    // If this isn't a string, return an error (this really shouldn't happen)
-                    return Err(Error::Parse(String::from(
-                        "Failed to parse contents of cell's source array as strings",
-                    )));
-                }
-            };
-            // If it starts with the name of one of the control variables, it's a control block
-            for index in 0..NOTEBOOK_CONTROL_VARIABLES.len() {
-                let control_variable = &NOTEBOOK_CONTROL_VARIABLES[index];
-                if line_string.starts_with(control_variable) {
-                    // Check for a value of True or False, since those are the possible values for the
-                    // control variables.  If we find one, set the value at the corresponding index for
-                    // control_variable
-                    if line_string.contains("True") {
-                        control_variable_values[index] = true;
-                    } else if line_string.contains("False") {
-                        control_variable_values[index] = false;
-                    }
-                }
-            }
-        }
-        // Now return all the control variables we found
-        return Ok(control_variable_values);
+        serde_json::from_str(&json_string).expect("Failed to create run metadata cell json.  This should not happen.")
     }
 
     /// Extracts and returns the "cells" array from `notebook`
@@ -713,31 +432,6 @@ impl ReportBuilder {
                 "Failed to parse notebook as JSON object",
             ))),
         }
-    }
-
-    /// Assembles and returns an ipynb json cell that defines a python dictionary containing data for
-    /// `run`
-    fn create_run_data_cell(run: &RunWithResultsAndErrorsData) -> Result<Value, Error> {
-        // Convert run into a python dict
-        let run_as_json = json!(run);
-        let run_as_dict = python_dict_formatter::get_python_dict_string_from_json(
-            &run_as_json.as_object().unwrap(),
-        )?;
-        // Add the python variable declaration and split into lines. We'll put the lines of code into a
-        // vector so we can fill in the source field in the cell json with it (ipynb files expect code
-        // to be in a json array of lines in the source field within a cell)
-        let source_string = format!("carrot_run_data = {}", run_as_dict);
-        let source: Vec<&str> = source_string
-            .split_inclusive("\n") // Jupyter expects the \n at the end of each line, so we include it
-            .collect();
-        // Fill in the source section of the cell and return it as a json value
-        Ok(json!({
-            "cell_type": "code",
-            "execution_count": null,
-            "metadata": {},
-            "outputs": [],
-            "source": source
-        }))
     }
 
     /// Writes `report_json` to an ipynb file, uploads it to GCS, and returns the gs uri of the file
@@ -775,11 +469,12 @@ impl ReportBuilder {
         notebook_location: &str,
         report_docker_location: &str,
         disks: &str,
+        run_csv_zip_location: &str,
         report_config: &Option<Value>,
     ) -> Result<Value, Error> {
         // Map that we'll add all our inputs to
         let mut inputs_map: Map<String, Value> = Map::new();
-        // Start with notebook, docker, and disks
+        // Start with notebook, docker, disks, and run_csv_zip_location
         inputs_map.insert(
             format!("{}.notebook_template", GENERATOR_WORKFLOW_NAME),
             Value::String(String::from(notebook_location)),
@@ -791,6 +486,10 @@ impl ReportBuilder {
         inputs_map.insert(
             format!("{}.disks", GENERATOR_WORKFLOW_NAME),
             Value::String(String::from(disks)),
+        );
+        inputs_map.insert(
+            format!("{}.in_run_csv_zip", GENERATOR_WORKFLOW_NAME),
+            Value::String(String::from(run_csv_zip_location)),
         );
         // If there is a value for report_config, use it for runtime attributes
         if let Some(report_config_value) = report_config {
@@ -821,38 +520,22 @@ impl ReportBuilder {
         Ok(Value::Object(inputs_map))
     }
 
-    /// Checks inputs (if `include_inputs` is true) and results (if `include_results` is true) in
-    /// `run_data` for gs uris, gets the sizes of the files for any that it finds, and returns a disk
-    /// size to use based on that
-    async fn get_disk_size_based_on_inputs_and_results(
+    /// Checks results in `run_data` for gs uris, gets the sizes of the files for any that it finds,
+    /// and returns a disk size to use based on that
+    async fn get_disk_size_based_on_results(
         &self,
         run_data: &RunWithResultsAndErrorsData,
-        include_inputs: bool,
-        include_results: bool,
     ) -> Result<u64, Error> {
         // Keep track of the size of all the gs files
         let mut size_total: u64 = 0;
         // Get the uris for any inputs and results we plan to include
         let mut gs_uris: Vec<String> = Vec::new();
-        if include_inputs {
-            // Get the gs uris from test and eval inputs
-            // We're only actually going to try to get the gs uris if the inputs value is an object (the
-            // other possibility is that it's null, if there are no inputs)
-            if let Some(test_inputs) = run_data.test_input.as_object() {
-                gs_uris.extend(ReportBuilder::get_gs_uris_from_map(test_inputs));
-            }
-            if let Some(eval_inputs) = run_data.eval_input.as_object() {
-                gs_uris.extend(ReportBuilder::get_gs_uris_from_map(eval_inputs));
-            }
-        }
-        if include_results {
-            // Get the gs uris from results
-            // Results can be None, we have to check for that and then check if it has an object with
-            // results
-            if let Some(results_obj) = &run_data.results {
-                if let Some(results) = results_obj.as_object() {
-                    gs_uris.extend(ReportBuilder::get_gs_uris_from_map(results));
-                }
+        // Get the gs uris from results
+        // Results can be None, we have to check for that and then check if it has an object with
+        // results
+        if let Some(results_obj) = &run_data.results {
+            if let Some(results) = results_obj.as_object() {
+                gs_uris.extend(ReportBuilder::get_gs_uris_from_map(results));
             }
         }
         // Now, get the sizes of each of these files
@@ -884,7 +567,7 @@ impl ReportBuilder {
         }
         // Multiply by two to give us wiggle room
         size_total *= 2;
-        // Convert to GB and round up, plus 20 as a baseline
+        // Convert to GB and round up, plus 21 as a baseline
         size_total = (size_total / 1000000000) + 21;
         Ok(size_total)
     }
@@ -922,7 +605,7 @@ impl ReportBuilder {
 mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
     use crate::manager::report_builder::{
-        Error, ReportBuilder, FILE_DOWNLOAD_CELL, RUN_INPUTS_AND_RESULTS_CELL, RUN_METADATA_CELL,
+        Error, ReportBuilder
     };
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
@@ -1083,10 +766,10 @@ mod tests {
         ReportData::create(conn, new_report).expect("Failed inserting test report")
     }
 
-    fn insert_test_report_with_control_block(conn: &PgConnection) -> ReportData {
+    fn insert_different_test_report(conn: &PgConnection) -> ReportData {
         let notebook: Value = serde_json::from_str(
             &read_to_string(
-                "testdata/manager/report_builder/report_notebook_with_control_block.ipynb",
+                "testdata/manager/report_builder/different_report_notebook.ipynb",
             )
             .unwrap(),
         )
@@ -1170,7 +853,7 @@ mod tests {
         conn: &PgConnection,
     ) -> (RunData, Vec<ReportData>) {
         let report1 = insert_test_report(conn);
-        let report2 = insert_test_report_with_control_block(conn);
+        let report2 = insert_different_test_report(conn);
         let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
         let _template_report1 =
             insert_test_template_report(conn, template.template_id, report1.report_id);
@@ -1213,7 +896,7 @@ mod tests {
              address: &str,
              name: &str|
              -> Result<String, crate::storage::gcloud_storage::Error> {
-                Ok(String::from("example.com/report/template/location.ipynb"))
+                Ok(String::from(address.to_owned() + "/" + name))
             },
         ));
         // Create and return the report builder
@@ -1281,7 +964,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_success() {
+    async fn create_run_report_for_ids_success() {
         let conn = get_test_db_connection();
         let test_report_builder = create_test_report_builder();
 
@@ -1298,8 +981,10 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
+
+
         let result_run_report = test_report_builder
-            .create_run_report(
+            .create_run_report_for_ids(
                 &conn,
                 run_id,
                 report_id,
@@ -1325,7 +1010,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_with_delete_failed_success() {
+    async fn create_run_report_for_ids_with_delete_failed_success() {
         let conn = get_test_db_connection();
         let test_report_builder = create_test_report_builder();
 
@@ -1344,7 +1029,7 @@ mod tests {
             .create();
 
         let result_run_report = test_report_builder
-            .create_run_report(
+            .create_run_report_for_ids(
                 &conn,
                 run_id,
                 report_id,
@@ -1370,7 +1055,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_failure_cromwell() {
+    async fn create_run_report_for_ids_failure_cromwell() {
         let conn = get_test_db_connection();
         let test_report_builder = create_test_report_builder();
 
@@ -1383,7 +1068,7 @@ mod tests {
             .create();
 
         let result_run_report = test_report_builder
-            .create_run_report(
+            .create_run_report_for_ids(
                 &conn,
                 run_id,
                 report_id,
@@ -1398,7 +1083,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_failure_no_run() {
+    async fn create_run_report_for_ids_failure_no_report() {
         let conn = get_test_db_connection();
         let test_report_builder = create_test_report_builder();
 
@@ -1416,48 +1101,12 @@ mod tests {
             .create();
 
         let result_run_report = test_report_builder
-            .create_run_report(
-                &conn,
-                Uuid::new_v4(),
-                report_id,
-                &Some(String::from("kevin@example.com")),
-                false,
-            )
-            .await
-            .err()
-            .unwrap();
-
-        assert!(matches!(
-            result_run_report,
-            Error::DB(diesel::result::Error::NotFound)
-        ));
-    }
-
-    #[actix_rt::test]
-    async fn create_run_report_failure_no_report() {
-        let conn = get_test_db_connection();
-        let test_report_builder = create_test_report_builder();
-
-        // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&conn);
-        // Make mockito mapping for cromwell
-        let mock_response_body = json!({
-          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
-          "status": "Submitted"
-        });
-        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
-            .with_status(201)
-            .with_header("content_type", "application/json")
-            .with_body(mock_response_body.to_string())
-            .create();
-
-        let result_run_report = test_report_builder
-            .create_run_report(
+            .create_run_report_for_ids(
                 &conn,
                 run_id,
                 Uuid::new_v4(),
                 &Some(String::from("kevin@example.com")),
-                false,
+                false
             )
             .await
             .err()
@@ -1470,7 +1119,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_failure_already_exists() {
+    async fn create_run_report_for_ids_failure_already_exists() {
         let conn = get_test_db_connection();
         let test_report_builder = create_test_report_builder();
 
@@ -1489,12 +1138,12 @@ mod tests {
             .create();
 
         let result_run_report = test_report_builder
-            .create_run_report(
+            .create_run_report_for_ids(
                 &conn,
                 run_id,
                 report_id,
                 &Some(String::from("kevin@example.com")),
-                false,
+                false
             )
             .await
             .err()
@@ -1504,7 +1153,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_run_report_with_delete_failed_failure_already_exists() {
+    async fn create_run_report_for_ids_with_delete_failed_failure_already_exists() {
         let conn = get_test_db_connection();
         let test_report_builder = create_test_report_builder();
 
@@ -1523,12 +1172,12 @@ mod tests {
             .create();
 
         let result_run_report = test_report_builder
-            .create_run_report(
+            .create_run_report_for_ids(
                 &conn,
                 run_id,
                 report_id,
                 &Some(String::from("kevin@example.com")),
-                true,
+                true
             )
             .await
             .err()
@@ -1538,101 +1187,82 @@ mod tests {
     }
 
     #[test]
-    fn create_report_template_no_control_block_success() {
+    fn create_report_template_success() {
         let conn = get_test_db_connection();
 
         let test_report = insert_test_report(&conn);
-        let (_, _, _, test_run) = insert_test_run_with_results(&conn);
+        let (_, _, test_test, test_run) = insert_test_run_with_results(&conn);
         let test_run_with_results =
             RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
-            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results)
+            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results, "Kevin's Test")
                 .unwrap();
+
+        let metadata_cell: Value = serde_json::from_str(&format!(
+            "{{\n\
+                \"cell_type\": \"code\",\n\
+                \"execution_count\": null,\n\
+                \"metadata\": {{}},\n\
+                \"outputs\": [],\n\
+                \"source\": [\n\
+                    \"# Print metadata\\n\",\n\
+                    \"from IPython.display import Markdown\\n\",\n\
+                    \"# Start with name and id\\n\",\n\
+                    \"md_string = \\\"# Test: {}\\\\n### Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
+                    \"# Status\\n\",\n\
+                    \"md_string += \\\"#### Status: {}\\\\n\\\"\\n\",\n\
+                    \"# Start and end time\\n\",\n\
+                    \"md_string += \\\"#### Start time: {}\\\\n#### End time: {}\\\\n\\\"\\n\",\n\
+                    \"# Cromwell ids\\n\",\n\
+                    \"md_string += \\\"#### Test Cromwell ID: {}\\\\n\\\"\\n\",\n\
+                    \"md_string += f\\\"#### Eval Cromwell ID: {}\\\\n\\\"\\n\",\n\
+                    \"# Display the metadata string\\n\",\n\
+                    \"Markdown(md_string)\"\n\
+                ]\n\
+            }}",
+            test_test.name, test_run.run_id, test_run.name, test_run.status, test_run.created_at,
+            match &test_run.finished_at { Some(f) => f.to_string(), None => "None".to_string()},
+            match &test_run.test_cromwell_job_id { Some(t) => t, None => "None"},
+            match &test_run.eval_cromwell_job_id { Some(e) => e, None => "None"},
+        )).unwrap();
 
         let expected_report = json!({
             "metadata": {
-                "language_info": {
-                    "codemirror_mode": {
-                        "name": "ipython",
-                        "version": 3
-                    },
-                    "file_extension": ".py",
-                    "mimetype": "text/x-python",
-                    "name": "python",
-                    "nbconvert_exporter": "python",
-                    "pygments_lexer": "ipython3",
-                    "version": "3.8.5-final"
+            "language_info": {
+                "codemirror_mode": {
+                    "name": "ipython",
+                    "version": 3
                 },
-                "orig_nbformat": 2,
-                "kernelspec": {
-                    "name": "python3",
-                    "display_name": "Python 3.8.5 64-bit",
-                    "metadata": {
-                        "interpreter": {
-                            "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                        }
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.8.4-final"
+            },
+            "orig_nbformat": 2,
+            "kernelspec": {
+                "name": "python3",
+                "display_name": "Python 3.8.4 64-bit",
+                "metadata": {
+                    "interpreter": {
+                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
                     }
                 }
-            },
-            "nbformat": 4,
-            "nbformat_minor": 2,
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 2,
             "cells": [
+                metadata_cell,
                 {
                     "cell_type": "code",
                     "execution_count": null,
                     "metadata": {},
                     "outputs": [],
                     "source": [
-                        "carrot_run_data = {\n",
-                        format!("    \"created_at\" : \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"created_by\" : \"Kevin@example.com\",\n",
-                        "    \"errors\" : None,\n",
-                        "    \"eval_cromwell_job_id\" : \"12345678902\",\n",
-                        "    \"eval_input\" : {\n",
-                        "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
-                        "        \"greeting_file_workflow.in_output_filename\" : \"greeting.txt\",\n",
-                        "    },\n",
-                        "    \"eval_options\" : None,\n",
-                        format!("    \"finished_at\" : \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"name\" : \"Kevin's test run\",\n",
-                        "    \"results\" : {\n",
-                        "        \"File Result\" : \"example.com/test/result/greeting.txt\",\n",
-                        "        \"Greeting\" : \"Yo, Jean-Paul Gasse\",\n",
-                        "    },\n",
-                        format!("    \"run_id\" : \"{}\",\n", test_run.run_id),
-                        "    \"status\" : \"succeeded\",\n",
-                        "    \"test_cromwell_job_id\" : \"123456789\",\n",
-                        format!("    \"test_id\" : \"{}\",\n", test_run.test_id),
-                        "    \"test_input\" : {\n",
-                        "        \"greeting_workflow.in_greeted\" : \"Jean-Paul Gasse\",\n",
-                        "        \"greeting_workflow.in_greeting\" : \"Yo\",\n",
-                        "    },\n",
-                        "    \"test_options\" : None,\n",
-                        "}"
-                    ]
-                },
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "# Control block\n",
-                        "carrot_download_results = True\n",
-                        "carrot_download_inputs = False\n",
-                    ]
-                },
-                *RUN_METADATA_CELL,
-                *FILE_DOWNLOAD_CELL,
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "message = carrot_run_data[\"results\"][\"Greeting\"]\n",
-                        "print(message)",
+                        "print('Random message')",
                    ]
                 },
                 {
@@ -1641,8 +1271,7 @@ mod tests {
                     "metadata": {},
                     "outputs": [],
                     "source": [
-                        "message_file = open(carrot_downloads[\"results\"][\"File Result\"], 'r')\n",
-                        "print(message_file.read())"
+                        "print('Hello')"
                    ]
                 },
                 {
@@ -1654,131 +1283,6 @@ mod tests {
                         "print('Thanks')",
                    ]
                 },
-                *RUN_INPUTS_AND_RESULTS_CELL
-            ]
-        });
-
-        assert_eq!(expected_report, result_report);
-    }
-
-    #[test]
-    fn create_report_template_with_control_block_success() {
-        let conn = get_test_db_connection();
-
-        let test_report = insert_test_report_with_control_block(&conn);
-        let (_, _, _, test_run) = insert_test_run_with_results(&conn);
-        let test_run_with_results =
-            RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
-
-        let result_report =
-            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results)
-                .unwrap();
-
-        let expected_report = json!({
-            "metadata": {
-                "language_info": {
-                    "codemirror_mode": {
-                        "name": "ipython",
-                        "version": 3
-                    },
-                    "file_extension": ".py",
-                    "mimetype": "text/x-python",
-                    "name": "python",
-                    "nbconvert_exporter": "python",
-                    "pygments_lexer": "ipython3",
-                    "version": "3.8.5-final"
-                },
-                "orig_nbformat": 2,
-                "kernelspec": {
-                    "name": "python3",
-                    "display_name": "Python 3.8.5 64-bit",
-                    "metadata": {
-                        "interpreter": {
-                            "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                        }
-                    }
-                }
-            },
-            "nbformat": 4,
-            "nbformat_minor": 2,
-            "cells": [
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "carrot_run_data = {\n",
-                        format!("    \"created_at\" : \"{}\",\n", test_run.created_at.format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"created_by\" : \"Kevin@example.com\",\n",
-                        "    \"errors\" : None,\n",
-                        "    \"eval_cromwell_job_id\" : \"12345678902\",\n",
-                        "    \"eval_input\" : {\n",
-                        "        \"greeting_file_workflow.in_greeting\" : \"test_output:greeting_workflow.out_greeting\",\n",
-                        "        \"greeting_file_workflow.in_output_filename\" : \"greeting.txt\",\n",
-                        "    },\n",
-                        "    \"eval_options\" : None,\n",
-                        format!("    \"finished_at\" : \"{}\",\n", test_run.finished_at.unwrap().format("%Y-%m-%dT%H:%M:%S%.f")),
-                        "    \"name\" : \"Kevin's test run\",\n",
-                        "    \"results\" : {\n",
-                        "        \"File Result\" : \"example.com/test/result/greeting.txt\",\n",
-                        "        \"Greeting\" : \"Yo, Jean-Paul Gasse\",\n",
-                        "    },\n",
-                        format!("    \"run_id\" : \"{}\",\n", test_run.run_id),
-                        "    \"status\" : \"succeeded\",\n",
-                        "    \"test_cromwell_job_id\" : \"123456789\",\n",
-                        format!("    \"test_id\" : \"{}\",\n", test_run.test_id),
-                        "    \"test_input\" : {\n",
-                        "        \"greeting_workflow.in_greeted\" : \"Jean-Paul Gasse\",\n",
-                        "        \"greeting_workflow.in_greeting\" : \"Yo\",\n",
-                        "    },\n",
-                        "    \"test_options\" : None,\n",
-                        "}"
-                    ]
-                },
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "# Setting control variables\n",
-                        "\n",
-                        "carrot_download_inputs = True\n",
-                    ]
-                },
-                *RUN_METADATA_CELL,
-                *FILE_DOWNLOAD_CELL,
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "message = carrot_run_data[\"results\"][\"Greeting\"]\n",
-                        "print(message)",
-                   ]
-                },
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "message_file = open(carrot_downloads[\"results\"][\"File Result\"], 'r')\n",
-                        "print(message_file.read())"
-                   ]
-                },
-                {
-                    "cell_type": "code",
-                    "execution_count": null,
-                    "metadata": {},
-                    "outputs": [],
-                    "source": [
-                        "print('Thanks')",
-                   ]
-                },
-                *RUN_INPUTS_AND_RESULTS_CELL
             ]
         });
 
@@ -1795,7 +1299,7 @@ mod tests {
             RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let result_report =
-            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results);
+            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results, "Kevin's Test");
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
     }
@@ -1809,6 +1313,7 @@ mod tests {
             "example.com/test/location",
             "example.com/test:test",
             "local-disk 500 HDD",
+            "gs://example/bucket/with/file.csv",
             &test_report.config,
         )
         .unwrap();
@@ -1818,6 +1323,7 @@ mod tests {
             "generate_report_file_workflow.docker" : "example.com/test:test",
             "generate_report_file_workflow.memory": "32 GiB",
             "generate_report_file_workflow.disks": "local-disk 500 HDD",
+            "generate_report_file_workflow.in_run_csv_zip": "gs://example/bucket/with/file.csv"
         });
 
         assert_eq!(result_input_json, expected_input_json);
@@ -1832,6 +1338,7 @@ mod tests {
             "example.com/test/location",
             "example.com/test:test",
             "local-disk 256 HDD",
+            "gs://example/bucket/with/file.zip",
             &test_report.config,
         );
 
@@ -1872,6 +1379,7 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
             results: Some(json!({
                 "File Result": "gs://result_bucket/file.vcf",
+                "Different File Result": "gs://result_bucket/different_file.vcf",
                 "String Result": "hi"
             })),
             errors: Some(json!([
@@ -1880,39 +1388,11 @@ mod tests {
         };
 
         let disk_size = test_report_builder
-            .get_disk_size_based_on_inputs_and_results(&test_run, true, true)
+            .get_disk_size_based_on_results(&test_run)
             .await
             .unwrap();
-        let expected_disk_size: u64 = 27;
+        let expected_disk_size: u64 = 23;
 
         assert_eq!(expected_disk_size, disk_size);
-    }
-
-    #[test]
-    fn get_control_block_values_success() {
-        let notebook: Value = serde_json::from_str(
-            &read_to_string(
-                "testdata/manager/report_builder/report_notebook_with_control_block.ipynb",
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        let expected_vec = vec![true, true];
-
-        let test_vec = ReportBuilder::get_control_block_values(&notebook).unwrap();
-
-        assert_eq!(expected_vec, test_vec);
-    }
-
-    #[test]
-    fn get_control_block_values_failure_no_cells() {
-        let notebook: Value = json!({
-            "cells": []
-        });
-
-        let test_err = ReportBuilder::get_control_block_values(&notebook).unwrap_err();
-
-        assert!(matches!(test_err, Error::Parse(_)));
     }
 }
