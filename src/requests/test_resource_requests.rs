@@ -9,6 +9,7 @@ use actix_web::client::Client;
 use std::fmt;
 use std::fs::{read, read_to_string};
 use std::str::Utf8Error;
+use crate::util::gs_uri_parsing;
 
 /// Struct for handling retrieving test data from http, gcs, and local locations
 #[derive(Clone)]
@@ -96,7 +97,7 @@ impl TestResourceClient {
     pub async fn get_resource_as_bytes(&self, address: &str) -> Result<Vec<u8>, Error> {
         // If the address is a gs address and retrieving from gs addresses is enabled, retrieve the data
         // using the gcloud storage api
-        if self.gcs_client.is_some() && address.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        if self.gcs_client.is_some() && address.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
             // We already know gcs_client has a value, so we can expect it
             let gcs_client = self.gcs_client.as_ref().expect("Attempted to unwrap TestResourceClient's gcs_client but failed.  This should not happen.");
             Ok(gcs_client

@@ -1,6 +1,7 @@
 //! Contains modules with functionality that is used elsewhere but that I can't find a better home
 //! for
 pub mod git_repos;
+pub mod gs_uri_parsing;
 pub mod python_dict_formatter;
 pub mod sort_string;
 pub mod temp_storage;

@@ -10,6 +10,7 @@ use std::fs;
 use std::io::prelude::*;
 use std::path::PathBuf;
 use uuid::Uuid;
+use crate::util::gs_uri_parsing;
 
 #[derive(Debug)]
 pub enum Error {
@@ -167,7 +168,7 @@ impl WdlStorageClient {
         // Loop through the results, and check if there is a result that matches the current scheme
         // we're using for wdl storage (local or GCS).  Return it, if so.  Otherwise, return None
         for wdl_hash in existing_wdl_hashes {
-            if wdl_hash.location.starts_with(gcloud_storage::GS_URI_PREFIX) {
+            if wdl_hash.location.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
                 if self.config.is_gcs() {
                     return Ok(Some(wdl_hash.location.to_owned()));
                 }

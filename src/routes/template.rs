@@ -18,7 +18,7 @@ use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool;
 use crate::validation::womtool::WomtoolRunner;
 use actix_multipart::Multipart;
-use actix_web::{error::BlockingError, guard, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, guard, HttpRequest, HttpResponse, Responder, web};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::PgConnection;
 use log::{debug, error};
@@ -29,6 +29,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use tempfile::{NamedTempFile, TempDir};
 use uuid::Uuid;
+use crate::util::gs_uri_parsing;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
 /// where the only difference is whether we're using the test or eval wdl
@@ -214,10 +215,10 @@ async fn create_from_json(
     // If either WDL is a gs uri, make sure those are allowed
     if new_template
         .test_wdl
-        .starts_with(gcloud_storage::GS_URI_PREFIX)
+        .starts_with(gs_uri_parsing::GS_URI_PREFIX)
         || new_template
             .eval_wdl
-            .starts_with(gcloud_storage::GS_URI_PREFIX)
+            .starts_with(gs_uri_parsing::GS_URI_PREFIX)
     {
         is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
     }
@@ -375,22 +376,22 @@ async fn update_from_json(
     let id = parse_id(&*id_param)?;
     // If either WDL or dependencies use a gs uri, make sure those are allowed
     if let Some(test_wdl) = &template_changes.test_wdl {
-        if test_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        if test_wdl.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
             is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
         }
     }
     if let Some(test_wdl_dependencies) = &template_changes.test_wdl_dependencies {
-        if test_wdl_dependencies.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        if test_wdl_dependencies.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
             is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
         }
     }
     if let Some(eval_wdl) = &template_changes.eval_wdl {
-        if eval_wdl.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        if eval_wdl.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
             is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
         }
     }
     if let Some(eval_wdl_dependencies) = &template_changes.eval_wdl_dependencies {
-        if eval_wdl_dependencies.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        if eval_wdl_dependencies.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
             is_gs_uris_for_wdls_enabled(carrot_config.gcloud())?;
         }
     }
@@ -1009,7 +1010,7 @@ fn verify_value_for_key_is_allowed_based_on_gcloud_config(
     gcloud_config: Option<&GCloudConfig>,
 ) -> Result<(), HttpResponse> {
     if let Some(value) = data_map.get(key) {
-        if value.starts_with(gcloud_storage::GS_URI_PREFIX) {
+        if value.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
             is_gs_uris_for_wdls_enabled(gcloud_config)?
         }
     }
@@ -1782,7 +1783,7 @@ mod tests {
     use crate::unit_test_util::*;
     use actix_web::client::Client;
     use actix_web::web::Bytes;
-    use actix_web::{http, test, App};
+    use actix_web::{App, http, test};
     use chrono::Utc;
     use diesel::PgConnection;
     use mockito::Mock;
