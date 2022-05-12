@@ -5,11 +5,11 @@
 
 use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
+use crate::util::gs_uri_parsing;
 use actix_web::client::Client;
 use std::fmt;
 use std::fs::read;
 use std::str::Utf8Error;
-use crate::util::gs_uri_parsing;
 
 /// Struct for handling retrieving test data from http, gcs, and local locations
 #[derive(Clone)]

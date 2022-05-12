@@ -20,9 +20,15 @@ def main():
 
 @main.command(name="find_by_id")
 @click.argument("id")
-def find_by_id(id):
+@click.option(
+    "--zip_csv",
+    "--instead_of_json_give_me_a_zipped_folder_with_csvs_in_it_please_and_thank_you",
+    type=click.Path(),
+    help="Instead of writing results to stdout as JSON, writes as a zip of CSV files to the specified file"
+)
+def find_by_id(id, zip_csv=None):
     """Retrieve a run by its ID"""
-    print(runs.find_by_id(id))
+    print(runs.find_by_id(id, csv=zip_csv))
 
 
 @main.command(name="delete")

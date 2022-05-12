@@ -24,6 +24,7 @@ def no_email():
     params=[
         {
             "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
+            "csv": None,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:06.371563",
@@ -45,6 +46,7 @@ def no_email():
         },
         {
             "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
+            "csv": None,
             "return": json.dumps(
                 {
                     "title": "No run found",
@@ -55,13 +57,18 @@ def no_email():
                 sort_keys=True,
             ),
         },
+        {
+            "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819", "--zip_csv", "csvs.zip"],
+            "csv": "csvs.zip",
+            "return": "Success!"
+        },
     ]
 )
 def find_by_id_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(runs).find_by_id(...).thenReturn(None)
     # Mock up request response
-    mockito.when(runs).find_by_id(request.param["args"][2]).thenReturn(
+    mockito.when(runs).find_by_id(request.param["args"][2], csv=request.param["csv"]).thenReturn(
         request.param["return"]
     )
     return request.param

@@ -4,13 +4,13 @@
 
 use crate::models::run::{RunData, RunWithResultsAndErrorsData};
 use crate::models::run_report::RunReportData;
+use crate::models::test::TestData;
 use crate::requests::github_requests;
 use crate::storage::gcloud_storage;
+use crate::util::gs_uri_parsing;
+use log::warn;
 use serde_json::{json, Map, Value};
 use std::fmt;
-use log::warn;
-use crate::models::test::TestData;
-use crate::util::gs_uri_parsing;
 
 /// Struct for posting comments to github
 pub struct GithubCommenter {
@@ -69,7 +69,7 @@ impl GithubCommenter {
         repo: &str,
         issue_number: i32,
         run: &RunData,
-        test_name: &str
+        test_name: &str,
     ) -> Result<(), Error> {
         let run_as_string = serde_json::to_string_pretty(run)?;
         let comment_body = format!(
@@ -117,7 +117,7 @@ impl GithubCommenter {
         repo: &str,
         issue_number: i32,
         run: &RunWithResultsAndErrorsData,
-        test_name: &str
+        test_name: &str,
     ) -> Result<(), Error> {
         let run_as_string = serde_json::to_string_pretty(run)?;
         // Build a results table
@@ -130,7 +130,8 @@ impl GithubCommenter {
                         || panic!("Failed to get results object as object for run {}. This should not happen.", run.run_id)
                     );
                 // Get table rows from the results map
-                let results_table_rows: String = GithubCommenter::make_md_table_rows_from_json_object(results_map);
+                let results_table_rows: String =
+                    GithubCommenter::make_md_table_rows_from_json_object(results_map);
                 // Make the results string now
                 format!(
                     "<details><summary><b>Results</b></summary>
@@ -142,8 +143,8 @@ impl GithubCommenter {
                     </details>\n",
                     results_table_rows
                 )
-            },
-            None => String::from("")
+            }
+            None => String::from(""),
         };
         let comment_body = format!(
             "### 🥕CARROT🥕 run finished\n\
@@ -249,11 +250,14 @@ impl GithubCommenter {
                         match gs_uri_parsing::get_object_cloud_console_url_from_gs_uri(string_val) {
                             Ok(gs_uri_as_cloud_url) => {
                                 format!("[View in the GCS Console]({})", gs_uri_as_cloud_url)
-                            },
+                            }
                             // If we run into an error trying to do the conversion, we'll
                             // log a message about it and just use the unprocessed value
                             Err(e) => {
-                                warn!("Failed to parse {} properly as gs uri with error {}", string_val, e);
+                                warn!(
+                                    "Failed to parse {} properly as gs uri with error {}",
+                                    string_val, e
+                                );
                                 String::from(string_val)
                             }
                         }
@@ -262,9 +266,9 @@ impl GithubCommenter {
                     else {
                         String::from(string_val)
                     }
-                },
+                }
                 // If it's not a string, convert it to a string
-                None => value.to_string()
+                None => value.to_string(),
             };
             // Make the table row string and add it to our list
             table_rows.push(format!("|{}|{}|", key, value_as_string));
@@ -363,7 +367,13 @@ mod tests {
             .create();
 
         github_commenter
-            .post_run_failed_to_start_comment("exampleowner", "examplerepo", 1, test_reason, "Failed test name")
+            .post_run_failed_to_start_comment(
+                "exampleowner",
+                "examplerepo",
+                1,
+                test_reason,
+                "Failed test name",
+            )
             .await
             .unwrap();
 
@@ -434,7 +444,13 @@ mod tests {
             .create();
 
         github_commenter
-            .post_run_finished_comment("exampleowner", "examplerepo", 1, &test_run, "Finished test name")
+            .post_run_finished_comment(
+                "exampleowner",
+                "examplerepo",
+                1,
+                &test_run,
+                "Finished test name",
+            )
             .await
             .unwrap();
 

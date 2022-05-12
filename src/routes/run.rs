@@ -9,15 +9,27 @@ use crate::manager::test_runner;
 use crate::manager::test_runner::TestRunner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultsAndErrorsData};
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::util::run_csv;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
 use chrono::NaiveDateTime;
-use log::error;
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
+use std::fs;
+use std::path::PathBuf;
+use tempfile::TempDir;
 use uuid::Uuid;
+
+/// Optional query parameters for the find_by_id mapping
+#[derive(Deserialize, Debug)]
+struct FindByIdQueryParams {
+    /// For the user to specify they want the returned data in csv form
+    #[serde(default)]
+    pub csv: bool,
+}
 
 /// Represents the part of a run query that is received as a request body
 ///
@@ -25,7 +37,7 @@ use uuid::Uuid;
 /// and the other parameters are expected as part of the request body.  A RunQuery
 /// cannot be deserialized from the request body, so this is used instead, and then a
 /// RunQuery can be built from the instance of this and the id from the path
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct RunQueryIncomplete {
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
@@ -43,6 +55,9 @@ pub struct RunQueryIncomplete {
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// For the user to specify they want the returned data in csv form
+    #[serde(default)]
+    pub csv: bool,
 }
 
 /// Represents the part of a new run that is received as a request body
@@ -69,7 +84,11 @@ pub struct NewRunIncomplete {
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(
+    req: HttpRequest,
+    web::Query(query): web::Query<FindByIdQueryParams>,
+    pool: web::Data<db::DbPool>,
+) -> Result<HttpResponse, HttpResponse> {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
@@ -87,8 +106,10 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     };
 
+    let return_csvs: bool = query.csv;
+
     // Query DB for run in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match RunWithResultsAndErrorsData::find_by_id(&conn, id) {
@@ -100,21 +121,35 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no run is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found".to_string(),
-                status: 404,
-                detail: "No run found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        Ok(results) => {
+            // Return it as csvs if the user requested that
+            if return_csvs {
+                // Build csv files from results
+                let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&vec![results])?;
+                Ok(HttpResponse::Ok().body(zip_bytes))
+            }
+            // Otherwise, just return the json
+            else {
+                Ok(HttpResponse::Ok().json(results))
+            }
         }
-    })
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no run is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    Err(HttpResponse::NotFound().json(ErrorBody {
+                        title: "No run found".to_string(),
+                        status: 404,
+                        detail: "No run found with the specified ID".to_string(),
+                    }))
+                }
+                // For other errors, return a 500
+                _ => Err(default_500(&e)),
+            }
+        }
+    }
 }
 
 /// Handles requests to /tests/{id}/runs for retrieving run info by query parameters and test id
@@ -130,7 +165,7 @@ async fn find_for_test(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> Result<HttpResponse, HttpResponse> {
     // Parse ID into Uuid
     let id = match Uuid::parse_str(&*id) {
         Ok(id) => id,
@@ -145,8 +180,10 @@ async fn find_for_test(
         }
     };
 
+    let return_csvs: bool = query.csv;
+
     // Create RunQuery based on id and query
-    let query = RunQuery {
+    let processed_query = RunQuery {
         pipeline_id: None,
         template_id: None,
         test_id: Some(id),
@@ -169,10 +206,10 @@ async fn find_for_test(
     };
 
     // Query DB for runs in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultsAndErrorsData::find(&conn, query) {
+        match RunWithResultsAndErrorsData::find(&conn, processed_query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -181,24 +218,35 @@ async fn find_for_test(
         }
     })
     .await
-    .map(|results| {
-        // If no run is found, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found".to_string(),
-                status: 404,
-                detail: "No runs found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If no run is found, return a 404
+            if results.len() < 1 {
+                Err(HttpResponse::NotFound().json(ErrorBody {
+                    title: "No run found".to_string(),
+                    status: 404,
+                    detail: "No runs found with the specified parameters".to_string(),
+                }))
+            } else {
+                // If there is no error, return a response with the retrieved data
+                // Return it as csvs if the user requested that
+                if return_csvs {
+                    // Build csv files from results
+                    let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&results)?;
+                    Ok(HttpResponse::Ok().body(zip_bytes))
+                }
+                // Otherwise, just return the json
+                else {
+                    Ok(HttpResponse::Ok().json(results))
+                }
+            }
         }
-    })
-    .map_err(|e| {
-        // If there is an error, return a 500
-        error!("{}", e);
-        default_500(&e)
-    })
+        Err(e) => {
+            // If there is an error, return a 500
+            error!("{}", e);
+            Err(default_500(&e))
+        }
+    }
 }
 
 /// Handles requests to /templates/{id}/runs for retrieving run info by query parameters and
@@ -231,8 +279,10 @@ async fn find_for_template(
         }
     };
 
+    let return_csvs: bool = query.csv;
+
     // Create RunQuery based on id and query
-    let query = RunQuery {
+    let processed_query = RunQuery {
         pipeline_id: None,
         template_id: Some(id),
         test_id: None,
@@ -254,11 +304,11 @@ async fn find_for_template(
         offset: query.offset,
     };
 
-    //Query DB for runs in new thread
-    web::block(move || {
+    // Query DB for runs in new thread
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultsAndErrorsData::find(&conn, query) {
+        match RunWithResultsAndErrorsData::find(&conn, processed_query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -267,24 +317,35 @@ async fn find_for_template(
         }
     })
     .await
-    .map(|results| {
-        // If no run is found, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found".to_string(),
-                status: 404,
-                detail: "No runs found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If no run is found, return a 404
+            if results.len() < 1 {
+                Err(HttpResponse::NotFound().json(ErrorBody {
+                    title: "No run found".to_string(),
+                    status: 404,
+                    detail: "No runs found with the specified parameters".to_string(),
+                }))
+            } else {
+                // If there is no error, return a response with the retrieved data
+                // Return it as csvs if the user requested that
+                if return_csvs {
+                    // Build csv files from results
+                    let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&results)?;
+                    Ok(HttpResponse::Ok().body(zip_bytes))
+                }
+                // Otherwise, just return the json
+                else {
+                    Ok(HttpResponse::Ok().json(results))
+                }
+            }
         }
-    })
-    .map_err(|e| {
-        // If there is an error, return a 500
-        error!("{}", e);
-        default_500(&e)
-    })
+        Err(e) => {
+            // If there is an error, return a 500
+            error!("{}", e);
+            Err(default_500(&e))
+        }
+    }
 }
 
 /// Handles requests to /pipelines/{id}/runs for retrieving run info by query parameters and
@@ -317,8 +378,10 @@ async fn find_for_pipeline(
         }
     };
 
+    let return_csvs: bool = query.csv;
+
     // Create RunQuery based on id and query
-    let query = RunQuery {
+    let processed_query = RunQuery {
         pipeline_id: Some(id),
         template_id: None,
         test_id: None,
@@ -341,10 +404,10 @@ async fn find_for_pipeline(
     };
 
     // Query DB for runs in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultsAndErrorsData::find(&conn, query) {
+        match RunWithResultsAndErrorsData::find(&conn, processed_query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -353,24 +416,35 @@ async fn find_for_pipeline(
         }
     })
     .await
-    .map(|results| {
-        // If no run is found, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found".to_string(),
-                status: 404,
-                detail: "No runs found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If no run is found, return a 404
+            if results.len() < 1 {
+                Err(HttpResponse::NotFound().json(ErrorBody {
+                    title: "No run found".to_string(),
+                    status: 404,
+                    detail: "No runs found with the specified parameters".to_string(),
+                }))
+            } else {
+                // If there is no error, return a response with the retrieved data
+                // Return it as csvs if the user requested that
+                if return_csvs {
+                    // Build csv files from results
+                    let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&results)?;
+                    Ok(HttpResponse::Ok().body(zip_bytes))
+                }
+                // Otherwise, just return the json
+                else {
+                    Ok(HttpResponse::Ok().json(results))
+                }
+            }
         }
-    })
-    .map_err(|e| {
-        // If there is an error, return a 500
-        error!("{}", e);
-        default_500(&e)
-    })
+        Err(e) => {
+            // If there is an error, return a 500
+            error!("{}", e);
+            Err(default_500(&e))
+        }
+    }
 }
 
 /// Handles requests to /tests/{id}/runs for starting a run for a test
@@ -535,6 +609,50 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
             _ => default_500(&e),
         }
     })
+}
+
+/// Generates csv files from `runs` and returns a zip of the csvs as bytes.  If an error occurs,
+/// logs the error and returns an appropriate error response
+fn get_bytes_for_csv_zip_from_runs(
+    runs: &Vec<RunWithResultsAndErrorsData>,
+) -> Result<Vec<u8>, HttpResponse> {
+    // Build csv files from results
+    let run_csvs_dir: TempDir = match run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(&runs) {
+        Ok(csv_dir) => csv_dir,
+        Err(e) => {
+            error!("Encountered error while trying to generate csvs for runs (use debug level logging for more info) : {}", e);
+            debug!(
+                "Encountered error while trying to generate csvs for runs {:#?} : {}",
+                runs, e
+            );
+            return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to generate csv files for retrieved run(s)".to_string(),
+                status: 500,
+                detail: format!(
+                    "Encountered error while trying to generate csv files for retrieved run(s): {}",
+                    e
+                ),
+            }));
+        }
+    };
+    // Get zip of csvs as bytes to return as response body
+    let mut zip_file_path: PathBuf = PathBuf::from(run_csvs_dir.path());
+    zip_file_path.push("run_csvs.zip");
+    match fs::read(zip_file_path) {
+        Ok(zip_data) => Ok(zip_data),
+        Err(e) => {
+            error!("Encountered error while trying to read csv zip for runs (use debug level logging for more info) : {}", e);
+            debug!(
+                "Encountered error while trying to read csv zip for runs {:#?} : {}",
+                runs, e
+            );
+            Err(HttpResponse::InternalServerError().json(ErrorBody{
+                title: "Failed to return generated csv files for retrieved run(s)".to_string(),
+                status: 500,
+                detail: format!("Encountered error while trying to return generated csv files for retrieved run(s): {}", e)
+            }))
+        }
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -912,6 +1030,15 @@ mod tests {
         RunData::create(conn, new_run).expect("Failed inserting test run")
     }
 
+    fn get_csv_zip_bytes_for_test_runs(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<u8> {
+        let run_csvs_dir: TempDir =
+            run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(&runs).unwrap();
+        // Get zip of csvs as bytes to return as response body
+        let mut zip_file_path: PathBuf = PathBuf::from(run_csvs_dir.path());
+        zip_file_path.push("run_csvs.zip");
+        fs::read(zip_file_path).unwrap()
+    }
+
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
@@ -931,6 +1058,28 @@ mod tests {
         let test_run: RunWithResultsAndErrorsData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run, new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_by_id_success_csv() {
+        let pool = get_test_db_pool();
+
+        let new_run = create_test_run_with_results(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/runs/{}?csv=true", new_run.run_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let new_run_csv_zip_bytes = get_csv_zip_bytes_for_test_runs(&vec![new_run]);
+
+        let result = test::read_body(resp).await;
+
+        assert_eq!(result.to_vec(), new_run_csv_zip_bytes);
     }
 
     #[actix_rt::test]
@@ -997,6 +1146,28 @@ mod tests {
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_success_csv() {
+        let pool = get_test_db_pool();
+
+        let new_run = create_test_run_with_results(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs?csv=true", new_run.test_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let new_run_csv_zip_bytes = get_csv_zip_bytes_for_test_runs(&vec![new_run]);
+
+        let result = test::read_body(resp).await;
+
+        assert_eq!(result.to_vec(), new_run_csv_zip_bytes);
     }
 
     #[actix_rt::test]
@@ -1071,6 +1242,31 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn find_for_template_success_csv() {
+        let pool = get_test_db_pool();
+
+        let (_, new_test, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/templates/{}/runs?csv=true",
+                new_test.template_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let new_run_csv_zip_bytes = get_csv_zip_bytes_for_test_runs(&vec![new_run]);
+
+        let result = test::read_body(resp).await;
+
+        assert_eq!(result.to_vec(), new_run_csv_zip_bytes);
+    }
+
+    #[actix_rt::test]
     async fn find_for_template_failure_not_found() {
         let pool = get_test_db_pool();
 
@@ -1139,6 +1335,31 @@ mod tests {
 
         assert_eq!(test_runs.len(), 1);
         assert_eq!(test_runs[0], new_run);
+    }
+
+    #[actix_rt::test]
+    async fn find_for_pipeline_success_csv() {
+        let pool = get_test_db_pool();
+
+        let (new_template, _, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/pipelines/{}/runs?csv=true",
+                new_template.pipeline_id
+            ))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let new_run_csv_zip_bytes = get_csv_zip_bytes_for_test_runs(&vec![new_run]);
+
+        let result = test::read_body(resp).await;
+
+        assert_eq!(result.to_vec(), new_run_csv_zip_bytes);
     }
 
     #[actix_rt::test]

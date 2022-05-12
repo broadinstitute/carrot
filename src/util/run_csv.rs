@@ -18,7 +18,7 @@ use zip::ZipWriter;
 pub enum Error {
     IO(std::io::Error),
     CSV(csv::Error),
-    Zip(zip::result::ZipError)
+    Zip(zip::result::ZipError),
 }
 
 impl std::error::Error for Error {}
@@ -80,7 +80,9 @@ enum CSVContentsType {
 ///
 /// Zipping functionality is partially adapted from
 /// https://github.com/zip-rs/zip/blob/5d0f198124946b7be4e5969719a7f29f363118cd/examples/write_dir.rs
-pub fn write_run_data_to_csvs_and_zip_in_temp_dir(runs: &Vec<RunWithResultsAndErrorsData>) -> Result<TempDir, Error> {
+pub fn write_run_data_to_csvs_and_zip_in_temp_dir(
+    runs: &Vec<RunWithResultsAndErrorsData>,
+) -> Result<TempDir, Error> {
     let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(runs)?;
     // Create a file to write the data to
     let mut zip_file_path: PathBuf = PathBuf::from(csv_dir.path());
@@ -95,7 +97,7 @@ pub fn write_run_data_to_csvs_and_zip_in_temp_dir(runs: &Vec<RunWithResultsAndEr
         "eval_inputs.csv",
         "test_options.csv",
         "eval_options.csv",
-        "results.csv"
+        "results.csv",
     ] {
         // Tell the zip writer we're starting a new file
         zip_writer.start_file(csv_filename, FileOptions::default())?;
@@ -215,7 +217,10 @@ fn build_metadata_rows(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<Vec<Strin
 /// Builds and returns a vec of rows containing a header followed by one row for each run in `runs`
 /// with its run_id and values corresponding to `csv_contents_type` (e.g. if `csv_contents_type` is
 /// CSVContentsType::TestInputs, the row will contain the values in the run's test_input field)
-fn build_rows(runs: &Vec<RunWithResultsAndErrorsData>, csv_contents_type: CSVContentsType) -> Vec<Vec<String>> {
+fn build_rows(
+    runs: &Vec<RunWithResultsAndErrorsData>,
+    csv_contents_type: CSVContentsType,
+) -> Vec<Vec<String>> {
     // First, we'll build our header row
     let mut headers: HashSet<String> = HashSet::new();
     // We'll keep track of the processed maps for each run so we don't have to process them more
@@ -341,14 +346,14 @@ fn init_writer_from_dir_and_name(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::read_to_string;
     use super::*;
-    use chrono::{NaiveDateTime, Utc};
-    use serde_json::json;
-    use tempfile::TempDir;
-    use uuid::Uuid;
     use crate::custom_sql_types::RunStatusEnum;
     use crate::models::run::RunWithResultsAndErrorsData;
+    use chrono::{NaiveDateTime, Utc};
+    use serde_json::json;
+    use std::fs::read_to_string;
+    use tempfile::TempDir;
+    use uuid::Uuid;
 
     fn create_test_runs() -> Vec<RunWithResultsAndErrorsData> {
         vec![
@@ -379,7 +384,7 @@ mod tests {
                     "output_file": "gs://example/path/to/file.mp4",
                     "output_number": 7
                 })),
-                errors: None
+                errors: None,
             },
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("4f27abe7-2cfa-42c3-acc2-ce5344b0e471").unwrap(),
@@ -408,7 +413,7 @@ mod tests {
                     "output_file": "gs://example/path/to/different/file.mp4",
                     "output_number": 5
                 })),
-                errors: None
+                errors: None,
             },
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("4b2d5150-7d86-4a11-888c-b78dc030ba4f").unwrap(),
@@ -439,7 +444,7 @@ mod tests {
                     "output_number": 5,
                     "new_result": "yes"
                 })),
-                errors: None
+                errors: None,
             },
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("cf4b5cb2-976e-4f9c-91ba-2b421d61199b").unwrap(),
@@ -464,7 +469,7 @@ mod tests {
                 results: None,
                 errors: Some(json!([
                     "Carrot failed to start the run because of a weird error"
-                ]))
+                ])),
             },
         ]
     }
@@ -477,31 +482,61 @@ mod tests {
         let csv_dir: TempDir = write_run_data_to_csvs_and_zip_in_temp_dir(&runs).unwrap();
 
         // Check that each file matches what we expect
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "metadata.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "metadata.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/metadata.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "test_inputs.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "test_inputs.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/test_inputs.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "eval_inputs.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "eval_inputs.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/eval_inputs.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "results.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "results.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/results.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "test_options.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "test_options.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/test_options.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "eval_options.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "eval_options.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/eval_options.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
     }
-    
+
     #[test]
     fn write_run_data_to_csvs_in_temp_dir_success() {
         // Get test runs to use
@@ -510,27 +545,57 @@ mod tests {
         let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(&runs).unwrap();
 
         // Check that each file matches what we expect
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "metadata.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "metadata.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/metadata.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "test_inputs.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "test_inputs.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/test_inputs.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "eval_inputs.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "eval_inputs.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/eval_inputs.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "results.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "results.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/results.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "test_options.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "test_options.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/test_options.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
 
-        let test_file_contents = read_to_string(format!("{}/{}", csv_dir.path().to_string_lossy(), "eval_options.csv")).unwrap();
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "eval_options.csv"
+        ))
+        .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/eval_options.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
     }

@@ -1093,7 +1093,12 @@ impl StatusManager {
         let mut run_report_outputs_map: Map<String, Value> = Map::new();
         // Loop through the four outputs we want, get them from `outputs`, and put them in our outputs
         // map
-        for output_key in vec!["populated_notebook", "html_report", "empty_notebook", "run_csv_zip"] {
+        for output_key in vec![
+            "populated_notebook",
+            "html_report",
+            "empty_notebook",
+            "run_csv_zip",
+        ] {
             // Get the output from the cromwell outputs
             let output_val =
                 match outputs.get(&format!("generate_report_file_workflow.{}", output_key)) {

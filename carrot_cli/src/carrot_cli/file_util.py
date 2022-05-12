@@ -28,3 +28,19 @@ def read_file_to_json(filename):
             sys.exit(1)
     else:
         return ""
+
+def write_data_to_file(data, filename):
+    """
+    Writes data to the file specified by filename
+    :param data: bytes to write to file
+    :param filename: filename to write to
+    """
+    try:
+        with open(filename, "w+b") as data_file:
+            data_file.write(data)
+    except IOError as e:
+        LOGGER.error(
+            f"Encountered the following error while trying to write data to file {filename}: {e}"
+        )
+        sys.exit(1)
+

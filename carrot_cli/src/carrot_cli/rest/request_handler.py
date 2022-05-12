@@ -2,7 +2,9 @@ import json as json_lib
 import logging
 import os
 import pprint
+import sys
 import urllib
+from enum import Enum
 
 import requests
 
@@ -10,16 +12,27 @@ from ..config import manager as config
 
 LOGGER = logging.getLogger(__name__)
 
+class ResponseFormat(Enum):
+    """Expected response format for a request"""
+    JSON = 1
+    BYTES = 2
+    TEXT = 3
 
-def find_by_id(entity, id):
-    """Submits a request to the find_by_id mapping for the specified entity with the specified id"""
+def find_by_id(entity, id, params=None, expected_format=ResponseFormat.JSON):
+    """
+    Submits a request to the find_by_id mapping for the specified entity with the specified id
+    Optionally, query params can also be provided
+    """
     # Build request address and send
     server_address = config.load_var("carrot_server_address")
     address = f"http://{server_address}/api/v1/{entity}/{id}"
-    return send_request("GET", address)
+    # Filter out params that are not set
+    if params:
+        params = list(filter(lambda param: param[1] != "", params))
+    return send_request("GET", address, params=params, expected_format=expected_format)
 
 
-def find(entity, params):
+def find(entity, params, expected_format=ResponseFormat.JSON):
     """Submits a request to the find mapping for the specified entity with the specified params"""
     # Build request address
     server_address = config.load_var("carrot_server_address")
@@ -27,7 +40,7 @@ def find(entity, params):
     # Filter out params that are not set
     params = list(filter(lambda param: param[1] != "", params))
     # Create and send request
-    return send_request("GET", address, params=params)
+    return send_request("GET", address, params=params, expected_format=expected_format)
 
 
 def create(entity, params, files=None):
@@ -130,7 +143,7 @@ def run(test_id, params):
     return send_request("POST", address, json=body)
 
 
-def find_runs(entity, id, params):
+def find_runs(entity, id, params, expected_format=ResponseFormat.JSON):
     """
     Submits a request to the find_runs mapping for the specified entity with the specified id
     and filtering by the specified params
@@ -141,7 +154,7 @@ def find_runs(entity, id, params):
     # Filter out params that are not set
     params = list(filter(lambda param: param[1] != "", params))
     # Create and send request
-    return send_request("GET", address, params=params)
+    return send_request("GET", address, params=params, expected_format=expected_format)
 
 
 def create_map(entity1, entity1_id, entity2, entity2_id, params, query_params=None):
@@ -205,10 +218,11 @@ def delete_map_by_ids(entity1, entity1_id, entity2, entity2_id):
     return send_request("DELETE", address)
 
 
-def send_request(method, url, params=None, json=None, body=None, files=None):
+def send_request(method, url, params=None, json=None, body=None, files=None, expected_format=ResponseFormat.JSON):
     """
     Sends a request to url with method, optionally with query params, json, form data body, and
-    files, and handles potential errors
+    files, and handles potential errors. expected_format specifies the format we expect the
+    response body to be in
     """
     processed_files = None
     try:
@@ -230,50 +244,68 @@ def send_request(method, url, params=None, json=None, body=None, files=None):
             response.status_code,
             response.text,
         )
-        # Parse json body from request and return
-        json_body = response.json()
-        if json_body is None:
-            return (
-                "Received response with status %i and empty body" % response.status_code
-            )
-        return json_lib.dumps(json_body, indent=4, sort_keys=True)
+        # If the status code indicates an error, try to get and return the error message as json
+        if response.status_code >= 300:
+            json_body = response.json()
+            if json_body is None:
+                LOGGER.error(
+                    "Received response with status %i and empty body" % response.status_code
+                )
+            else:
+                LOGGER.error(json_lib.dumps(json_body, indent=4, sort_keys=True))
+            sys.exit(1)
+        # Get body in whatever format we expect
+        if expected_format == ResponseFormat.JSON:
+            # Parse json body from request and return
+            json_body = response.json()
+            if json_body is None:
+                LOGGER.error(
+                    "Received response with status %i and empty body" % response.status_code
+                )
+                sys.exit(1)
+            return json_lib.dumps(json_body, indent=4, sort_keys=True)
+        elif expected_format == ResponseFormat.BYTES:
+            return response.content
+        elif expected_format == ResponseFormat.TEXT:
+            return response.text
     except (AttributeError, json_lib.decoder.JSONDecodeError):
-        LOGGER.debug("Failed to parse json from response body: %s", response.text)
-        return json_lib.dumps(
-            {"Status": response.status_code, "Body": response.text},
-            indent=4,
-            sort_keys=True,
-        )
+        LOGGER.error("Failed to parse json from response body: %s", response.text)
+        sys.exit(1)
     except requests.ConnectionError as err:
         LOGGER.debug(err)
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
-            return "Encountered a connection error."
+            LOGGER.error("Encountered a connection error.")
         else:
-            return "Encountered a connection error. Enable verbose logging (-v) for more info"
+            LOGGER.error("Encountered a connection error. Enable verbose logging (-v) for more info")
+        sys.exit(1)
     except requests.URLRequired as err:
         LOGGER.debug(err)
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
-            return "Invalid URL."
+            LOGGER.error("Invalid URL.")
         else:
-            return "Invalid URL. Enable verbose logging (-v) for more info"
+            LOGGER.error("Invalid URL. Enable verbose logging (-v) for more info")
+        sys.exit(1)
     except requests.Timeout as err:
         LOGGER.debug(err)
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
-            return "Request timed out."
+            LOGGER.error("Request timed out.")
         else:
-            return "Request timed out. Enable verbose logging (-v) for more info"
+            LOGGER.error("Request timed out. Enable verbose logging (-v) for more info")
+        sys.exit(1)
     except requests.TooManyRedirects as err:
         LOGGER.debug(err)
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
-            return "Too many redirects"
+            LOGGER.error("Too many redirects")
         else:
-            return "Too many redirects. Enable verbose logging (-v) for more info"
+            LOGGER.error("Too many redirects. Enable verbose logging (-v) for more info")
+        sys.exit(1)
     except IOError as err:
         LOGGER.debug(err)
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
-            return "Encountered an IO error"
+            LOGGER.error("Encountered an IO error")
         else:
-            return "Encountered an IO error. Enable verbose logging (-v) for more info"
+            LOGGER.error("Encountered an IO error. Enable verbose logging (-v) for more info")
+        sys.exit(1)
     finally:
         # Close any open files
         if processed_files is not None:

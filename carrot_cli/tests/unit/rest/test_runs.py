@@ -1,4 +1,6 @@
+import copy
 import json
+import tempfile
 
 import mockito
 import pytest
@@ -46,20 +48,45 @@ def unstub():
                 sort_keys=True,
             ),
         },
+        {
+            "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+            "csv": True,
+            "file_contents": b"randombytesrepresentingazip",
+            "return": "Success!"
+        },
     ]
 )
 def find_by_id_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).find_by_id(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).find_by_id("runs", request.param["id"]).thenReturn(
-        request.param["return"]
-    )
+    if "csv" in request.param and request.param["csv"]:
+        mockito.when(request_handler).find_by_id(
+            "runs",
+            request.param["id"],
+            params=[("csv", str(request.param["csv"]).lower())],
+            expected_format=request_handler.ResponseFormat.BYTES
+        ).thenReturn(
+            request.param["file_contents"]
+        )
+        # Create a temp file that we'll write to
+        request.param["file"] = tempfile.NamedTemporaryFile()
+        request.param["csv"] = request.param["file"].name
+    else:
+        mockito.when(request_handler).find_by_id("runs", request.param["id"]).thenReturn(
+            request.param["return"]
+        )
     return request.param
 
 
 def test_find_by_id(find_by_id_data):
-    result = runs.find_by_id(find_by_id_data["id"])
+    if "csv" in find_by_id_data:
+        result = runs.find_by_id(find_by_id_data["id"], csv=find_by_id_data["csv"])
+        # Check that the file has the correct data written to it
+        written_data = find_by_id_data["file"].read()
+        assert written_data == find_by_id_data["file_contents"]
+    else:
+        result = runs.find_by_id(find_by_id_data["id"])
     assert result == find_by_id_data["return"]
 
 
@@ -85,6 +112,7 @@ def test_find_by_id(find_by_id_data):
                 ("sort", ""),
                 ("limit", ""),
                 ("offset", ""),
+                ("csv", False),
             ],
             "return": json.dumps(
                 [
@@ -129,6 +157,7 @@ def test_find_by_id(find_by_id_data):
                 ("sort", ""),
                 ("limit", ""),
                 ("offset", ""),
+                ("csv", False)
             ],
             "return": json.dumps(
                 {
@@ -140,17 +169,61 @@ def test_find_by_id(find_by_id_data):
                 sort_keys=True,
             ),
         },
+        {
+            "parent_entity": "tests",
+            "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
+            "params": [
+                ("name", "Queen of Bright Moon run"),
+                ("status", ""),
+                ("test_input", ""),
+                ("test_options", ""),
+                ("eval_input", ""),
+                ("eval_options", ""),
+                ("test_cromwell_job_id", ""),
+                ("eval_cromwell_job_id", ""),
+                ("created_before", ""),
+                ("created_after", ""),
+                ("created_by", ""),
+                ("finished_before", ""),
+                ("finished_after", ""),
+                ("sort", ""),
+                ("limit", ""),
+                ("offset", ""),
+                ("csv", True),
+            ],
+            "file_contents": b'randombytespresentingazip',
+            "return": "Success!"
+        },
     ]
 )
 def find_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).find_runs(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).find_runs(
-        request.param["parent_entity"],
-        request.param["parent_entity_id"],
-        request.param["params"],
-    ).thenReturn(request.param["return"])
+    # If csv param is true, we have to create a temp file and include expected format in the function call
+    if request.param["params"][16][1]:
+        # Pass a copy of params to the mock so we can modify the original
+        params_for_mock = copy.deepcopy(request.param["params"])
+        params_for_mock[16] = ("csv", "true")
+        mockito.when(request_handler).find_runs(
+            request.param["parent_entity"],
+            request.param["parent_entity_id"],
+            params_for_mock,
+            expected_format=request_handler.ResponseFormat.BYTES
+        ).thenReturn(request.param["file_contents"])
+        # Create a temp file that we'll write to
+        request.param["file"] = tempfile.NamedTemporaryFile()
+        request.param["params"][16] = ("csv", request.param["file"].name)
+    else:
+        # Pass a copy of params to the mock so we can modify the original
+        params_for_mock = copy.deepcopy(request.param["params"])
+        params_for_mock[16] = ("csv", "false")
+        mockito.when(request_handler).find_runs(
+            request.param["parent_entity"],
+            request.param["parent_entity_id"],
+            params_for_mock,
+        ).thenReturn(request.param["return"])
+        request.param["params"][16] = ("csv", None)
     return request.param
 
 
@@ -174,8 +247,13 @@ def test_find(find_data):
         find_data["params"][13][1],
         find_data["params"][14][1],
         find_data["params"][15][1],
+        find_data["params"][16][1],
     )
     assert result == find_data["return"]
+    # If the result is written to a zip, check that the zip has what we expect
+    if "file_contents" in find_data:
+        written_data = find_data["file"].read()
+        assert written_data == find_data["file_contents"]
 
 
 @pytest.fixture(

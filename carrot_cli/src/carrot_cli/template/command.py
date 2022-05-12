@@ -337,6 +337,12 @@ def delete(template, yes):
     "asc(created_at) with offset=1 would return records sorted by when they were created "
     "starting from the second record to be created",
 )
+@click.option(
+    "--zip_csv",
+    "--instead_of_json_give_me_a_zipped_folder_with_csvs_in_it_please_and_thank_you",
+    type=click.Path(),
+    help="Instead of writing results to stdout as JSON, writes as a zip of CSV files to the specified file"
+)
 def find_runs(
     template,
     name,
@@ -355,6 +361,7 @@ def find_runs(
     sort,
     limit,
     offset,
+    zip_csv
 ):
     """
     Retrieve runs related to the template specified by TEMPLATE (id or name), filtered by the
@@ -389,6 +396,7 @@ def find_runs(
             sort,
             limit,
             offset,
+            csv=zip_csv
         )
     )
 

@@ -9,19 +9,19 @@ use crate::models::run::{RunData, RunWithResultsAndErrorsData};
 use crate::models::run_report::{NewRunReport, RunReportData};
 use crate::models::template::TemplateData;
 use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
+use crate::models::test::TestData;
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
 use crate::util::{run_csv, temp_storage};
 use core::fmt;
-use std::fs::File;
-use std::path::PathBuf;
 use diesel::PgConnection;
 use log::{debug, error, warn};
 use serde_json::{Map, Value};
+use std::fs::File;
+use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
-use crate::models::test::TestData;
 
 /// Struct for assembling reports from runs and submitting jobs to cromwell to fill them
 #[derive(Clone)]
@@ -44,7 +44,7 @@ pub enum Error {
     Cromwell(CromwellRequestError),
     Prohibited(String),
     Autosize(String),
-    CSV(run_csv::Error)
+    CSV(run_csv::Error),
 }
 
 impl std::error::Error for Error {}
@@ -166,7 +166,8 @@ impl ReportBuilder {
             },
         )?;
         // Get run with results and errors to upload as csvs and to pass to create_run_report
-        let run_in_vec: Vec<RunWithResultsAndErrorsData> = vec![RunWithResultsAndErrorsData::find_by_id(conn, run.run_id)?];
+        let run_in_vec: Vec<RunWithResultsAndErrorsData> =
+            vec![RunWithResultsAndErrorsData::find_by_id(conn, run.run_id)?];
         // Write data to csvs and upload so the reports can use them
         let run_csv_zip_location: String = self.create_and_upload_run_csvs(&run_in_vec).await?;
         // If there are reports to generate, generate them
@@ -178,7 +179,12 @@ impl ReportBuilder {
                     run.run_id, mapping.report_id
                 );
                 // Check if we already have a run report for this run and report
-                ReportBuilder::verify_no_existing_run_report(conn, run.run_id, mapping.report_id, false)?;
+                ReportBuilder::verify_no_existing_run_report(
+                    conn,
+                    run.run_id,
+                    mapping.report_id,
+                    false,
+                )?;
                 // Create the run report
                 run_reports.push(
                     self.create_run_report(
@@ -218,7 +224,14 @@ impl ReportBuilder {
         // Create and upload csv files for this run so we can use them as an input to the report wdl
         let run_csv_zip_location: String = self.create_and_upload_run_csvs(&run_in_vec).await?;
         // Create the run report
-        self.create_run_report(conn, &run_in_vec[0], &run_csv_zip_location, report_id, created_by).await
+        self.create_run_report(
+            conn,
+            &run_in_vec[0],
+            &run_csv_zip_location,
+            report_id,
+            created_by,
+        )
+        .await
     }
 
     /// Assembles a report Jupyter Notebook from the data for the run specified by `run_id` and the
@@ -242,7 +255,8 @@ impl ReportBuilder {
         let report = ReportData::find_by_id(conn, report_id)?;
         let test = TestData::find_by_id(conn, run.test_id)?;
         // Build the notebook we will submit from the notebook specified in the report and the run data
-        let report_json = ReportBuilder::create_report_template(&report.notebook, &run, &test.name)?;
+        let report_json =
+            ReportBuilder::create_report_template(&report.notebook, &run, &test.name)?;
         // Upload the report json as a file to a GCS location where cromwell will be able to read it
         let report_template_location = self
             .upload_report_template(&report_json, &report.name, &run.name)
@@ -288,7 +302,10 @@ impl ReportBuilder {
     /// uploads them to google cloud storage, in the bucket specified in self.config.report_location
     /// in a sub directory of "run_data" named with a uuid.  Returns the gs uri for the location of
     /// the uploaded zip
-    async fn create_and_upload_run_csvs(&self, runs: &Vec<RunWithResultsAndErrorsData>) -> Result<String, Error> {
+    async fn create_and_upload_run_csvs(
+        &self,
+        runs: &Vec<RunWithResultsAndErrorsData>,
+    ) -> Result<String, Error> {
         // First make the csvs
         let runs_csvs_dir: TempDir = run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(runs)?;
         // Upload the zip containing all the other files
@@ -365,8 +382,10 @@ impl ReportBuilder {
                 report_as_map.insert(String::from("cells"), Value::Array(cells));
             }
             None => {
-                return Err(Error::Parse(String::from("Failed to parse notebook as JSON object")))
-            },
+                return Err(Error::Parse(String::from(
+                    "Failed to parse notebook as JSON object",
+                )))
+            }
         }
         // Wrap it in a Value and return it
         Ok(report_template)
@@ -398,13 +417,27 @@ impl ReportBuilder {
                     \"Markdown(md_string)\"\n\
                 ]\n\
             }}",
-            test_name, run.run_id, run.name, run.status, run.created_at,
-            match &run.finished_at { Some(f) => f.to_string(), None => "None".to_string()},
-            match &run.test_cromwell_job_id { Some(t) => t, None => "None"},
-            match &run.eval_cromwell_job_id { Some(e) => e, None => "None"},
+            test_name,
+            run.run_id,
+            run.name,
+            run.status,
+            run.created_at,
+            match &run.finished_at {
+                Some(f) => f.to_string(),
+                None => "None".to_string(),
+            },
+            match &run.test_cromwell_job_id {
+                Some(t) => t,
+                None => "None",
+            },
+            match &run.eval_cromwell_job_id {
+                Some(e) => e,
+                None => "None",
+            },
         );
 
-        serde_json::from_str(&json_string).expect("Failed to create run metadata cell json.  This should not happen.")
+        serde_json::from_str(&json_string)
+            .expect("Failed to create run metadata cell json.  This should not happen.")
     }
 
     /// Extracts and returns the "cells" array from `notebook`
@@ -604,9 +637,7 @@ impl ReportBuilder {
 #[cfg(test)]
 mod tests {
     use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
-    use crate::manager::report_builder::{
-        Error, ReportBuilder
-    };
+    use crate::manager::report_builder::{Error, ReportBuilder};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::result::{NewResult, ResultData};
@@ -768,10 +799,8 @@ mod tests {
 
     fn insert_different_test_report(conn: &PgConnection) -> ReportData {
         let notebook: Value = serde_json::from_str(
-            &read_to_string(
-                "testdata/manager/report_builder/different_report_notebook.ipynb",
-            )
-            .unwrap(),
+            &read_to_string("testdata/manager/report_builder/different_report_notebook.ipynb")
+                .unwrap(),
         )
         .unwrap();
 
@@ -981,8 +1010,6 @@ mod tests {
             .with_body(mock_response_body.to_string())
             .create();
 
-
-
         let result_run_report = test_report_builder
             .create_run_report_for_ids(
                 &conn,
@@ -1106,7 +1133,7 @@ mod tests {
                 run_id,
                 Uuid::new_v4(),
                 &Some(String::from("kevin@example.com")),
-                false
+                false,
             )
             .await
             .err()
@@ -1143,7 +1170,7 @@ mod tests {
                 run_id,
                 report_id,
                 &Some(String::from("kevin@example.com")),
-                false
+                false,
             )
             .await
             .err()
@@ -1177,7 +1204,7 @@ mod tests {
                 run_id,
                 report_id,
                 &Some(String::from("kevin@example.com")),
-                true
+                true,
             )
             .await
             .err()
@@ -1195,9 +1222,12 @@ mod tests {
         let test_run_with_results =
             RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
-        let result_report =
-            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results, "Kevin's Test")
-                .unwrap();
+        let result_report = ReportBuilder::create_report_template(
+            &test_report.notebook,
+            &test_run_with_results,
+            "Kevin's Test",
+        )
+        .unwrap();
 
         let metadata_cell: Value = serde_json::from_str(&format!(
             "{{\n\
@@ -1221,11 +1251,25 @@ mod tests {
                     \"Markdown(md_string)\"\n\
                 ]\n\
             }}",
-            test_test.name, test_run.run_id, test_run.name, test_run.status, test_run.created_at,
-            match &test_run.finished_at { Some(f) => f.to_string(), None => "None".to_string()},
-            match &test_run.test_cromwell_job_id { Some(t) => t, None => "None"},
-            match &test_run.eval_cromwell_job_id { Some(e) => e, None => "None"},
-        )).unwrap();
+            test_test.name,
+            test_run.run_id,
+            test_run.name,
+            test_run.status,
+            test_run.created_at,
+            match &test_run.finished_at {
+                Some(f) => f.to_string(),
+                None => "None".to_string(),
+            },
+            match &test_run.test_cromwell_job_id {
+                Some(t) => t,
+                None => "None",
+            },
+            match &test_run.eval_cromwell_job_id {
+                Some(e) => e,
+                None => "None",
+            },
+        ))
+        .unwrap();
 
         let expected_report = json!({
             "metadata": {
@@ -1298,8 +1342,11 @@ mod tests {
         let test_run_with_results =
             RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
-        let result_report =
-            ReportBuilder::create_report_template(&test_report.notebook, &test_run_with_results, "Kevin's Test");
+        let result_report = ReportBuilder::create_report_template(
+            &test_report.notebook,
+            &test_run_with_results,
+            "Kevin's Test",
+        );
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
     }

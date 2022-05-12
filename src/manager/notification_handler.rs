@@ -182,7 +182,13 @@ impl NotificationHandler {
         match &self.github_commenter {
             Some(github_commenter) => {
                 github_commenter
-                    .post_run_failed_to_start_comment(owner, repo, issue_number, error_message, test_name)
+                    .post_run_failed_to_start_comment(
+                        owner,
+                        repo,
+                        issue_number,
+                        error_message,
+                        test_name,
+                    )
                     .await?;
             }
             None => {}
