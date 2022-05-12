@@ -20,10 +20,12 @@ task generate_report_file {
         String bootDiskSizeGb
 
         File notebook_template
+        File run_csv_zip
     }
 
     parameter_meta {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
+        run_csv_zip: "A zip file containing csv files with the data to be used in the notebook"
     }
 
     String nb_name = "report.ipynb"
@@ -34,6 +36,9 @@ task generate_report_file {
 
         # Copy the notebook template to our current folder:
         cp "~{notebook_template}" ~{nb_name}
+
+        # Unzip the run csv zip
+        unzip "~{run_csv_zip}"
 
         # Do the conversion:
 
@@ -82,9 +87,11 @@ workflow generate_report_file_workflow {
         String bootDiskSizeGb = "10"
 
         File notebook_template
+        File in_run_csv_zip
     }
     parameter_meta {
         notebook_template : "A Jupyter notebook that will be run with the other supplied parameters as inputs to generate the report"
+        run_csv_zip: "A zip file containing csv files with the data to be used in the notebook"
     }
 
     call generate_report_file {
@@ -99,11 +106,13 @@ workflow generate_report_file_workflow {
             preemptible = preemptible,
             bootDiskSizeGb = bootDiskSizeGb,
             notebook_template = notebook_template,
+            run_csv_zip = in_run_csv_zip,
     }
 
     output {
         File empty_notebook = notebook_template
         File populated_notebook = generate_report_file.populated_notebook
         File html_report = generate_report_file.html_report
+        File run_csv_zip = in_run_csv_zip
     }
 }

@@ -1091,9 +1091,9 @@ impl StatusManager {
         // We'll build a json map to contain the outputs we want and store it in the DB in run_report's
         // result field
         let mut run_report_outputs_map: Map<String, Value> = Map::new();
-        // Loop through the three outputs we want, get them from `outputs`, and put them in our outputs
+        // Loop through the four outputs we want, get them from `outputs`, and put them in our outputs
         // map
-        for output_key in vec!["populated_notebook", "html_report", "empty_notebook"] {
+        for output_key in vec!["populated_notebook", "html_report", "empty_notebook", "run_csv_zip"] {
             // Get the output from the cromwell outputs
             let output_val =
                 match outputs.get(&format!("generate_report_file_workflow.{}", output_key)) {
@@ -2694,7 +2694,8 @@ mod tests {
             "outputs": {
                 "generate_report_file_workflow.populated_notebook": "gs://example/example/populated_notebook.ipynb",
                 "generate_report_file_workflow.empty_notebook": "gs://example/example/empty_notebook.ipynb",
-                "generate_report_file_workflow.html_report": "gs://example/example/html_report.html"
+                "generate_report_file_workflow.html_report": "gs://example/example/html_report.html",
+                "generate_report_file_workflow.run_csv_zip": "gs://example/example/run_csvs.zip"
             },
             "end": "2020-12-31T11:11:11.0000Z"
         });
@@ -2729,6 +2730,7 @@ mod tests {
                 "populated_notebook": "gs://example/example/populated_notebook.ipynb",
                 "html_report": "gs://example/example/html_report.html",
                 "empty_notebook": "gs://example/example/empty_notebook.ipynb",
+                "run_csv_zip": "gs://example/example/run_csvs.zip"
             })
         );
     }

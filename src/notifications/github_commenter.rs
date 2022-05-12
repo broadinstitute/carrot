@@ -180,7 +180,7 @@ impl GithubCommenter {
             // We'll build a list of markdown rows containing each of the report results converted into
             // an authenticated url, starting with the header
             let mut report_results_table: Vec<String> = vec![
-                String::from("| Report | URI |"),
+                String::from("| File | URI |"),
                 String::from("| --- | --- |"),
             ];
             // Get results
@@ -462,16 +462,18 @@ mod tests {
                 "populated_notebook":"gs://test_bucket/filled report.ipynb",
                 "empty_notebook":"gs://test_bucket/somewhere/empty_report.ipynb",
                 "html_report":"gs://test_bucket/report.html",
+                "run_csv_zip":"gs://test_bucket/run_csvs.zip"
             })),
             cromwell_job_id: Some(String::from("as9283-054asdf32893a-sdfawe9")),
         };
 
         let expected_results = vec![
-            "| Report | URI |",
+            "| File | URI |",
             "| --- | --- |",
             "| empty_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/somewhere%2Fempty_report.ipynb) |",
             "| html_report | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/report.html) |",
             "| populated_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/filled%20report.ipynb) |",
+            "| run_csv_zip | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/run_csvs.zip) |",
         ]
         .join("\n");
         let request_body = json!({

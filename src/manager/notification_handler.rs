@@ -642,7 +642,8 @@ mod tests {
             results: Some(json!({
                 "populated_notebook": "gs://test_bucket/filled_report.ipynb",
                 "html_report": "gs://test_bucket/report.html",
-                "empty_notebook": "gs://test_bucket/empty_report.ipynb"
+                "empty_notebook": "gs://test_bucket/empty_report.ipynb",
+                "run_csv_zip":"gs://test_bucket/run_csvs.zip"
             })),
             created_by: Some(format!("{}@example.com", email_base_name)),
             finished_at: Some(Utc::now().naive_utc()),
@@ -1277,11 +1278,12 @@ mod tests {
         );
 
         let expected_results = vec![
-            "| Report | URI |",
+            "| File | URI |",
             "| --- | --- |",
             "| empty_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/empty_report.ipynb) |",
             "| html_report | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/report.html) |",
             "| populated_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/filled_report.ipynb) |",
+            "| run_csv_zip | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/run_csvs.zip) |",
         ]
         .join("\n");
         let request_body = json!({

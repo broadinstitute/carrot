@@ -70,6 +70,9 @@ impl RunErrorData {
     /// Returns a result containing either the retrieved run_error as a
     /// RunErrorData instance or an error if the query fails for some reason or if no
     /// run_error is found matching the criteria
+    ///
+    /// This is basically just here for api completeness
+    #[allow(dead_code)]
     pub fn find_by_run_id(conn: &PgConnection, id: Uuid) -> Result<Self, diesel::result::Error> {
         run_error.filter(run_id.eq(id)).first::<Self>(conn)
     }

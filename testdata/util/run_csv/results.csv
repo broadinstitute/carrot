@@ -1,0 +1,5 @@
+run_id,new_result,output_file,output_number
+67e55044-10b1-426f-9247-bb680e5fe0c8,,gs://example/path/to/file.mp4,7
+4f27abe7-2cfa-42c3-acc2-ce5344b0e471,,gs://example/path/to/different/file.mp4,5
+4b2d5150-7d86-4a11-888c-b78dc030ba4f,yes,gs://example/path/to/different/file.mp4,5
+cf4b5cb2-976e-4f9c-91ba-2b421d61199b,,,

@@ -7,7 +7,7 @@ use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
 use actix_web::client::Client;
 use std::fmt;
-use std::fs::{read, read_to_string};
+use std::fs::read;
 use std::str::Utf8Error;
 use crate::util::gs_uri_parsing;
 
