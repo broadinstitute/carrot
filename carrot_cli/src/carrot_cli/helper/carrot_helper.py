@@ -14,6 +14,7 @@ import re
 import shutil
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 from urllib.error import HTTPError
 
@@ -253,30 +254,33 @@ class CarrotHelper:
         pipelines = {}
         wd = self.working_dir
         dirs = [x for x in dirs if os.path.isdir(x)]
+
+        # Extend directories to include all the subdirectories.
+        dirs = [Path(x[0]) for d in dirs for x in os.walk(d)]
+
+        # Keep only the child directories.
+        only_child_dirs = []
+        for d in dirs:
+            if True not in (d in d2.parents for d2 in dirs if d != d2):
+                only_child_dirs.append(d)
+        dirs = only_child_dirs
+
         for d in dirs:
             d = os.path.normpath(d).split(os.sep)
-            if len(d) == 0:
+            if len(d) < 3:
                 continue
-            pipeline = d[0]
-            templates = [d[1]] if len(d) == 2 else None
-            run_dirs = [d[2]] if len(d) == 3 else None
-            print("\n----", d, "\n", pipeline, "\n")
-            exit()
+
+            pipeline, template, run_dir = d[-3], d[-2], d[-1]
+
             if pipeline not in pipelines:
                 pipelines[pipeline] = {}
-            templates = \
-                templates or \
-                [x for x in next(os.walk(os.path.join(wd, pipeline)))[1]]
-            for t in templates:
-                if t not in pipelines[pipeline]:
-                    pipelines[pipeline][t] = []
-                run_dirs = \
-                    run_dirs or \
-                    [x for x in next(os.walk(os.path.join(
-                        wd, pipeline, t)))[1]]
-                for r in run_dirs:
-                    if r not in pipelines[pipeline][t]:
-                        pipelines[pipeline][t].append(r)
+
+            if template not in pipelines[pipeline]:
+                pipelines[pipeline][template] = []
+
+            if run_dir not in pipelines[pipeline][template]:
+                pipelines[pipeline][template].append(run_dir)
+
         return pipelines
 
     @staticmethod
