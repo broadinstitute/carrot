@@ -22,6 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
+use crate::routes::util::parse_id;
 
 /// Optional query parameters for the find_by_id mapping
 #[derive(Deserialize, Debug)]
@@ -58,6 +59,32 @@ pub struct RunQueryIncomplete {
     /// For the user to specify they want the returned data in csv form
     #[serde(default)]
     pub csv: bool,
+}
+
+impl From<RunQueryIncomplete> for RunQuery {
+    fn from(query: RunQueryIncomplete) -> Self {
+        RunQuery {
+            pipeline_id: None,
+            template_id: None,
+            test_id: None,
+            name: query.name,
+            status: query.status,
+            test_input: query.test_input,
+            test_options: query.test_options,
+            eval_input: query.eval_input,
+            eval_options: query.eval_options,
+            test_cromwell_job_id: query.test_cromwell_job_id,
+            eval_cromwell_job_id: query.eval_cromwell_job_id,
+            created_before: query.created_before,
+            created_after: query.created_after,
+            created_by: query.created_by,
+            finished_before: query.finished_before,
+            finished_after: query.finished_after,
+            sort: query.sort,
+            limit: query.limit,
+            offset: query.offset,
+        }
+    }
 }
 
 /// Represents the part of a new run that is received as a request body
@@ -165,88 +192,21 @@ async fn find_for_test(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, HttpResponse> {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&*id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response
     };
 
     let return_csvs: bool = query.csv;
 
     // Create RunQuery based on id and query
-    let processed_query = RunQuery {
-        pipeline_id: None,
-        template_id: None,
-        test_id: Some(id),
-        name: query.name,
-        status: query.status,
-        test_input: query.test_input,
-        test_options: query.test_options,
-        eval_input: query.eval_input,
-        eval_options: query.eval_options,
-        test_cromwell_job_id: query.test_cromwell_job_id,
-        eval_cromwell_job_id: query.eval_cromwell_job_id,
-        created_before: query.created_before,
-        created_after: query.created_after,
-        created_by: query.created_by,
-        finished_before: query.finished_before,
-        finished_after: query.finished_after,
-        sort: query.sort,
-        limit: query.limit,
-        offset: query.offset,
-    };
+    let mut processed_query = RunQuery::from(query);
+    processed_query.test_id = Some(id);
 
-    // Query DB for runs in new thread
-    match web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
-
-        match RunWithResultsAndErrorsData::find(&conn, processed_query) {
-            Ok(test) => Ok(test),
-            Err(e) => {
-                error!("{}", e);
-                Err(e)
-            }
-        }
-    })
-    .await
-    {
-        Ok(results) => {
-            // If no run is found, return a 404
-            if results.len() < 1 {
-                Err(HttpResponse::NotFound().json(ErrorBody {
-                    title: "No run found".to_string(),
-                    status: 404,
-                    detail: "No runs found with the specified parameters".to_string(),
-                }))
-            } else {
-                // If there is no error, return a response with the retrieved data
-                // Return it as csvs if the user requested that
-                if return_csvs {
-                    // Build csv files from results
-                    let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&results)?;
-                    Ok(HttpResponse::Ok().body(zip_bytes))
-                }
-                // Otherwise, just return the json
-                else {
-                    Ok(HttpResponse::Ok().json(results))
-                }
-            }
-        }
-        Err(e) => {
-            // If there is an error, return a 500
-            error!("{}", e);
-            Err(default_500(&e))
-        }
-    }
+    // Use our processed query to find the run data
+    find(processed_query, return_csvs, pool).await
 }
 
 /// Handles requests to /templates/{id}/runs for retrieving run info by query parameters and
@@ -264,88 +224,21 @@ async fn find_for_template(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
-    //Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&*id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response
     };
 
     let return_csvs: bool = query.csv;
 
     // Create RunQuery based on id and query
-    let processed_query = RunQuery {
-        pipeline_id: None,
-        template_id: Some(id),
-        test_id: None,
-        name: query.name,
-        status: query.status,
-        test_input: query.test_input,
-        test_options: query.test_options,
-        eval_input: query.eval_input,
-        eval_options: query.eval_options,
-        test_cromwell_job_id: query.test_cromwell_job_id,
-        eval_cromwell_job_id: query.eval_cromwell_job_id,
-        created_before: query.created_before,
-        created_after: query.created_after,
-        created_by: query.created_by,
-        finished_before: query.finished_before,
-        finished_after: query.finished_after,
-        sort: query.sort,
-        limit: query.limit,
-        offset: query.offset,
-    };
+    let mut processed_query = RunQuery::from(query);
+    processed_query.template_id = Some(id);
 
-    // Query DB for runs in new thread
-    match web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
-
-        match RunWithResultsAndErrorsData::find(&conn, processed_query) {
-            Ok(test) => Ok(test),
-            Err(e) => {
-                error!("{}", e);
-                Err(e)
-            }
-        }
-    })
-    .await
-    {
-        Ok(results) => {
-            // If no run is found, return a 404
-            if results.len() < 1 {
-                Err(HttpResponse::NotFound().json(ErrorBody {
-                    title: "No run found".to_string(),
-                    status: 404,
-                    detail: "No runs found with the specified parameters".to_string(),
-                }))
-            } else {
-                // If there is no error, return a response with the retrieved data
-                // Return it as csvs if the user requested that
-                if return_csvs {
-                    // Build csv files from results
-                    let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&results)?;
-                    Ok(HttpResponse::Ok().body(zip_bytes))
-                }
-                // Otherwise, just return the json
-                else {
-                    Ok(HttpResponse::Ok().json(results))
-                }
-            }
-        }
-        Err(e) => {
-            // If there is an error, return a 500
-            error!("{}", e);
-            Err(default_500(&e))
-        }
-    }
+    // Use our processed query to find the run data
+    find(processed_query, return_csvs, pool).await
 }
 
 /// Handles requests to /pipelines/{id}/runs for retrieving run info by query parameters and
@@ -363,52 +256,38 @@ async fn find_for_pipeline(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&*id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response
     };
 
     let return_csvs: bool = query.csv;
 
     // Create RunQuery based on id and query
-    let processed_query = RunQuery {
-        pipeline_id: Some(id),
-        template_id: None,
-        test_id: None,
-        name: query.name,
-        status: query.status,
-        test_input: query.test_input,
-        test_options: query.test_options,
-        eval_input: query.eval_input,
-        eval_options: query.eval_options,
-        test_cromwell_job_id: query.test_cromwell_job_id,
-        eval_cromwell_job_id: query.eval_cromwell_job_id,
-        created_before: query.created_before,
-        created_after: query.created_after,
-        created_by: query.created_by,
-        finished_before: query.finished_before,
-        finished_after: query.finished_after,
-        sort: query.sort,
-        limit: query.limit,
-        offset: query.offset,
-    };
+    let mut processed_query = RunQuery::from(query);
+    processed_query.pipeline_id = Some(id);
 
+    // Use our processed query to find the run data
+    find(processed_query, return_csvs, pool).await
+}
+
+/// Queries for run data based on `run_query` (using a connection from `pool`), and returns an
+/// appropriate HttpResponse containing either the retrieved run data (as binary data for a zip of
+/// csvs containing the data if `return_csvs` or as json if not) or an error message and status code
+/// if there is an error
+async fn find(
+    run_query: RunQuery,
+    return_csvs: bool,
+    pool: web::Data<db::DbPool>,
+) -> HttpResponse {
     // Query DB for runs in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunWithResultsAndErrorsData::find(&conn, processed_query) {
-            Ok(test) => Ok(test),
+        match RunWithResultsAndErrorsData::find(&conn, run_query) {
+            Ok(runs) => Ok(runs),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -420,29 +299,31 @@ async fn find_for_pipeline(
         Ok(results) => {
             // If no run is found, return a 404
             if results.len() < 1 {
-                Err(HttpResponse::NotFound().json(ErrorBody {
+                HttpResponse::NotFound().json(ErrorBody {
                     title: "No run found".to_string(),
                     status: 404,
                     detail: "No runs found with the specified parameters".to_string(),
-                }))
+                })
             } else {
                 // If there is no error, return a response with the retrieved data
                 // Return it as csvs if the user requested that
                 if return_csvs {
                     // Build csv files from results
-                    let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&results)?;
-                    Ok(HttpResponse::Ok().body(zip_bytes))
+                    match get_bytes_for_csv_zip_from_runs(&results) {
+                        Ok(zip_bytes) => HttpResponse::Ok().body(zip_bytes),
+                        Err(error_response) => error_response
+                    }
                 }
                 // Otherwise, just return the json
                 else {
-                    Ok(HttpResponse::Ok().json(results))
+                    HttpResponse::Ok().json(results)
                 }
             }
         }
         Err(e) => {
             // If there is an error, return a 500
             error!("{}", e);
-            Err(default_500(&e))
+            default_500(&e)
         }
     }
 }
