@@ -1,7 +1,7 @@
 //! Provides functions for parsing gs uris and related operations
 
-use std::fmt;
 use percent_encoding::{AsciiSet, CONTROLS};
+use std::fmt;
 
 /// Prefix indicating a URI is a GS URI
 pub static GS_URI_PREFIX: &'static str = "gs://";
@@ -30,7 +30,7 @@ pub const GCLOUD_ENCODING_SET: &AsciiSet = &CONTROLS
 
 #[derive(Debug)]
 pub enum Error {
-    Parse(String)
+    Parse(String),
 }
 
 impl fmt::Display for Error {
@@ -104,5 +104,4 @@ mod tests {
         let failure = get_object_cloud_console_url_from_gs_uri(test_result_uri);
         assert!(matches!(failure, Err(Error::Parse(_))));
     }
-
 }

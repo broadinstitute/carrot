@@ -878,6 +878,7 @@ def test_delete(delete_data, caplog):
                 "asc(name)",
                 1,
                 0,
+                None
             ],
             "return": json.dumps(
                 [
@@ -901,6 +902,68 @@ def test_delete(delete_data, caplog):
                 indent=4,
                 sort_keys=True,
             ),
+        },
+        {
+            "args": [
+                "template",
+                "find_runs",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "--name",
+                "Queen of Bright Moon run",
+                "--status",
+                "succeeded",
+                "--test_input",
+                "tests/data/mock_test_input.json",
+                "--test_options",
+                "tests/data/mock_test_options.json",
+                "--eval_input",
+                "tests/data/mock_eval_input.json",
+                "--eval_options",
+                "tests/data/mock_eval_options.json",
+                "--test_cromwell_job_id",
+                "d9855002-6b71-429c-a4de-8e90222488cd",
+                "--eval_cromwell_job_id",
+                "03958293-6b71-429c-a4de-8e90222488cd",
+                "--created_before",
+                "2020-10-00T00:00:00.000000",
+                "--created_after",
+                "2020-09-00T00:00:00.000000",
+                "--created_by",
+                "glimmer@example.com",
+                "--finished_before",
+                "2020-10-00T00:00:00.000000",
+                "--finished_after",
+                "2020-09-00T00:00:00.000000",
+                "--sort",
+                "asc(name)",
+                "--limit",
+                1,
+                "--offset",
+                0,
+                "--zip_csv",
+                "csvs.zip"
+            ],
+            "params": [
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "Queen of Bright Moon run",
+                "succeeded",
+                {"in_greeted": "Cool Person"},
+                {"option": "other_value"},
+                {"in_output_filename": "test_greeting.txt"},
+                {"option": "value"},
+                "d9855002-6b71-429c-a4de-8e90222488cd",
+                "03958293-6b71-429c-a4de-8e90222488cd",
+                "2020-10-00T00:00:00.000000",
+                "2020-09-00T00:00:00.000000",
+                "glimmer@example.com",
+                "2020-10-00T00:00:00.000000",
+                "2020-09-00T00:00:00.000000",
+                "asc(name)",
+                1,
+                0,
+                "csvs.zip",
+            ],
+            "return": "Success!"
         },
         {
             "args": [
@@ -958,6 +1021,7 @@ def test_delete(delete_data, caplog):
                 "asc(name)",
                 1,
                 0,
+                None
             ],
             "from_name": {
                 "name": "Sword of Protection template",
@@ -1021,6 +1085,7 @@ def test_delete(delete_data, caplog):
                 "",
                 20,
                 0,
+                None,
             ],
             "return": json.dumps(
                 {
@@ -1076,6 +1141,7 @@ def find_runs_data(request):
             request.param["params"][14],
             request.param["params"][15],
             request.param["params"][16],
+            csv=request.param["params"][17],
         ).thenReturn(request.param["return"])
     return request.param
 

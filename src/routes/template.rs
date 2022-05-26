@@ -14,11 +14,12 @@ use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::multipart_handling;
 use crate::routes::util::parse_id;
 use crate::storage::gcloud_storage;
+use crate::util::gs_uri_parsing;
 use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool;
 use crate::validation::womtool::WomtoolRunner;
 use actix_multipart::Multipart;
-use actix_web::{error::BlockingError, guard, HttpRequest, HttpResponse, Responder, web};
+use actix_web::{error::BlockingError, guard, web, HttpRequest, HttpResponse, Responder};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::PgConnection;
 use log::{debug, error};
@@ -29,7 +30,6 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use tempfile::{NamedTempFile, TempDir};
 use uuid::Uuid;
-use crate::util::gs_uri_parsing;
 
 /// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
 /// where the only difference is whether we're using the test or eval wdl
@@ -1783,7 +1783,7 @@ mod tests {
     use crate::unit_test_util::*;
     use actix_web::client::Client;
     use actix_web::web::Bytes;
-    use actix_web::{App, http, test};
+    use actix_web::{http, test, App};
     use chrono::Utc;
     use diesel::PgConnection;
     use mockito::Mock;

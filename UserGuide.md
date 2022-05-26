@@ -452,33 +452,22 @@ Only certain python libraries are currently supported within the CARROT reportin
 ```
 
 
+###### <a name="1d-using-data-from-carrot"/> **1c. Using data from CARROT**
 
-###### <a name="1c-a-control-block-optional"/> **1c. A control block (optional)**
+When the report is generated, CARROT will supply the data for the run(s) in a series of CSV files that should be opened within your Jupyter Notebook in order to access the data.  The following CSV files will be included:
 
-The control block is a Jupyter notebook cell at the top of a notebook that contains directives for CARROT indicating how to execute the notebook.  It is an optional section and may be omitted.
+* metadata.csv - contains a row for each run with metadata for that row (rund_id, name, test_id, status, cromwell ids, created_at, created_by, finished_at, and errors)
+* test_inputs.csv - contains a row for each run with its run id and the contents of the test_input json for that run, with input names as column headers
+* eval_inputs.csv - contains a row for each run with its run id and the contents of the eval_input json for that run, with input names as column headers
+* test_options.csv - contains a row for each run with its run id and the contents of the test_options json for that run, with option names as column headers
+* eval_options.csv - contains a row for each run with its run id and the contents of the eval_options json for that run, with option names as column headers
+* results.csv - contains a row for each run with its run id and the contents of the results json for that run, with the result names as column headers
 
-By default, the job that generates a report will download all the result files for the run associated to the report being generated (it will not download any inputs).  If you would like to override this behavior (e.g. to  download the workflow inputs to use as part of the notebook visualization and to not download the results), you can do so by including a control block at the top of your notebook that looks like this:
+If you would like to download these files to use them locally and experiment with your notebook definition before defining the Report in CARROT, you can use the `--zip_csv` option in any of the `find_runs` commands or the `run find_by_id` command in carrot_cli.  For example:
 
-![Report Control Block](images/Report_Control_Block.png)
-
-
-Currently these parameters are only allowed to be set within a control block.
-
-The `carrot_download_results `parameter determines whether result files will be downloaded automatically (defaults to `True`).
-
-The `carrot_download_inputs `parameter determines whether input files will be downloaded automatically.  Automatic downloading is currently limited to only files indicated by `gs://` URIs.
-
-
-###### <a name="1d-using-data-from-carrot"/> **1d. Using data from CARROT**
-
-When generating the report, CARROT will insert a cell at the top containing a Python dictionary with the data for the run for which the report is being generated.  This dictionary will be formatted to match the value you would get if you were to retrieve a run’s data using `carrot_cli run find_by_id.`
-
-![Example Run Data Block](images/Example_Run_Data.png)
-
-
-The dictionary is titled `carrot_run_data`.  You can reference this variable within your notebook to use any of this data within your report.  If you allow automatic downloading of the `gs://` files within the notebook, they will be stored in a dictionary called `carrot_downloads`.  For example, if you enable automatic downloading of result files, you will be able to access the result titled “<code><em>Output File</em></code>” in the example above via:
-
-`carrot_downloads['results']['Output File']`
+```
+carrot_cli tempalte find_runs "My cool template" --zip_csv run_data_csvs.zip
+```
 
 
 ##### <a name="2-define-a-report-in-carrot"/> **2. Define a Report in CARROT**

@@ -20,6 +20,8 @@ def unstub():
         {
             "entity": "pipelines",
             "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "params": None,
+            "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:06.371563",
@@ -35,6 +37,28 @@ def unstub():
         {
             "entity": "templates",
             "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+            "params": None,
+            "expected_format": request_handler.ResponseFormat.JSON,
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-02T13:41:44.217522",
+                    "created_by": "catra@example.com",
+                    "description": "This template has problems with misdirected aggression",
+                    "test_wdl": "example.com/horde_test.wdl",
+                    "eval_wdl": "example.com/horde_eval.wdl",
+                    "name": "Catra template",
+                    "pipeline_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "template_id": "58723b05-6060-4444-9f1b-394aff691cce",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "entity": "templates",
+            "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+            "params": [("csv", "true")],
+            "expected_format": request_handler.ResponseFormat.BYTES,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-02T13:41:44.217522",
@@ -63,7 +87,7 @@ def find_by_id_data(request):
         request.param["entity"],
         request.param["id"],
     )
-    mockito.when(request_handler).send_request("GET", address).thenReturn(
+    mockito.when(request_handler).send_request("GET", address, params=request.param["params"], expected_format=request.param["expected_format"]).thenReturn(
         request.param["return"]
     )
     return request.param
@@ -71,7 +95,10 @@ def find_by_id_data(request):
 
 def test_find_by_id(find_by_id_data):
     result = request_handler.find_by_id(
-        find_by_id_data["entity"], find_by_id_data["id"]
+        find_by_id_data["entity"],
+        find_by_id_data["id"],
+        params=find_by_id_data["params"],
+        expected_format=find_by_id_data["expected_format"]
     )
     assert result == find_by_id_data["return"]
 
@@ -81,6 +108,7 @@ def test_find_by_id(find_by_id_data):
         {
             "entity": "pipelines",
             "params": [("name", "Queen of Bright Moon Pipeline")],
+            "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 [
                     {
@@ -98,6 +126,7 @@ def test_find_by_id(find_by_id_data):
         {
             "entity": "pipelines",
             "params": [("id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"), ("name", "")],
+            "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 {
                     "title": "No pipelines found",
@@ -120,13 +149,13 @@ def find_data(request):
     # Get params filtered to remove empty ones since the empty ones won't be passed to request
     params = list(filter(lambda param: param[1] != "", request.param["params"]))
     mockito.when(request_handler).send_request(
-        "GET", address, params=params
+        "GET", address, params=params, expected_format=request.param["expected_format"]
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find(find_data):
-    result = request_handler.find(find_data["entity"], find_data["params"])
+    result = request_handler.find(find_data["entity"], find_data["params"], find_data["expected_format"])
     assert result == find_data["return"]
 
 
@@ -475,6 +504,7 @@ def test_run(run_data):
             "entity": "tests",
             "id": "5fad47be-0d23-4679-8d8c-deff717d5419",
             "params": [("name", "Entrapta Test Run")],
+            "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 [
                     {
@@ -501,6 +531,7 @@ def test_run(run_data):
             "entity": "templates",
             "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "params": [("id", ""), ("name", "Mara's Test Run")],
+            "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 {
                     "title": "No run found",
@@ -510,6 +541,13 @@ def test_run(run_data):
                 indent=4,
                 sort_keys=True,
             ),
+        },
+        {
+            "entity": "tests",
+            "id": "5fad47be-0d23-4679-8d8c-deff717d5419",
+            "params": [("name", "Entrapta Test Run"), ("csv", "true")],
+            "expected_format": request_handler.ResponseFormat.BYTES,
+            "return": b'randombytesthatrepresentazip',
         },
     ]
 )
@@ -527,14 +565,14 @@ def find_runs_data(request):
     # Get params filtered to remove empty ones since the empty ones won't be passed to request
     params = list(filter(lambda param: param[1] != "", request.param["params"]))
     mockito.when(request_handler).send_request(
-        "GET", address, params=params
+        "GET", address, params=params, expected_format=request.param["expected_format"]
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find_runs(find_runs_data):
     result = request_handler.find_runs(
-        find_runs_data["entity"], find_runs_data["id"], find_runs_data["params"]
+        find_runs_data["entity"], find_runs_data["id"], find_runs_data["params"], find_runs_data["expected_format"]
     )
     assert result == find_runs_data["return"]
 
@@ -825,24 +863,29 @@ def test_find_maps(find_maps_data):
     params=[
         {
             "exception": requests.ConnectionError,
-            "return": "Encountered a connection error. Enable verbose logging (-v) for more info",
+            "log": "Encountered a connection error. Enable verbose logging (-v) for more info",
+            "exit": True
         },
         {
             "exception": requests.URLRequired,
-            "return": "Invalid URL. Enable verbose logging (-v) for more info",
+            "log": "Invalid URL. Enable verbose logging (-v) for more info",
+            "exit": True
         },
         {
             "exception": requests.Timeout,
-            "return": "Request timed out. Enable verbose logging (-v) for more info",
+            "log": "Request timed out. Enable verbose logging (-v) for more info",
+            "exit": True
         },
         {
             "exception": requests.TooManyRedirects,
-            "return": "Too many redirects. Enable verbose logging (-v) for more info",
+            "log": "Too many redirects. Enable verbose logging (-v) for more info",
+            "exit": True
         },
         {
             "status_code": 400,
-            "text": "",
-            "return": json.dumps({"Body": "", "Status": 400}, indent=4, sort_keys=True),
+            "text": json.dumps({"Body": "", "Status": 400}),
+            "log": json.dumps({"Body": "", "Status": 400}, indent=4, sort_keys=True),
+            "exit": True
         },
         {
             "status_code": 200,
@@ -850,6 +893,7 @@ def test_find_maps(find_maps_data):
             "return": json.dumps(
                 {"name": "test_name", "test_id": "123456789"}, indent=4, sort_keys=True
             ),
+            "exit": False
         },
     ]
 )
@@ -877,18 +921,27 @@ def send_request_data(request):
             "POST", "http://example.com/api/v1/pipelines", params=params, json=json_body, data=None, files=None
         ).thenReturn(response)
 
-    return request.param["return"]
+    return request.param
 
 
-def test_send_request(send_request_data):
+def test_send_request(send_request_data, caplog):
     params = [("sort", "asc(name)")]
     body = {"test", "test"}
     # Send request
-    response = request_handler.send_request(
-        "POST", "http://example.com/api/v1/pipelines", params=params, json=body
-    )
-    # Check that we got the expected error message
-    assert response == send_request_data
+    if not send_request_data["exit"]:
+        response = request_handler.send_request(
+            "POST", "http://example.com/api/v1/pipelines", params=params, json=body
+        )
+        # Check that we got the expected response
+        assert response == send_request_data["return"]
+    else:
+        with pytest.raises(SystemExit):
+            request_handler.send_request(
+                "POST", "http://example.com/api/v1/pipelines", params=params, json=body
+            )
+    # If we're expecting a log message, make sure we check for it
+    if "log" in send_request_data:
+        assert send_request_data["log"] in caplog.text
 
 
 @pytest.fixture(

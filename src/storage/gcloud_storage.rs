@@ -1,4 +1,6 @@
 //! Defines functionality for interacting with the google cloud storage API
+use crate::util::gs_uri_parsing;
+use crate::util::gs_uri_parsing::GCLOUD_ENCODING_SET;
 use google_storage1::{Object, Storage};
 use hyper::client::Response;
 use percent_encoding::{AsciiSet, CONTROLS};
@@ -6,8 +8,6 @@ use std::fmt;
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
-use crate::util::gs_uri_parsing;
-use crate::util::gs_uri_parsing::GCLOUD_ENCODING_SET;
 
 /// Shorthand type for google_storage1::Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>
 pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hyper::Client>>;
@@ -238,7 +238,8 @@ impl GCloudClient {
         name: &str,
     ) -> Result<String, Error> {
         // Parse address to get bucket and object name
-        let (bucket_name, object_name): (String, String) = gs_uri_parsing::parse_bucket_and_object_name(address)?;
+        let (bucket_name, object_name): (String, String) =
+            gs_uri_parsing::parse_bucket_and_object_name(address)?;
         // Append name to the end of object name to get the full name we'll use
         let full_name: String = object_name + "/" + name;
         // Get the storage hub mutex lock (unwrapping because we want to panic if the mutex is poisoned)

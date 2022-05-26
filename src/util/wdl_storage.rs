@@ -4,13 +4,13 @@ use crate::config::{GCSWdlStorageConfig, LocalWdlStorageConfig, WdlStorageConfig
 use crate::models::wdl_hash::{WdlDataToHash, WdlHashData};
 use crate::storage::gcloud_storage;
 use crate::storage::gcloud_storage::GCloudClient;
+use crate::util::gs_uri_parsing;
 use diesel::PgConnection;
 use std::fmt;
 use std::fs;
 use std::io::prelude::*;
 use std::path::PathBuf;
 use uuid::Uuid;
-use crate::util::gs_uri_parsing;
 
 #[derive(Debug)]
 pub enum Error {
