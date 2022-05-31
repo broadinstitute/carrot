@@ -5,6 +5,6 @@
 //! them here, along with any custom functions we ever define, so they can be used in queries in
 //! the models submodules
 
-use diesel::sql_types::*;
+use diesel::sql_types::Text;
 
 sql_function!(fn lower(x: Text) -> Text);

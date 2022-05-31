@@ -5,7 +5,7 @@
 //! contained within the report is defined within the sections mapped to it. Represented in the
 //! database by the REPORT table.
 
-use crate::custom_sql_types::{ReportStatusEnum, REPORT_FAILURE_STATUSES};
+use crate::custom_sql_types::REPORT_FAILURE_STATUSES;
 use crate::schema::report;
 use crate::schema::report::dsl::*;
 use crate::schema::run_report;
@@ -158,7 +158,7 @@ impl ReportData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &*sort_clause.key {
                     "report_id" => {
@@ -293,12 +293,7 @@ impl ReportData {
         // Query the run_reports table for non failed run reports
         let non_failed_run_reports_count = run_report::dsl::run_report
             .filter(run_report::dsl::report_id.eq(id))
-            .filter(
-                run_report::dsl::status.ne(all(REPORT_FAILURE_STATUSES
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<ReportStatusEnum>>())),
-            )
+            .filter(run_report::dsl::status.ne(all(REPORT_FAILURE_STATUSES.to_vec())))
             .select(run_report::dsl::run_id)
             .first::<Uuid>(conn);
 
@@ -317,7 +312,7 @@ impl ReportData {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::RunStatusEnum;
+    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_report::{NewRunReport, RunReportData};

@@ -11,7 +11,6 @@ mod requests;
 mod routes;
 mod run_error_logger;
 mod schema;
-mod storage;
 mod util;
 mod validation;
 
@@ -44,6 +43,7 @@ embed_migrations!("migrations");
 /// Creates a status manager and starts it running in its own thread.  Uses `db_pool` for database
 /// connections and `carrot_config` for configuring the status manager and related entities.
 /// Returns a sender for sending a terminate message, and a join handle for joining to the thread
+#[must_use]
 pub fn run_status_manager(
     db_pool: db::DbPool,
     carrot_config: config::Config,
@@ -72,6 +72,7 @@ pub fn run_status_manager(
 /// Creates a gcloud subscriber and starts it running in its own thread.  Uses `db_pool` for database
 /// connections and `carrot_config` for configuring the status manager and related entities.
 /// Returns a sender for sending a terminate message, and a join handle for joining to the thread
+#[must_use]
 pub fn run_gcloud_subscriber(
     db_pool: db::DbPool,
     carrot_config: config::Config,
@@ -87,7 +88,7 @@ pub fn run_gcloud_subscriber(
                 db_pool,
                 carrot_config,
                 subscriber_receive,
-            ))
+            ));
         })
         .expect("Failed to spawn gcloud subscriber thread");
 
@@ -116,10 +117,10 @@ fn main() {
     // Initialize logger with level from config
     let mut logger = simple_logger::SimpleLogger::new()
         .with_utc_timestamps()
-        .with_level(carrot_config.logging().level().to_owned().to_level_filter());
+        .with_level(carrot_config.logging().level().clone().to_level_filter());
     // Add any module-specific levels
     for item in carrot_config.logging().modules() {
-        logger = logger.with_module_level(item.0, item.1.to_owned().to_level_filter());
+        logger = logger.with_module_level(item.0, item.1.clone().to_level_filter());
     }
     logger.init().expect("Failed to initialize logger");
 

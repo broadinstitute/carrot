@@ -13,7 +13,7 @@ pub enum Error {
     IO(std::io::Error),
     Invalid(String),
     FromUtf8(std::string::FromUtf8Error),
-    JSON(serde_json::error::Error),
+    Json(serde_json::error::Error),
 }
 
 impl fmt::Display for Error {
@@ -22,7 +22,7 @@ impl fmt::Display for Error {
             Error::IO(e) => write!(f, "Womtool IO Error {}", e),
             Error::Invalid(msg) => write!(f, "Womtool Invalid Error {}", msg),
             Error::FromUtf8(e) => write!(f, "Womtool FromUtf8Error Error {}", e),
-            Error::JSON(e) => write!(f, "Womtool JSON Error {}", e),
+            Error::Json(e) => write!(f, "Womtool JSON Error {}", e),
         }
     }
 }
@@ -42,7 +42,7 @@ impl From<std::string::FromUtf8Error> for Error {
 }
 impl From<serde_json::error::Error> for Error {
     fn from(e: serde_json::error::Error) -> Error {
-        Error::JSON(e)
+        Error::Json(e)
     }
 }
 

@@ -7,9 +7,9 @@ use crate::db;
 use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use crate::routes::util::parse_id;
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
-use uuid::Uuid;
 
 /// Handles requests to /software_builds/{id} for retrieving software_build info by software_build_id
 ///
@@ -20,26 +20,18 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database software_builds in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Query DB for software_build in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareBuildData::find_by_id(&conn, id) {
@@ -51,21 +43,25 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|software_builds| HttpResponse::Ok().json(software_builds))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no software_build is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No software_build found".to_string(),
-                status: 404,
-                detail: "No software_build found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(software_builds) => HttpResponse::Ok().json(software_builds),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no software_build is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No software_build found".to_string(),
+                        status: 404,
+                        detail: "No software_build found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })
+    }
 }
 
 /// Handles requests to /software_builds for retrieving software_build info by query parameters
@@ -80,9 +76,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 async fn find(
     web::Query(query): web::Query<SoftwareBuildQuery>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Query DB for software_builds in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareBuildData::find(&conn, query) {
@@ -94,24 +90,26 @@ async fn find(
         }
     })
     .await
-    .map(|software_builds| {
-        // If no software_build is found, return a 404
-        if software_builds.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No software_build found".to_string(),
-                status: 404,
-                detail: "No software_builds found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(software_builds)
+    {
+        Ok(software_builds) => {
+            // If no software_build is found, return a 404
+            if software_builds.is_empty() {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No software_build found".to_string(),
+                    status: 404,
+                    detail: "No software_builds found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(software_builds)
+            }
         }
-    })
-    .map_err(|e| {
-        // For any errors, return a 500
-        error!("{}", e);
-        default_500(&e)
-    })
+        Err(e) => {
+            // For any errors, return a 500
+            error!("{}", e);
+            default_500(&e)
+        }
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

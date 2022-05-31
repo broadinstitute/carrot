@@ -174,7 +174,7 @@ impl SoftwareBuildData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "software_build_id" => {
@@ -357,7 +357,7 @@ mod tests {
         let mut software_versions = Vec::new();
 
         let new_software_version = NewSoftwareVersion {
-            software_id: new_software.software_id.clone(),
+            software_id: new_software.software_id,
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
         };
 
@@ -488,7 +488,7 @@ mod tests {
         let new_run = RunData::create(&conn, new_run).expect("Failed to insert run");
 
         let new_run_software_version = NewRunSoftwareVersion {
-            run_id: new_run.run_id.clone(),
+            run_id: new_run.run_id,
             software_version_id: id,
         };
 

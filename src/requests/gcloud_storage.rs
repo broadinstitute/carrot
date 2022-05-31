@@ -3,7 +3,6 @@ use crate::util::gs_uri_parsing;
 use crate::util::gs_uri_parsing::GCLOUD_ENCODING_SET;
 use google_storage1::{Object, Storage};
 use hyper::client::Response;
-use percent_encoding::{AsciiSet, CONTROLS};
 use std::fmt;
 use std::fs::File;
 use std::io::{Cursor, Read};
@@ -15,7 +14,7 @@ pub type StorageHub = Storage<hyper::Client, yup_oauth2::ServiceAccountAccess<hy
 #[derive(Debug)]
 pub enum Error {
     Parse(gs_uri_parsing::Error),
-    GCS(google_storage1::Error),
+    Gcs(google_storage1::Error),
     IO(std::io::Error),
     Failed(String),
     Utf8(std::str::Utf8Error),
@@ -28,7 +27,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Parse(e) => write!(f, "GCloud Storage Error Parsing URI {}", e),
-            Error::GCS(e) => write!(f, "GCloud Storage GCS Error {}", e),
+            Error::Gcs(e) => write!(f, "GCloud Storage GCS Error {}", e),
             Error::IO(e) => write!(f, "GCloud Storage IO Error {}", e),
             Error::Failed(msg) => write!(f, "GCloud Storage Failed Error {}", msg),
             Error::Utf8(e) => write!(f, "GCloud Storage Utf8 Error {}", e),
@@ -45,7 +44,7 @@ impl From<gs_uri_parsing::Error> for Error {
 
 impl From<google_storage1::Error> for Error {
     fn from(e: google_storage1::Error) -> Error {
-        Error::GCS(e)
+        Error::Gcs(e)
     }
 }
 
@@ -82,13 +81,16 @@ impl GCloudClient {
     /// # Panics
     /// Panics if attempting to load the service account key file specified by `key_file_location`
     /// fails
-    pub fn new(key_file_location: &String) -> GCloudClient {
+    pub fn new(key_file_location: &str) -> GCloudClient {
         // Load GCloud SA key so we can use it for authentication
         let client_secret =
-            yup_oauth2::service_account_key_from_file(key_file_location).expect(&format!(
-                "Failed to load service account key from file at: {}",
-                key_file_location
-            ));
+            yup_oauth2::service_account_key_from_file(&String::from(key_file_location))
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "Failed to load service account key from file at: {}",
+                        key_file_location
+                    )
+                });
         // Create hyper client for authenticating to GCloud
         let auth_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
             hyper_rustls::TlsClient::new(),

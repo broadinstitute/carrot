@@ -242,7 +242,7 @@ impl RunData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -437,7 +437,7 @@ impl RunData {
         };
         // Do the delete in a transaction
         #[cfg(not(test))]
-        return conn.build_transaction().run(|| delete_closure());
+        return conn.build_transaction().run(delete_closure);
 
         // Tests do all database stuff in transactions that are not committed so they don't interfere
         // with other tests. An unfortunate side effect of this is that we can't use transactions in
@@ -556,7 +556,7 @@ impl RunWithResultsAndErrorsData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -788,7 +788,7 @@ mod tests {
 
         let new_run_result = NewRunResult {
             run_id: id.clone(),
-            result_id: new_result.result_id.clone(),
+            result_id: new_result.result_id,
             value: rand_result.to_string(),
         };
 
@@ -813,7 +813,7 @@ mod tests {
 
         let new_run_result2 = NewRunResult {
             run_id: id.clone(),
-            result_id: new_result2.result_id.clone(),
+            result_id: new_result2.result_id,
             value: String::from(rand_result),
         };
 
@@ -1130,7 +1130,7 @@ mod tests {
 
         let new_software_version = NewSoftwareVersion {
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
-            software_id: new_software.software_id.clone(),
+            software_id: new_software.software_id,
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version)
@@ -1138,7 +1138,7 @@ mod tests {
 
         let new_software_version2 = NewSoftwareVersion {
             commit: String::from("c9d1a4eb7d1c49428b03bee19a72401b02cec466 "),
-            software_id: new_software.software_id.clone(),
+            software_id: new_software.software_id,
         };
 
         let new_software_version2 = SoftwareVersionData::create(conn, new_software_version2)
@@ -1146,7 +1146,7 @@ mod tests {
 
         let new_run_software_version = NewRunSoftwareVersion {
             run_id: id,
-            software_version_id: new_software_version.software_version_id.clone(),
+            software_version_id: new_software_version.software_version_id,
         };
 
         run_software_versions.push(
@@ -1156,7 +1156,7 @@ mod tests {
 
         let new_run_software_version = NewRunSoftwareVersion {
             run_id: id,
-            software_version_id: new_software_version2.software_version_id.clone(),
+            software_version_id: new_software_version2.software_version_id,
         };
 
         run_software_versions.push(
@@ -1567,7 +1567,7 @@ mod tests {
             test_options: None,
             eval_input: None,
             eval_options: None,
-            test_cromwell_job_id: Some(test_run.test_cromwell_job_id.clone().unwrap()),
+            test_cromwell_job_id: test_run.test_cromwell_job_id.clone(),
             eval_cromwell_job_id: None,
             created_before: None,
             created_after: None,
@@ -1604,7 +1604,7 @@ mod tests {
             eval_input: None,
             eval_options: None,
             test_cromwell_job_id: None,
-            eval_cromwell_job_id: Some(test_run.eval_cromwell_job_id.clone().unwrap()),
+            eval_cromwell_job_id: test_run.eval_cromwell_job_id.clone(),
             created_before: None,
             created_after: None,
             created_by: None,

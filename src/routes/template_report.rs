@@ -9,11 +9,11 @@ use crate::models::template_report::{
 };
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use crate::routes::util::parse_id;
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use uuid::Uuid;
 
 /// Represents the part of a new template_report mapping that is received as a request body
 ///
@@ -37,41 +37,25 @@ struct NewTemplateReportIncomplete {
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Parse report ID into Uuid
-    let report_id = match Uuid::parse_str(report_id) {
-        Ok(report_id) => report_id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Report ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Report ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+    let report_id = match parse_id(report_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
     };
 
     // Query DB for report in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TemplateReportData::find_by_template_and_report(&conn, id, report_id) {
@@ -83,23 +67,28 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    .map(|reports| {
-        // If there is no error, return a response with the retrieved data
-        HttpResponse::Ok().json(reports)
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no mapping is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No template_report mapping found".to_string(),
-                status: 404,
-                detail: "No template_report mapping found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        Ok(reports) => {
+            // If there is no error, return a response with the retrieved data
+            HttpResponse::Ok().json(reports)
         }
-    })
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no mapping is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No template_report mapping found".to_string(),
+                        status: 404,
+                        detail: "No template_report mapping found with the specified ID"
+                            .to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
+        }
+    }
 }
 
 /// Handles requests to /templates/{id}/reports for retrieving mapping info by query parameters
@@ -117,26 +106,18 @@ async fn find(
     id: web::Path<String>,
     web::Query(mut query): web::Query<TemplateReportQuery>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Set template_id as part of query object
     query.template_id = Some(id);
 
     // Query DB for reports in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TemplateReportData::find(&conn, query) {
@@ -148,25 +129,27 @@ async fn find(
         }
     })
     .await
-    .map(|reports| {
-        if reports.len() < 1 {
-            // If no mapping is found, return a 404
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No template_report mapping found".to_string(),
-                status: 404,
-                detail: "No template_report mapping found with the specified parameters"
-                    .to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(reports)
+    {
+        Ok(reports) => {
+            if reports.is_empty() {
+                // If no mapping is found, return a 404
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No template_report mapping found".to_string(),
+                    status: 404,
+                    detail: "No template_report mapping found with the specified parameters"
+                        .to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(reports)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // For any errors, return a 500
-        default_500(&e)
-    })
+        Err(e) => {
+            error!("{}", e);
+            // For any errors, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /templates/{id}/reports/{report_id} mapping for creating template_report
@@ -185,48 +168,32 @@ async fn create(
     req: HttpRequest,
     web::Json(new_test): web::Json<NewTemplateReportIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Parse report ID into Uuid
-    let report_id = match Uuid::parse_str(report_id) {
-        Ok(report_id) => report_id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Report ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Report ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+    let report_id = match parse_id(report_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
     };
 
     // Create a NewTemplateReport to pass to the create function
     let new_test = NewTemplateReport {
         template_id: id,
-        report_id: report_id,
+        report_id,
         created_by: new_test.created_by,
     };
 
     // Insert in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TemplateReportData::create(&conn, new_test) {
@@ -238,13 +205,15 @@ async fn create(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|reports| HttpResponse::Ok().json(reports))
-    .map_err(|e| {
-        error!("{}", e);
-        // For any errors, return a 500
-        default_500(&e)
-    })
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(reports) => HttpResponse::Ok().json(reports),
+        Err(e) => {
+            error!("{}", e);
+            // For any errors, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles DELETE requests to /templates/{id}/reports/{report_id} for deleting template_report
@@ -258,41 +227,25 @@ async fn create(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Parse report ID into Uuid
-    let report_id = match Uuid::parse_str(report_id) {
-        Ok(report_id) => report_id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Report ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Report ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+    let report_id = match parse_id(report_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
     };
 
     //Query DB for pipeline in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TemplateReportData::delete(&conn, id, report_id) {
@@ -303,9 +256,10 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
             }
         }
     })
-        .await
+    .await
+    {
         // If there is no error, verify that a row was deleted
-        .map(|reports| {
+        Ok(reports) => {
             if reports > 0 {
                 let message = format!("Successfully deleted {} row", reports);
                 HttpResponse::Ok().json(json!({ "message": message }))
@@ -316,8 +270,8 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     detail: "No template_report mapping found for the specified id".to_string(),
                 })
             }
-        })
-        .map_err(|e| {
+        }
+        Err(e) => {
             error!("{}", e);
             match e {
                 // If no template is found, return a 404
@@ -331,7 +285,8 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                 // For other errors, return a 500
                 _ => default_500(&e),
             }
-        })
+        }
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

@@ -5,15 +5,15 @@ use uuid::Uuid;
 
 /// Writes `message` to the log as an error and inserts a run error into the db for the run with id
 /// `run_id`.  Logs any errors encountered trying to do the insert
-pub fn log_error(conn: &PgConnection, run_id: Uuid, message: String) {
+pub fn log_error(conn: &PgConnection, run_id: Uuid, message: &str) {
     // Log the message first
-    error!("{}", &message);
+    error!("{}", message);
     // Now write it to the db
     if let Err(e) = RunErrorData::create(
         conn,
         NewRunError {
             run_id,
-            error: message.clone(),
+            error: String::from(message),
         },
     ) {
         error!(

@@ -4,7 +4,7 @@ use percent_encoding::{AsciiSet, CONTROLS};
 use std::fmt;
 
 /// Prefix indicating a URI is a GS URI
-pub static GS_URI_PREFIX: &'static str = "gs://";
+pub static GS_URI_PREFIX: &str = "gs://";
 
 /// A set of all the characters that need to be percent-encoded for the GCS API
 pub const GCLOUD_ENCODING_SET: &AsciiSet = &CONTROLS
@@ -45,7 +45,7 @@ impl fmt::Display for Error {
 /// `object_uri` in the format gs://bucketname/ob/ject/nam/e
 pub fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String), Error> {
     // Split it so we can extract the parts we want
-    let split_result_uri: Vec<&str> = object_uri.split("/").collect();
+    let split_result_uri: Vec<&str> = object_uri.split('/').collect();
     // If the split uri isn't at least 4 parts, this isn't a valid uri
     if split_result_uri.len() < 4 {
         return Err(Error::Parse(format!(
@@ -56,7 +56,7 @@ pub fn parse_bucket_and_object_name(object_uri: &str) -> Result<(String, String)
     // Bucket name comes after the gs://
     let bucket_name = String::from(split_result_uri[2]);
     // Object name is everything after the bucket name
-    let object_name = String::from(object_uri.splitn(4, "/").collect::<Vec<&str>>()[3]);
+    let object_name = String::from(object_uri.splitn(4, '/').collect::<Vec<&str>>()[3]);
     Ok((bucket_name, object_name))
 }
 

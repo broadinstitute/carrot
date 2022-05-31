@@ -139,7 +139,7 @@ impl SoftwareVersionData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "software_version_id" => {
@@ -237,8 +237,8 @@ mod tests {
         let new_softwares = insert_test_softwares(conn);
 
         let ids = vec![
-            new_softwares.get(0).unwrap().software_id.clone(),
-            new_softwares.get(1).unwrap().software_id.clone(),
+            new_softwares.get(0).unwrap().software_id,
+            new_softwares.get(1).unwrap().software_id,
         ];
 
         let new_software_versions = insert_test_software_versions_with_software_id(conn, ids);

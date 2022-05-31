@@ -3,8 +3,8 @@
 //! Provides functions for retrieving resources referenced in test configs, such as WDLs and test
 //! data
 
-use crate::storage::gcloud_storage;
-use crate::storage::gcloud_storage::GCloudClient;
+use crate::requests::gcloud_storage;
+use crate::requests::gcloud_storage::GCloudClient;
 use crate::util::gs_uri_parsing;
 use actix_web::client::Client;
 use std::fmt;
@@ -116,7 +116,7 @@ impl TestResourceClient {
 
     /// Attempts to retrieve and return the resource at `address` as a byte vec
     async fn get_resource_from_http_url(&self, address: &str) -> Result<Vec<u8>, Error> {
-        let request = self.http_client.get(format!("{}", address));
+        let request = self.http_client.get(address);
 
         // Make the request
         let mut response = request.send().await?;
@@ -141,8 +141,8 @@ impl TestResourceClient {
 #[cfg(test)]
 mod tests {
 
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::test_resource_requests::{Error, TestResourceClient};
-    use crate::storage::gcloud_storage::GCloudClient;
     use actix_web::client::Client;
     use std::fs::read_to_string;
     use std::sync::Arc;
@@ -233,7 +233,7 @@ mod tests {
         let client = Client::default();
         let mut gcloud_client = GCloudClient::new(&String::from("test"));
         gcloud_client.set_retrieve_media(Box::new(
-            |address: &str| -> Result<Vec<u8>, crate::storage::gcloud_storage::Error> {
+            |address: &str| -> Result<Vec<u8>, crate::requests::gcloud_storage::Error> {
                 Ok(b"Test contents".to_vec())
             },
         ));
@@ -256,10 +256,10 @@ mod tests {
         let client = Client::default();
         let mut gcloud_client = GCloudClient::new(&String::from("test"));
         gcloud_client.set_retrieve_media(Box::new(
-            |address: &str| -> Result<Vec<u8>, crate::storage::gcloud_storage::Error> {
-                Err(crate::storage::gcloud_storage::Error::Failed(String::from(
-                    "Failed to retrieve",
-                )))
+            |address: &str| -> Result<Vec<u8>, crate::requests::gcloud_storage::Error> {
+                Err(crate::requests::gcloud_storage::Error::Failed(
+                    String::from("Failed to retrieve"),
+                ))
             },
         ));
         let test_resource_client: TestResourceClient =
@@ -274,7 +274,7 @@ mod tests {
         // Make sure they match
         assert!(matches!(
             response,
-            Error::GS(crate::storage::gcloud_storage::Error::Failed(_))
+            Error::GS(crate::requests::gcloud_storage::Error::Failed(_))
         ));
     }
 }

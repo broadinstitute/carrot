@@ -40,15 +40,15 @@ pub struct SubscriptionIncomplete {
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(
-    id: web::Path<String>,
-    pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+async fn find_by_id(id: web::Path<String>, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Parse subscription_id
-    let subscription_id = parse_id(&id)?;
+    let subscription_id = match parse_id(&id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
 
     // Query DB for pipeline in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SubscriptionData::find_by_id(&conn, subscription_id) {
@@ -57,23 +57,25 @@ async fn find_by_id(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no pipeline is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No subscription found".to_string(),
-                status: 404,
-                detail: "No subscription found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no pipeline is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No subscription found".to_string(),
+                        status: 404,
+                        detail: "No subscription found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })?;
-
-    Ok(res)
+    }
 }
 
 /// Creates a new subscription based on the parameters `id`, `email`, and `entity_type`
@@ -90,15 +92,22 @@ async fn create(
     email: String,
     entity_type: EntityTypeEnum,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Parse id into Uuid
-    let entity_id = parse_id(&id)?;
+    let entity_id = match parse_id(&id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
     // Get db connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
     // Verify that the existence of the entity we're trying to subscribe to
-    verify_existence(entity_id.clone(), conn, entity_type.clone()).await?;
+    if let Err(e) = verify_existence(entity_id, conn, entity_type).await {
+        return e;
+    }
     // Verify that the email is a valid email address
-    validate_email(&email)?;
+    if let Err(e) = validate_email(&email) {
+        return e;
+    }
     // Create NewSubscription from params
     let new_subscription = NewSubscription {
         entity_type,
@@ -107,7 +116,7 @@ async fn create(
     };
     // Insert in new thread
     let conn = pool.get().expect("Failed to get DB connection from pool");
-    let res = web::block(
+    match web::block(
         move || match SubscriptionData::create(&conn, new_subscription) {
             Ok(subscription) => Ok(subscription),
             Err(e) => {
@@ -117,14 +126,15 @@ async fn create(
         },
     )
     .await
-    // If there is no error, return a response with the created subscription
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-    Ok(res)
+    {
+        // If there is no error, return a response with the created subscription
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles POST requests to /pipelines/{id}/subscriptions for creating a subscription to a
@@ -142,7 +152,7 @@ async fn create_for_pipeline(
     id: web::Path<String>,
     web::Json(new_sub): web::Json<SubscriptionIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     create(
         id.to_string(),
         new_sub.email,
@@ -167,7 +177,7 @@ async fn create_for_template(
     id: web::Path<String>,
     web::Json(new_sub): web::Json<SubscriptionIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     create(
         id.to_string(),
         new_sub.email,
@@ -192,7 +202,7 @@ async fn create_for_test(
     id: web::Path<String>,
     web::Json(new_sub): web::Json<SubscriptionIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     create(id.to_string(), new_sub.email, EntityTypeEnum::Test, pool).await
 }
 
@@ -211,8 +221,11 @@ async fn delete(
     email: String,
     entity_type: EntityTypeEnum,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let entity_id = parse_id(&entity_id)?;
+) -> HttpResponse {
+    let entity_id = match parse_id(&entity_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
     // Create SubscriptionDeleteParams from params
     let delete_query = SubscriptionDeleteParams {
         entity_type: Some(entity_type),
@@ -224,7 +237,7 @@ async fn delete(
     };
     // Delete in new thread
     let conn = pool.get().expect("Failed to get DB connection from pool");
-    let res = web::block(
+    match web::block(
         move || match SubscriptionData::delete(&conn, delete_query) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
@@ -234,25 +247,26 @@ async fn delete(
         },
     )
     .await
-    // If there is no error, verify that a row was deleted
-    .map(|results| {
-        if results > 0 {
-            let message = format!("Successfully deleted {} row(s)", results);
-            HttpResponse::Ok().json(json!({ "message": message }))
-        } else {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No subscription found".to_string(),
-                status: 404,
-                detail: "No subscription found for the specified parameters".to_string(),
-            })
+    {
+        // If there is no error, verify that a row was deleted
+        Ok(results) => {
+            if results > 0 {
+                let message = format!("Successfully deleted {} row(s)", results);
+                HttpResponse::Ok().json(json!({ "message": message }))
+            } else {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No subscription found".to_string(),
+                    status: 404,
+                    detail: "No subscription found for the specified parameters".to_string(),
+                })
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-    Ok(res)
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles DELETE requests to /pipelines/{id}/subscriptions for deleting a subscription to a
@@ -270,7 +284,7 @@ async fn delete_for_pipeline(
     id: web::Path<String>,
     web::Query(new_sub): web::Query<SubscriptionIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     delete(
         id.to_string(),
         new_sub.email,
@@ -295,7 +309,7 @@ async fn delete_for_template(
     id: web::Path<String>,
     web::Query(new_sub): web::Query<SubscriptionIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     delete(
         id.to_string(),
         new_sub.email,
@@ -320,7 +334,7 @@ async fn delete_for_test(
     id: web::Path<String>,
     web::Query(new_sub): web::Query<SubscriptionIncomplete>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     delete(id.to_string(), new_sub.email, EntityTypeEnum::Test, pool).await
 }
 
@@ -333,12 +347,9 @@ async fn delete_for_test(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find(
-    query: SubscriptionQuery,
-    pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+async fn find(query: SubscriptionQuery, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Query DB for subscriptions in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SubscriptionData::find(&conn, query) {
@@ -350,26 +361,26 @@ async fn find(
         }
     })
     .await
-    .map(|results| {
-        // If there are no results, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No subscriptions found".to_string(),
-                status: 404,
-                detail: "No subscriptions found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If there are no results, return a 404
+            if results.is_empty() {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No subscriptions found".to_string(),
+                    status: 404,
+                    detail: "No subscriptions found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(results)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-
-    Ok(res)
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /subscriptions for retrieving subscription info by query
@@ -385,7 +396,7 @@ async fn find(
 async fn find_for_any(
     web::Query(query): web::Query<SubscriptionQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     find(query, pool).await
 }
 
@@ -404,8 +415,11 @@ async fn find_for_pipeline(
     id: web::Path<String>,
     web::Query(mut query): web::Query<SubscriptionQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let entity_id = parse_id(&id)?;
+) -> HttpResponse {
+    let entity_id = match parse_id(&id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
     // Fill in id and type in query
     query.entity_id = Some(entity_id);
     query.entity_type = Some(EntityTypeEnum::Pipeline);
@@ -428,8 +442,11 @@ async fn find_for_template(
     id: web::Path<String>,
     web::Query(mut query): web::Query<SubscriptionQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let entity_id = parse_id(&id)?;
+) -> HttpResponse {
+    let entity_id = match parse_id(&id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
     // Fill in id and type in query
     query.entity_id = Some(entity_id);
     query.entity_type = Some(EntityTypeEnum::Template);
@@ -452,8 +469,11 @@ async fn find_for_test(
     id: web::Path<String>,
     web::Query(mut query): web::Query<SubscriptionQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let entity_id = parse_id(&id)?;
+) -> HttpResponse {
+    let entity_id = match parse_id(&id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
     // Fill in id and type in query
     query.entity_id = Some(entity_id);
     query.entity_type = Some(EntityTypeEnum::Test);
@@ -487,7 +507,7 @@ async fn verify_existence(
     entity_type: EntityTypeEnum,
 ) -> Result<(), HttpResponse> {
     // Verify the pipeline with this id exists
-    web::block(move || match entity_type {
+    match web::block(move || match entity_type {
         EntityTypeEnum::Pipeline => match PipelineData::find_by_id(&conn, id) {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
@@ -502,36 +522,38 @@ async fn verify_existence(
         },
     })
     .await
-    .map(|_| ())
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no entity is found, return a 404
-            BlockingError::Error(diesel::NotFound) => {
-                let (title, detail) = match entity_type {
-                    EntityTypeEnum::Pipeline => (
-                        "No pipeline found".to_string(),
-                        "No pipeline found with the specified ID".to_string(),
-                    ),
-                    EntityTypeEnum::Template => (
-                        "No template found".to_string(),
-                        "No template found with the specified ID".to_string(),
-                    ),
-                    EntityTypeEnum::Test => (
-                        "No test found".to_string(),
-                        "No test found with the specified ID".to_string(),
-                    ),
-                };
-                HttpResponse::NotFound().json(ErrorBody {
-                    title,
-                    status: 404,
-                    detail,
-                })
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no entity is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    let (title, detail) = match entity_type {
+                        EntityTypeEnum::Pipeline => (
+                            "No pipeline found".to_string(),
+                            "No pipeline found with the specified ID".to_string(),
+                        ),
+                        EntityTypeEnum::Template => (
+                            "No template found".to_string(),
+                            "No template found with the specified ID".to_string(),
+                        ),
+                        EntityTypeEnum::Test => (
+                            "No test found".to_string(),
+                            "No test found with the specified ID".to_string(),
+                        ),
+                    };
+                    Err(HttpResponse::NotFound().json(ErrorBody {
+                        title,
+                        status: 404,
+                        detail,
+                    }))
+                }
+                // For other errors, return a 500
+                _ => Err(default_500(&e)),
             }
-            // For other errors, return a 500
-            _ => default_500(&e),
         }
-    })
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

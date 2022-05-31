@@ -5,9 +5,9 @@ use crate::db::DbPool;
 use crate::manager::report_builder::ReportBuilder;
 use crate::manager::test_runner::TestRunner;
 use crate::requests::cromwell_requests::CromwellClient;
+use crate::requests::gcloud_storage::GCloudClient;
 use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes;
-use crate::storage::gcloud_storage::GCloudClient;
 use crate::util::git_repos::GitRepoChecker;
 use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool::WomtoolRunner;
@@ -31,7 +31,7 @@ pub fn run_app(
 
     let (host, port) = {
         let api_config = carrot_config.api();
-        (api_config.host().to_owned(), api_config.port().to_owned())
+        (api_config.host().clone(), api_config.port().clone())
     };
 
     // Configure app server
@@ -45,12 +45,7 @@ pub fn run_app(
         // Make a client that'll be used for http requests
         let http_client: Client = Client::default();
         // Make a gcloud client for interacting with gcs
-        let gcloud_client: Option<GCloudClient> = match carrot_config.gcloud() {
-            Some(gcloud_config) => {
-                Some(GCloudClient::new(gcloud_config.gcloud_sa_key_file()))
-            },
-            None => None
-        };
+        let gcloud_client: Option<GCloudClient> = carrot_config.gcloud().map(|gcloud_config| GCloudClient::new(gcloud_config.gcloud_sa_key_file()));
         // Create a test resource client and cromwell client for the test runner
         let test_resource_client: TestResourceClient = TestResourceClient::new(http_client.clone(), gcloud_client.clone());
         let cromwell_client: CromwellClient = CromwellClient::new(http_client, carrot_config.cromwell().address());
@@ -64,13 +59,10 @@ pub fn run_app(
             }
         };
         // Create report builder
-        let report_builder: Option<ReportBuilder> = match carrot_config.reporting() {
-            Some(reporting_config) => {
-                // We can unwrap gcloud_client because reporting won't work without it
-                Some(ReportBuilder::new(cromwell_client, gcloud_client.clone().expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config))
-            },
-            None => None
-        };
+        let report_builder: Option<ReportBuilder> = carrot_config.reporting().map(|reporting_config| {
+            // We can unwrap gcloud_client because reporting won't work without it
+            ReportBuilder::new(cromwell_client, gcloud_client.clone().expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config)
+        });
         // Create a git repo checker
         let git_repo_checker: GitRepoChecker = match carrot_config.custom_image_build() {
             Some(image_build_config) => {
@@ -87,7 +79,7 @@ pub fn run_app(
             WdlStorageConfig::Local(local_storage_config) => {
                 WdlStorageClient::new_local(local_storage_config.clone())
             },
-            WdlStorageConfig::GCS(gcs_storage_config) => {
+            WdlStorageConfig::Gcs(gcs_storage_config) => {
                 WdlStorageClient::new_gcs(
                     gcs_storage_config.clone(),
                     gcloud_client.expect("Failed to unwrap gcloud_client to create gcs wdl storage client.  This should not happen")

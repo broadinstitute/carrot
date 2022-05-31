@@ -147,6 +147,7 @@ impl TestRunner {
     /// the build (i.e. it doesn't submit the build job to Cromwell).  Instead, it marks the build as
     /// `Created`, which will indicate to the `status_manager` that it should be submitted to
     /// Cromwell for building.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_run(
         &self,
         conn: &PgConnection,
@@ -161,7 +162,7 @@ impl TestRunner {
         // Parse test id into UUID
         let test_id = TestRunner::parse_test_id(test_id)?;
         // Retrieve test for id or return error
-        let test = TestRunner::get_test(&conn, test_id)?;
+        let test = TestRunner::get_test(conn, test_id)?;
 
         // Merge input and options JSONs
         let mut test_json = json!({});
@@ -262,16 +263,13 @@ impl TestRunner {
         if !version_map.is_empty() {
             for (_, version) in version_map {
                 // Create build for this software version if there isn't one
-                match software_builder::get_or_create_software_build(
+                if let Err(e) = software_builder::get_or_create_software_build(
                     conn,
                     version.software_version_id,
                 ) {
                     // If creating a build fails, mark run as failed
-                    Err(e) => {
-                        update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-                        return Err(Error::Build(e));
-                    }
-                    _ => {}
+                    update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
+                    return Err(Error::Build(e));
                 };
             }
             // Update run status to building
@@ -280,7 +278,7 @@ impl TestRunner {
                 // If updating the run fails, try marking it as failed before returning an error
                 Err(e) => {
                     update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-                    return Err(e);
+                    Err(e)
                 }
             }
         }
@@ -293,7 +291,7 @@ impl TestRunner {
                 Ok(run) => Ok(run),
                 Err(e) => {
                     update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-                    return Err(e);
+                    Err(e)
                 }
             }
         }
@@ -312,7 +310,7 @@ impl TestRunner {
         run: &RunData,
     ) -> Result<RunData, Error> {
         // Retrieve test for id or return error
-        let test = TestRunner::get_test(&conn, run.test_id.clone())?;
+        let test = TestRunner::get_test(conn, run.test_id)?;
 
         self.start_run_test_with_template_id(conn, run, test.template_id)
             .await
@@ -330,22 +328,22 @@ impl TestRunner {
         template_id: Uuid,
     ) -> Result<RunData, Error> {
         // Retrieve template to get WDLs or return error
-        let template_id = template_id.clone();
-        let template = TestRunner::get_template(&conn, template_id)?;
+        let template_id = template_id;
+        let template = TestRunner::get_template(conn, template_id)?;
 
         // Format json so it's ready to submit
         let input_json_to_submit = self.format_test_json_for_cromwell(&run.test_input)?;
 
         // Write json to temp file so it can be submitted to cromwell
         let input_json_file =
-            temp_storage::get_temp_file(&input_json_to_submit.to_string().as_bytes())?;
+            temp_storage::get_temp_file(input_json_to_submit.to_string().as_bytes())?;
 
         // Write options json (if there is one) to file for the same reason
         let (_options_json_file, options_json_file_path): (Option<NamedTempFile>, Option<PathBuf>) =
             match &run.test_options {
                 Some(test_options) => {
                     let options_file =
-                        temp_storage::get_temp_file(&test_options.to_string().as_bytes())?;
+                        temp_storage::get_temp_file(test_options.to_string().as_bytes())?;
                     let options_file_path = PathBuf::from(options_file.path());
                     (Some(options_file), Some(options_file_path))
                 }
@@ -357,7 +355,7 @@ impl TestRunner {
             .test_resource_client
             .get_resource_as_string(&template.test_wdl)
             .await?;
-        let test_wdl_as_file = temp_storage::get_temp_file(&test_wdl_as_string.as_bytes())?;
+        let test_wdl_as_file = temp_storage::get_temp_file(test_wdl_as_string.as_bytes())?;
 
         // Do the same for the test wdl dependencies if present
         let (_test_wdl_deps_file, test_wdl_deps_file_path): (
@@ -380,9 +378,9 @@ impl TestRunner {
         let start_job_result: Result<WorkflowIdAndStatus, CromwellRequestError> =
             util::start_job_from_file(
                 &self.cromwell_client,
-                &test_wdl_as_file.path(),
+                test_wdl_as_file.path(),
                 test_wdl_deps_file_path.as_deref(),
-                &input_json_file.path(),
+                input_json_file.path(),
                 options_json_file_path.as_deref(),
             )
             .await;
@@ -426,7 +424,7 @@ impl TestRunner {
         test_outputs: &Map<String, Value>,
     ) -> Result<RunData, Error> {
         // Retrieve test for id or return error
-        let test = TestRunner::get_test(&conn, run.test_id.clone())?;
+        let test = TestRunner::get_test(conn, run.test_id)?;
 
         match self
             .start_run_eval_with_template_id(conn, run, test.template_id, test_outputs)
@@ -435,7 +433,7 @@ impl TestRunner {
             Ok(run) => Ok(run),
             Err(e) => {
                 update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-                return Err(e);
+                Err(e)
             }
         }
     }
@@ -454,8 +452,8 @@ impl TestRunner {
         test_outputs: &Map<String, Value>,
     ) -> Result<RunData, Error> {
         // Retrieve template to get WDLs or return error
-        let template_id = template_id.clone();
-        let template = TestRunner::get_template(&conn, template_id)?;
+        let template_id = template_id;
+        let template = TestRunner::get_template(conn, template_id)?;
 
         // Format json so it's ready to submit
         let input_json_to_submit =
@@ -463,14 +461,14 @@ impl TestRunner {
 
         // Write json to temp file so it can be submitted to cromwell
         let input_json_file =
-            temp_storage::get_temp_file(&input_json_to_submit.to_string().as_bytes())?;
+            temp_storage::get_temp_file(input_json_to_submit.to_string().as_bytes())?;
 
         // Write options json (if there is one) to file for the same reason
         let (_options_json_file, options_json_file_path): (Option<NamedTempFile>, Option<PathBuf>) =
             match &run.eval_options {
                 Some(eval_options) => {
                     let options_file =
-                        temp_storage::get_temp_file(&eval_options.to_string().as_bytes())?;
+                        temp_storage::get_temp_file(eval_options.to_string().as_bytes())?;
                     let options_file_path = PathBuf::from(options_file.path());
                     (Some(options_file), Some(options_file_path))
                 }
@@ -482,7 +480,7 @@ impl TestRunner {
             .test_resource_client
             .get_resource_as_string(&template.eval_wdl)
             .await?;
-        let eval_wdl_as_file = temp_storage::get_temp_file(&eval_wdl_as_string.as_bytes())?;
+        let eval_wdl_as_file = temp_storage::get_temp_file(eval_wdl_as_string.as_bytes())?;
 
         // Do the same for the eval wdl dependencies if present
         let (_eval_wdl_deps_file, eval_wdl_deps_file_path): (
@@ -505,9 +503,9 @@ impl TestRunner {
         let start_job_result: Result<WorkflowIdAndStatus, CromwellRequestError> =
             util::start_job_from_file(
                 &self.cromwell_client,
-                &eval_wdl_as_file.path(),
+                eval_wdl_as_file.path(),
                 eval_wdl_deps_file_path.as_deref(),
-                &input_json_file.path(),
+                input_json_file.path(),
                 options_json_file_path.as_deref(),
             )
             .await;
@@ -576,7 +574,7 @@ impl TestRunner {
                 // Pull software name and commit from value
                 let name_and_commit: Vec<&str> = value
                     .trim_start_matches("image_build:")
-                    .split("|")
+                    .split('|')
                     .collect();
                 // Try to get software, return error if unsuccessful
                 let software =
@@ -607,7 +605,7 @@ impl TestRunner {
 
                 version_map.insert(String::from(key), software_version);
                 // Also add run_software_version mapping
-                for (_, value) in &version_map {
+                for value in version_map.values() {
                     TestRunner::get_or_create_run_software_version(
                         conn,
                         value.software_version_id,
@@ -638,9 +636,7 @@ impl TestRunner {
 
             match run_software_version {
                 // If we found it, return it
-                Ok(run_software_version) => {
-                    return Ok(run_software_version);
-                }
+                Ok(run_software_version) => Ok(run_software_version),
                 // If we didn't find it, create it
                 Err(diesel::NotFound) => {
                     let new_run_software_version = NewRunSoftwareVersion {
@@ -654,14 +650,12 @@ impl TestRunner {
                     )?)
                 }
                 // Otherwise, return error
-                Err(e) => return Err(Error::DB(e)),
+                Err(e) => Err(Error::DB(e)),
             }
         };
 
         #[cfg(not(test))]
-        return conn
-            .build_transaction()
-            .run(|| run_software_version_closure());
+        return conn.build_transaction().run(run_software_version_closure);
 
         // Tests do all database stuff in transactions that are not committed so they don't interfere
         // with other tests. An unfortunate side effect of this is that we can't use transactions in
@@ -702,15 +696,15 @@ impl TestRunner {
             limit: None,
             offset: None,
         };
-        match RunData::find(&conn, run_name_query) {
+        match RunData::find(conn, run_name_query) {
             Ok(run_data) => {
                 // If we got a result, return true
-                if run_data.len() > 0 {
-                    return Ok(true);
+                if !run_data.is_empty() {
+                    Ok(true)
                 }
                 // Otherwise, false
                 else {
-                    return Ok(false);
+                    Ok(false)
                 }
             }
             Err(e) => {
@@ -718,9 +712,9 @@ impl TestRunner {
                     "Encountered error while attempting to retrieve run by name: {}",
                     e
                 );
-                return Err(e);
+                Err(e)
             }
-        };
+        }
     }
 
     /// Parses `test_id` as a Uuid and returns it, or returns an error if parsing fails
@@ -740,7 +734,7 @@ impl TestRunner {
     /// Retrieves test from DB with id `test_id` or returns error if query fails or test does not
     /// exist
     fn get_test(conn: &PgConnection, test_id: Uuid) -> Result<TestData, Error> {
-        match TestData::find_by_id(&conn, test_id) {
+        match TestData::find_by_id(conn, test_id) {
             Ok(data) => Ok(data),
             Err(e) => {
                 error!(
@@ -755,7 +749,7 @@ impl TestRunner {
     /// Retrieves template from DB with id `template_id` or returns error if query fails or template
     /// does not exist
     fn get_template(conn: &PgConnection, test_id: Uuid) -> Result<TemplateData, Error> {
-        match TemplateData::find_by_id(&conn, test_id) {
+        match TemplateData::find_by_id(conn, test_id) {
             Ok(data) => Ok(data),
             Err(e) => {
                 error!(
@@ -789,7 +783,7 @@ impl TestRunner {
         let mut formatted_json = Map::new();
 
         for (key, value) in object_map {
-            let mut new_val = value.to_owned();
+            let mut new_val = value.clone();
 
             // If this value is a string, check if it's specifying a custom docker image build and
             // format accordingly if so
@@ -800,7 +794,7 @@ impl TestRunner {
                     if let Some(image_registry_host) = &self.image_registry_host {
                         // Pull software name and commit from value
                         let name_and_commit: Vec<&str> =
-                            val.trim_start_matches("image_build:").split("|").collect();
+                            val.trim_start_matches("image_build:").split('|').collect();
                         new_val = json!(util::get_formatted_image_url(
                             name_and_commit[0],
                             name_and_commit[1],
@@ -810,7 +804,7 @@ impl TestRunner {
                 }
             };
 
-            formatted_json.insert(String::from(key), new_val.to_owned());
+            formatted_json.insert(String::from(key), new_val.clone());
         }
 
         Ok(formatted_json.into())
@@ -845,7 +839,7 @@ impl TestRunner {
 
         // Loop through each input and add them to formatted_json, modifying any that need modifying
         for (key, value) in object_map {
-            let mut new_val = value.to_owned();
+            let mut new_val = value.clone();
 
             // If this value is a string, check if it's specifying a custom docker image build and
             // format accordingly if so
@@ -855,7 +849,7 @@ impl TestRunner {
                     if let Some(image_registry_host) = &self.image_registry_host {
                         // Pull software name and commit from value
                         let name_and_commit: Vec<&str> =
-                            val.trim_start_matches("image_build:").split("|").collect();
+                            val.trim_start_matches("image_build:").split('|').collect();
                         new_val = json!(util::get_formatted_image_url(
                             name_and_commit[0],
                             name_and_commit[1],
@@ -870,7 +864,7 @@ impl TestRunner {
                     // Find it in the outputs
                     match test_outputs.get(output_key) {
                         Some(val) => {
-                            new_val = val.to_owned();
+                            new_val = val.clone();
                         }
                         // If we didn't find it, that's a problem, so return an error
                         None => {
@@ -881,7 +875,7 @@ impl TestRunner {
                 }
             };
 
-            formatted_json.insert(String::from(key), new_val.to_owned());
+            formatted_json.insert(String::from(key), new_val.clone());
         }
 
         Ok(formatted_json.into())
@@ -898,6 +892,7 @@ impl TestRunner {
     /// if not, inserts a new run with `test_id`, `name`, `test_input`, `eval_input`, `created_by`,
     /// and a status of `Created` into the database.  Returns an error if a run already exists with
     /// `name` or there is some issue querying or inserting to the DB
+    #[allow(clippy::too_many_arguments)]
     fn create_run_in_db(
         conn: &PgConnection,
         test_id: Uuid,
@@ -915,20 +910,20 @@ impl TestRunner {
             }
 
             let new_run = NewRun {
-                test_id: test_id,
-                name: name,
+                test_id,
+                name,
                 status: RunStatusEnum::Created,
-                test_input: test_input,
-                test_options: test_options,
-                eval_input: eval_input,
-                eval_options: eval_options,
+                test_input,
+                test_options,
+                eval_input,
+                eval_options,
                 test_cromwell_job_id: None,
                 eval_cromwell_job_id: None,
-                created_by: created_by,
+                created_by,
                 finished_at: None,
             };
 
-            match RunData::create(&conn, new_run) {
+            match RunData::create(conn, new_run) {
                 Ok(run) => Ok(run),
                 Err(e) => {
                     error!(
@@ -943,7 +938,7 @@ impl TestRunner {
         // Write run to db in a transaction so we don't have issues with creating a run with the same
         // name after we've verified that one doesn't exist
         #[cfg(not(test))]
-        return conn.build_transaction().run(|| create_run_closure());
+        return conn.build_transaction().run(create_run_closure);
 
         // Tests do all database stuff in transactions that are not committed so they don't interfere
         // with other tests. An unfortunate side effect of this is that we can't use transactions in
@@ -1040,8 +1035,8 @@ mod tests {
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::requests::cromwell_requests::CromwellClient;
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::storage::gcloud_storage::GCloudClient;
     use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
     use chrono::Utc;
@@ -1654,8 +1649,7 @@ mod tests {
         )
         .expect("Failed to create run");
 
-        let queried_run =
-            RunData::find_by_id(&conn, run.run_id.clone()).expect("Failed to retrieve run");
+        let queried_run = RunData::find_by_id(&conn, run.run_id).expect("Failed to retrieve run");
 
         assert_eq!(run, queried_run);
     }

@@ -11,17 +11,17 @@ pub struct SortClause {
 ///
 /// Expects sort strings to be comma-separated lists of sort keys, optionally enclosed in asc() or
 /// desc().  For example, asc(name),desc(created_at),pipeline_id
-pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
+pub fn parse(sort_string: &str) -> Vec<SortClause> {
     let mut sort_clauses = Vec::new();
 
-    for clause in sort_string.split(",") {
+    for clause in sort_string.split(',') {
         let clause = clause.trim();
         if clause.starts_with("asc(") {
             sort_clauses.push(SortClause {
                 key: String::from(
                     clause
                         .trim_start_matches("asc(")
-                        .trim_end_matches(")")
+                        .trim_end_matches(')')
                         .trim(),
                 ),
                 ascending: true,
@@ -31,7 +31,7 @@ pub fn parse_sort_string(sort_string: &str) -> Vec<SortClause> {
                 key: String::from(
                     clause
                         .trim_start_matches("desc(")
-                        .trim_end_matches(")")
+                        .trim_end_matches(')')
                         .trim(),
                 ),
                 ascending: false,
@@ -52,21 +52,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_sort_string_empty() {
-        assert_eq!(parse_sort_string(""), Vec::new());
+    fn parse_empty() {
+        assert_eq!(parse(""), Vec::new());
     }
 
     #[test]
-    fn parse_sort_string_whitespace() {
+    fn parse_whitespace() {
         assert_eq!(
-            parse_sort_string("  \n\r\t\u{000B}\u{000C}\u{0085}\u{2028}\u{2029}"),
+            parse("  \n\r\t\u{000B}\u{000C}\u{0085}\u{2028}\u{2029}"),
             Vec::new()
         );
     }
 
     #[test]
-    fn parse_sort_string_middle_whitespace() {
-        let sort = parse_sort_string("asc(name), ,version");
+    fn parse_middle_whitespace() {
+        let sort = parse("asc(name), ,version");
         assert_eq!(
             sort[0],
             SortClause {
@@ -84,8 +84,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_sort_string_starting_whitespace() {
-        let sort = parse_sort_string(" ,desc(description),version");
+    fn parse_starting_whitespace() {
+        let sort = parse(" ,desc(description),version");
         assert_eq!(
             sort[0],
             SortClause {
@@ -103,8 +103,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_sort_string_ending_whitespace() {
-        let sort = parse_sort_string("asc(name),desc(description), ");
+    fn parse_ending_whitespace() {
+        let sort = parse("asc(name),desc(description), ");
         assert_eq!(
             sort[0],
             SortClause {
@@ -122,8 +122,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_sort_string_normal() {
-        let sort = parse_sort_string("asc(name),desc(description),version");
+    fn parse_normal() {
+        let sort = parse("asc(name),desc(description),version");
         assert_eq!(
             sort[0],
             SortClause {

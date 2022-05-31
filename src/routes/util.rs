@@ -12,15 +12,15 @@ use uuid::Uuid;
 /// parsing Uuid path variables and having that take up a bunch of space
 pub fn parse_id(id: &str) -> Result<Uuid, HttpResponse> {
     match Uuid::parse_str(id) {
-        Ok(id) => return Ok(id),
+        Ok(id) => Ok(id),
         Err(e) => {
             error!("{}", e);
             // If it doesn't parse successfully, return an error to the user
-            return Err(HttpResponse::BadRequest().json(ErrorBody {
+            Err(HttpResponse::BadRequest().json(ErrorBody {
                 title: "ID formatted incorrectly".to_string(),
                 status: 400,
                 detail: "ID must be formatted as a Uuid".to_string(),
-            }));
+            }))
         }
     }
 }

@@ -128,6 +128,7 @@ impl NotificationHandler {
     /// Sends notifications (emails and github comments) for the start of `run`, using `conn` to
     /// retrieve subscribers, then building notification messages using `owner`, `repo`, `author`,
     /// `issue_number`, `test_name`, and `run`
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_run_started_from_github_notifications(
         &self,
         conn: &PgConnection,
@@ -157,6 +158,7 @@ impl NotificationHandler {
     /// Sends notifications (emails and github comments) for a failure to start run of test with
     /// `test_id` and `test_name` from a github request posted by `author` to `owner`'s `repo`, on
     /// issue `issue_number`, caused by `error_message` (which will be sent to user)
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_run_failed_to_start_from_github_notifications(
         &self,
         conn: &PgConnection,
@@ -256,9 +258,9 @@ impl NotificationHandler {
                 // Get run with result data
                 let run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
                 // Get test
-                let test = TestData::find_by_id(conn, run.test_id.clone())?;
+                let test = TestData::find_by_id(conn, run.test_id)?;
                 // Get subscriptions
-                let subs = SubscriptionData::find_all_for_test(conn, test.test_id.clone())?;
+                let subs = SubscriptionData::find_all_for_test(conn, test.test_id)?;
 
                 // Assemble set of email addresses to notify
                 let mut email_addresses = HashSet::new();
@@ -279,7 +281,7 @@ impl NotificationHandler {
                 // Attempt to send email, and log an error and mark the error boolean as true if it fails
                 if !email_addresses.is_empty() {
                     emailer.send_email(
-                        email_addresses.into_iter().collect(),
+                        &email_addresses.into_iter().collect::<Vec<&str>>(),
                         &subject,
                         &message,
                     )?;
@@ -315,7 +317,11 @@ impl NotificationHandler {
 
                 // Attempt to send email, and log an error and mark the error boolean as true if it fails
                 if !email_addresses.is_empty() {
-                    emailer.send_email(email_addresses.into_iter().collect(), subject, message)?;
+                    emailer.send_email(
+                        &email_addresses.into_iter().collect::<Vec<&str>>(),
+                        subject,
+                        message,
+                    )?;
                 }
 
                 Ok(())
@@ -364,7 +370,7 @@ impl NotificationHandler {
                 // Attempt to send email, and log an error and mark the error boolean as true if it fails
                 if !email_addresses.is_empty() {
                     emailer.send_email(
-                        email_addresses.into_iter().collect(),
+                        &email_addresses.into_iter().collect::<Vec<&str>>(),
                         &subject,
                         &message,
                     )?;
@@ -399,7 +405,7 @@ impl NotificationHandler {
                             .post_run_finished_comment(
                                 &data_from_github.owner,
                                 &data_from_github.repo,
-                                data_from_github.issue_number.clone(),
+                                data_from_github.issue_number,
                                 &run_data,
                                 &test_data.name,
                             )
@@ -443,7 +449,7 @@ impl NotificationHandler {
                             .post_run_report_finished_comment(
                                 &data_from_github.owner,
                                 &data_from_github.repo,
-                                data_from_github.issue_number.clone(),
+                                data_from_github.issue_number,
                                 run_report,
                                 report_name,
                                 run_name,
@@ -507,7 +513,7 @@ mod tests {
         email_base_name: &str,
     ) -> (RunData, TestData) {
         let test = insert_test_test_with_subscriptions_with_entities(conn, email_base_name);
-        let run = insert_test_run_with_test_id(conn, test.test_id.clone(), email_base_name);
+        let run = insert_test_run_with_test_id(conn, test.test_id, email_base_name);
 
         (run, test)
     }
@@ -517,8 +523,8 @@ mod tests {
         email_base_name: &str,
     ) -> TestData {
         let pipeline = insert_test_pipeline(conn);
-        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
-        let test = insert_test_test_with_template_id(conn, template.template_id.clone());
+        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(conn, template.template_id);
 
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Pipeline,
@@ -682,8 +688,7 @@ mod tests {
             &new_run.name, &new_test.name, &new_run.status
         );
         let new_run_with_results =
-            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone())
-                .unwrap();
+            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id).unwrap();
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
         // Make temporary directory for the email
@@ -695,7 +700,7 @@ mod tests {
 
         // Send email
         test_handler
-            .send_run_complete_emails(&pool.get().unwrap(), new_run.run_id.clone())
+            .send_run_complete_emails(&pool.get().unwrap(), new_run.run_id)
             .unwrap();
 
         // Verify that the email was created correctly
@@ -788,7 +793,7 @@ mod tests {
         );
 
         // Send emails
-        match test_handler.send_run_complete_emails(&pool.get().unwrap(), new_run.run_id.clone()) {
+        match test_handler.send_run_complete_emails(&pool.get().unwrap(), new_run.run_id) {
             Err(e) => match e {
                 super::Error::Email(_) => {}
                 _ => panic!(
@@ -818,12 +823,11 @@ mod tests {
         );
 
         let new_run_with_results =
-            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id.clone())
-                .unwrap();
+            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id).unwrap();
 
         // Send email
         let result = test_handler
-            .send_run_complete_emails(&pool.get().unwrap(), new_run.run_id.clone())
+            .send_run_complete_emails(&pool.get().unwrap(), new_run.run_id)
             .unwrap_err();
 
         assert!(matches!(result, Error::NoEmailer));

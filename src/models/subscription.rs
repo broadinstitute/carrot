@@ -154,7 +154,7 @@ impl SubscriptionData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &*sort_clause.key {
                     "subscription_id" => {
@@ -322,8 +322,8 @@ mod tests {
 
     fn insert_test_subscriptions_with_entities(conn: &PgConnection) -> Vec<SubscriptionData> {
         let pipeline = insert_test_pipeline(conn);
-        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
-        let test = insert_test_test_with_template_id(conn, template.template_id.clone());
+        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(conn, template.template_id);
 
         let mut subscriptions = Vec::new();
 
@@ -524,7 +524,7 @@ mod tests {
         let test_query = SubscriptionQuery {
             subscription_id: None,
             entity_type: None,
-            entity_id: Some(test_subscriptions[0].entity_id.clone()),
+            entity_id: Some(test_subscriptions[0].entity_id),
             created_before: None,
             created_after: None,
             email: None,
@@ -642,12 +642,12 @@ mod tests {
         let test_subscription = insert_test_subscription(&conn);
 
         // Make sure we can find it
-        SubscriptionData::find_by_id(&conn, test_subscription.subscription_id.clone())
+        SubscriptionData::find_by_id(&conn, test_subscription.subscription_id)
             .expect("Could not find test_subscription after insert");
 
         // Delete it
         let delete_params = SubscriptionDeleteParams {
-            subscription_id: Some(test_subscription.subscription_id.clone()),
+            subscription_id: Some(test_subscription.subscription_id),
             entity_type: None,
             entity_id: None,
             created_before: None,

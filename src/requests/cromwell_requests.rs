@@ -54,16 +54,16 @@ pub struct StartJobParams {
 #[derive(Serialize)]
 #[allow(dead_code)] // Because we're not using all variations currently
 pub enum WorkflowTypeEnum {
-    WDL,
-    CWL,
+    Wdl,
+    Cwl,
 }
 
 /// Mapping workflow types to the values the Cromwell API expects
 impl fmt::Display for WorkflowTypeEnum {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            WorkflowTypeEnum::WDL => write!(f, "{}", "WDL"),
-            WorkflowTypeEnum::CWL => write!(f, "{}", "CWL"),
+            WorkflowTypeEnum::Wdl => write!(f, "WDL"),
+            WorkflowTypeEnum::Cwl => write!(f, "CWL"),
         }
     }
 }
@@ -83,9 +83,9 @@ pub enum WorkflowTypeVersionEnum {
 impl fmt::Display for WorkflowTypeVersionEnum {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            WorkflowTypeVersionEnum::DraftDash2 => write!(f, "{}", "draft-2"),
-            WorkflowTypeVersionEnum::OnePointZero => write!(f, "{}", "1.0"),
-            WorkflowTypeVersionEnum::VOnePointZero => write!(f, "{}", "v1.0"),
+            WorkflowTypeVersionEnum::DraftDash2 => write!(f, "draft-2"),
+            WorkflowTypeVersionEnum::OnePointZero => write!(f, "1.0"),
+            WorkflowTypeVersionEnum::VOnePointZero => write!(f, "v1.0"),
         }
     }
 }
@@ -321,7 +321,7 @@ impl CromwellClient {
         // Parse response body into Json
         match serde_json::from_str(body_utf8) {
             Ok(value) => Ok(value),
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e.into()),
         }
     }
 

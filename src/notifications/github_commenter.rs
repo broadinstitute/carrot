@@ -4,9 +4,8 @@
 
 use crate::models::run::{RunData, RunWithResultsAndErrorsData};
 use crate::models::run_report::RunReportData;
-use crate::models::test::TestData;
+use crate::requests::gcloud_storage;
 use crate::requests::github_requests;
-use crate::storage::gcloud_storage;
 use crate::util::gs_uri_parsing;
 use log::warn;
 use serde_json::{json, Map, Value};
@@ -21,7 +20,7 @@ pub struct GithubCommenter {
 pub enum Error {
     Json(serde_json::Error),
     Post(github_requests::Error),
-    GCS(gcloud_storage::Error),
+    Gcs(gcloud_storage::Error),
 }
 
 impl std::error::Error for Error {}
@@ -31,7 +30,7 @@ impl fmt::Display for Error {
         match self {
             Error::Json(e) => write!(f, "GitHub Commenter Error Json {}", e),
             Error::Post(e) => write!(f, "GitHub Commenter Error Post {}", e),
-            Error::GCS(e) => write!(f, "GitHub Commenter Error GCS {}", e),
+            Error::Gcs(e) => write!(f, "GitHub Commenter Error GCS {}", e),
         }
     }
 }
@@ -50,7 +49,7 @@ impl From<github_requests::Error> for Error {
 
 impl From<gcloud_storage::Error> for Error {
     fn from(e: gcloud_storage::Error) -> Error {
-        Error::GCS(e)
+        Error::Gcs(e)
     }
 }
 
@@ -190,13 +189,18 @@ impl GithubCommenter {
                     // Loop through the results and convert them and format them for a markdown table (note: we
                     // can unwrap here because, if the results are not formatted as an object, something's real
                     // busted)
-                    for (report_key, uri) in report_results.as_object().expect(&format!(
+                    for (report_key, uri) in report_results.as_object().unwrap_or_else(|| panic!(
                         "Results for run report with run_id {} and report_id {} not formatted as json object",
                         run_report.run_id, run_report.report_id
                     )) {
                         // Get the report_uri as a string (again, there's a problem that needs fixing if it's
                         // not a string)
-                        let uri_string = uri.as_str().expect(&format!("Result uri for key {} for run report with run_id {} and report_id {} not formatted as string", report_key, run_report.run_id, run_report.report_id));
+                        let uri_string = uri.as_str().unwrap_or_else(|| panic!(
+                            "Result uri for key {} for run report with run_id {} and report_id {} not formatted as string",
+                            report_key,
+                            run_report.run_id,
+                            run_report.report_id
+                        ));
                         // Convert it to a clickable link
                         let processed_uri_string = match gs_uri_parsing::get_object_cloud_console_url_from_gs_uri(uri_string) {
                             Ok(gs_uri_as_cloud_url) => {

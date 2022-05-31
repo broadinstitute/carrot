@@ -127,7 +127,7 @@ impl RunResultData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -798,8 +798,8 @@ mod tests {
 
         let test_run_result2 = RunResultData::find_by_run_and_result(
             &conn,
-            test_run_result.run_id.clone(),
-            test_run_result.result_id.clone(),
+            test_run_result.run_id,
+            test_run_result.result_id,
         );
 
         assert!(matches!(

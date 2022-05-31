@@ -9,14 +9,14 @@ use crate::manager::report_builder::ReportBuilder;
 use crate::models::run_report::{RunReportData, RunReportQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::routes::util::parse_id;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Query;
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use uuid::Uuid;
 
 /// Represents the part of a new run_report that is received as a request body
 #[derive(Deserialize, Serialize)]
@@ -41,41 +41,25 @@ struct CreateQueryParams {
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Run ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Run ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Parse report ID into Uuid
-    let report_id = match Uuid::parse_str(report_id) {
-        Ok(report_id) => report_id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Report ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Report ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+    let report_id = match parse_id(report_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
     };
 
     // Query DB for report in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match RunReportData::find_by_run_and_report(&conn, id, report_id) {
@@ -87,23 +71,27 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    .map(|reports| {
-        // If there is no error, return a response with the retrieved data
-        HttpResponse::Ok().json(reports)
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No run_report found".to_string(),
-                status: 404,
-                detail: "No run_report found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        Ok(reports) => {
+            // If there is no error, return a response with the retrieved data
+            HttpResponse::Ok().json(reports)
         }
-    })
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No run_report found".to_string(),
+                        status: 404,
+                        detail: "No run_report found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
+        }
+    }
 }
 
 /// Handles requests to /runs/{id}/reports for retrieving info by query parameters
@@ -121,26 +109,18 @@ async fn find(
     id: web::Path<String>,
     web::Query(mut query): web::Query<RunReportQuery>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Set run_id as part of query object
     query.run_id = Some(id);
 
     // Query DB for reports in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match RunReportData::find(&conn, query) {
@@ -152,24 +132,26 @@ async fn find(
         }
     })
     .await
-    .map(|reports| {
-        if reports.len() < 1 {
-            // If no is found, return a 404
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No run_report found".to_string(),
-                status: 404,
-                detail: "No run_report found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(reports)
+    {
+        Ok(reports) => {
+            if reports.is_empty() {
+                // If no is found, return a 404
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No run_report found".to_string(),
+                    status: 404,
+                    detail: "No run_report found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(reports)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // For any errors, return a 500
-        default_500(&e)
-    })
+        Err(e) => {
+            error!("{}", e);
+            // For any errors, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /runs/{id}/reports/{report_id} mapping for creating a run report
@@ -189,41 +171,22 @@ async fn create(
     query_params: Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
     report_builder: web::Data<Option<ReportBuilder>>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Run ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Run ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
     // Parse report ID into Uuid
-    let report_id = match Uuid::parse_str(report_id) {
-        Ok(report_id) => report_id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Report ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Report ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+    let report_id = match parse_id(report_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
     };
     // Set whether to delete an existent failed run_report automatically based on query params
-    let delete_failed: bool = match query_params.delete_failed {
-        Some(true) => true,
-        _ => false,
-    };
+    let delete_failed: bool = matches!(query_params.delete_failed, Some(true));
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
     // Get the report_builder and create the run report or return an error if we don't have one
@@ -241,7 +204,7 @@ async fn create(
                     .await
             }
             None => {
-                return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+                return HttpResponse::InternalServerError().json(ErrorBody {
                     title: String::from("No report builder"),
                     status: 500,
                     detail: String::from(
@@ -250,11 +213,11 @@ async fn create(
                           Please complain about it on the carrot github: \
                           https://github.com/broadinstitute/carrot/issues",
                     ),
-                }))
+                })
             }
         }
     } {
-        Ok(run_report) => Ok(HttpResponse::Ok().json(run_report)),
+        Ok(run_report) => HttpResponse::Ok().json(run_report),
         Err(err) => {
             error!("{}", err);
             let error_body = match err {
@@ -294,7 +257,7 @@ async fn create(
                     status: 500,
                     detail: format!("Error while attempting to create temporary file: {}", e),
                 },
-                report_builder::Error::GCS(e) => ErrorBody {
+                report_builder::Error::Gcs(e) => ErrorBody {
                     title: "GCS error".to_string(),
                     status: 500,
                     detail: format!(
@@ -313,19 +276,19 @@ async fn create(
                 report_builder::Error::Autosize(e) => ErrorBody {
                     title: "Autosize error".to_string(),
                     status: 500,
-                    detail: format!("{}", e),
+                    detail: e,
                 },
-                report_builder::Error::CSV(e) => ErrorBody {
+                report_builder::Error::Csv(e) => ErrorBody {
                     title: "CSV error".to_string(),
                     status: 500,
                     detail: format!("Error while attempting to convert run data into CSV to include in report: {}", e),
                 },
             };
-            Ok(HttpResponseBuilder::new(
+            HttpResponseBuilder::new(
                 StatusCode::from_u16(error_body.status)
                     .expect("Failed to parse status code. This shouldn't happen"),
             )
-            .json(error_body))
+            .json(error_body)
         }
     }
 }
@@ -341,41 +304,25 @@ async fn create(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Run ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Run ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Parse report ID into Uuid
-    let report_id = match Uuid::parse_str(report_id) {
-        Ok(report_id) => report_id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "Report ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "Report ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+    let report_id = match parse_id(report_id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
     };
 
     //Query DB for pipeline in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match RunReportData::delete(&conn, id, report_id) {
@@ -387,26 +334,25 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
         }
     })
     .await
-    // If there is no error, verify that a row was deleted
-    .map(|reports| {
-        if reports > 0 {
-            let message = format!("Successfully deleted {} row", reports);
-            HttpResponse::Ok().json(json!({ "message": message }))
-        } else {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No run_report found".to_string(),
-                status: 404,
-                detail: "No run_report found for the specified id".to_string(),
-            })
+    {
+        // If there is no error, verify that a row was deleted
+        Ok(reports) => {
+            if reports > 0 {
+                let message = format!("Successfully deleted {} row", reports);
+                HttpResponse::Ok().json(json!({ "message": message }))
+            } else {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No run_report found".to_string(),
+                    status: 404,
+                    detail: "No run_report found for the specified id".to_string(),
+                })
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // For other errors, return a 500
-            _ => default_500(&e),
+        Err(e) => {
+            error!("{}", e);
+            default_500(&e)
         }
-    })
+    }
 }
 
 /// Attaches the RESTs in this file to a service config
@@ -462,7 +408,7 @@ mod tests {
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
     use crate::requests::cromwell_requests::CromwellClient;
-    use crate::storage::gcloud_storage::GCloudClient;
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::unit_test_util::*;
     use actix_web::{client::Client, http, test, App};
     use chrono::Utc;
@@ -656,7 +602,7 @@ mod tests {
 
         let new_run_result = NewRunResult {
             run_id: run.run_id,
-            result_id: new_result.result_id.clone(),
+            result_id: new_result.result_id,
             value: "Yo, Jean Paul Gasse".to_string(),
         };
 
@@ -767,7 +713,7 @@ mod tests {
                     |f: &File,
                      address: &str,
                      name: &str|
-                     -> Result<String, crate::storage::gcloud_storage::Error> {
+                     -> Result<String, crate::requests::gcloud_storage::Error> {
                         Ok(String::from("example.com/report/template/location.ipynb"))
                     },
                 ));
@@ -1290,9 +1236,9 @@ mod tests {
         let report = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(error_body.title, "Run ID formatted incorrectly");
+        assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(error_body.detail, "Run ID must be formatted as a Uuid");
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 
     #[actix_rt::test]
@@ -1534,8 +1480,8 @@ mod tests {
         let report = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(error_body.title, "Run ID formatted incorrectly");
+        assert_eq!(error_body.title, "ID formatted incorrectly");
         assert_eq!(error_body.status, 400);
-        assert_eq!(error_body.detail, "Run ID must be formatted as a Uuid");
+        assert_eq!(error_body.detail, "ID must be formatted as a Uuid");
     }
 }

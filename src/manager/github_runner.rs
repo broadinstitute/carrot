@@ -154,22 +154,20 @@ impl GithubRunner {
         request: &GithubRunRequest,
     ) -> Result<RunData, Error> {
         // Build test and eval input jsons from the request, if it has values for the keys
-        let test_input = match &request.test_input_key {
-            Some(key) => Some(GithubRunner::build_input_from_key_and_software_and_commit(
+        let test_input = request.test_input_key.as_ref().map(|key| {
+            GithubRunner::build_input_from_key_and_software_and_commit(
                 key,
                 &request.software_name,
                 &request.commit,
-            )),
-            None => None,
-        };
-        let eval_input = match &request.eval_input_key {
-            Some(key) => Some(GithubRunner::build_input_from_key_and_software_and_commit(
+            )
+        });
+        let eval_input = request.eval_input_key.as_ref().map(|key| {
+            GithubRunner::build_input_from_key_and_software_and_commit(
                 key,
                 &request.software_name,
                 &request.commit,
-            )),
-            None => None,
-        };
+            )
+        });
         // Start run
         Ok(self
             .test_runner
@@ -264,8 +262,8 @@ mod tests {
         email_base_name: &str,
     ) -> TestData {
         let pipeline = insert_test_pipeline(conn);
-        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
-        let test = insert_test_test_with_template_id(conn, template.template_id.clone());
+        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(conn, template.template_id);
 
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Pipeline,

@@ -6,10 +6,10 @@
 use crate::db;
 use crate::models::pipeline::{NewPipeline, PipelineChangeset, PipelineData, PipelineQuery};
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use crate::routes::util::parse_id;
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use serde_json::json;
-use uuid::Uuid;
 
 /// Handles requests to /pipelines/{id} for retrieving pipeline info by pipeline_id
 ///
@@ -20,29 +20,18 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(
-    req: HttpRequest,
-    pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        // If it doesn't parse successfully, return an error to the user
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Query DB for pipeline in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::find_by_id(&conn, id) {
@@ -51,23 +40,25 @@ async fn find_by_id(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no pipeline is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipeline found".to_string(),
-                status: 404,
-                detail: "No pipeline found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no pipeline is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No pipeline found".to_string(),
+                        status: 404,
+                        detail: "No pipeline found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })?;
-
-    Ok(res)
+    }
 }
 
 /// Handles requests to /pipelines for retrieving pipeline info by query parameters
@@ -82,9 +73,9 @@ async fn find_by_id(
 async fn find(
     web::Query(query): web::Query<PipelineQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Query DB for pipelines in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::find(&conn, query) {
@@ -96,26 +87,26 @@ async fn find(
         }
     })
     .await
-    .map(|results| {
-        // If there are no results, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipelines found".to_string(),
-                status: 404,
-                detail: "No pipelines found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If there are no results, return a 404
+            if results.is_empty() {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No pipelines found".to_string(),
+                    status: 404,
+                    detail: "No pipelines found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(results)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-
-    Ok(res)
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /pipelines for creating pipelines
@@ -130,9 +121,9 @@ async fn find(
 async fn create(
     web::Json(new_pipeline): web::Json<NewPipeline>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Insert in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::create(&conn, new_pipeline) {
@@ -144,14 +135,15 @@ async fn create(
         }
     })
     .await
-    // If there is no error, return a response with the created pipeline
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-    Ok(res)
+    {
+        // If there is no error, return a response with the created pipeline
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /pipelines/{id} for updating a pipeline
@@ -167,23 +159,15 @@ async fn update(
     id: web::Path<String>,
     web::Json(pipeline_changes): web::Json<PipelineChangeset>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Update in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::update(&conn, id, pipeline_changes) {
@@ -195,15 +179,15 @@ async fn update(
         }
     })
     .await
-    // If there is no error, return a response with the updated pipeline
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-
-    Ok(res)
+    {
+        // If there is no error, return a response with the updated pipeline
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles DELETE requests to /pipelines/{id} for deleting pipeline rows by pipeline_id
@@ -216,26 +200,18 @@ async fn update(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Query DB for pipeline in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match PipelineData::delete(&conn, id) {
@@ -247,35 +223,38 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
         }
     })
     .await
-    // If there is no error, verify that a row was deleted
-    .map(|results| {
-        if results > 0 {
-            let message = format!("Successfully deleted {} row", results);
-            HttpResponse::Ok().json(json!({ "message": message }))
-        } else {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No pipeline found".to_string(),
-                status: 404,
-                detail: "No pipeline found for the specified id".to_string(),
-            })
+    {
+        // If there is no error, verify that a row was deleted
+        Ok(results) => {
+            if results > 0 {
+                let message = format!("Successfully deleted {} row", results);
+                HttpResponse::Ok().json(json!({ "message": message }))
+            } else {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No pipeline found".to_string(),
+                    status: 404,
+                    detail: "No pipeline found for the specified id".to_string(),
+                })
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // Return a 403 if there's a foreign key violation
-            BlockingError::Error(diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                _,
-            )) => HttpResponse::Forbidden().json(ErrorBody {
-                title: "Cannot delete".to_string(),
-                status: 403,
-                detail: "Cannot delete a pipeline if there is a template mapped to it".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // Return a 403 if there's a foreign key violation
+                BlockingError::Error(diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                    _,
+                )) => HttpResponse::Forbidden().json(ErrorBody {
+                    title: "Cannot delete".to_string(),
+                    status: 403,
+                    detail: "Cannot delete a pipeline if there is a template mapped to it"
+                        .to_string(),
+                }),
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config
