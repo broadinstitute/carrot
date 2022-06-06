@@ -24,6 +24,10 @@ WDLS_DIR_RELATIVE = "."
 WDLS_DIR = "wdl"
 WDLS_TEST_DIR = "carrot"
 
+# TEMP, should be replaced with a better interface.
+WDLS_LOCAL_DIR = ""
+TEST_WDLS_LOCAL_DIR = ""
+
 DEFAULT_EVAL_INPUTS_FILENAME = "eval_input_defaults.json"
 DEFAULT_TEST_INPUTS_FILENAME = "test_input_defaults.json"
 EVAL_INPUTS_FILENAME = "eval_input.json"
@@ -66,18 +70,14 @@ class CarrotHelper:
     cy = "\033[93m"  # Color Yellow
 
     def __init__(self, working_dir, repository, branch, womtool_path,
-                 pipelines_filename=PIPELINES_JSON, email=None,
-                 initialize_pipelines=True):
+                 pipelines_filename=PIPELINES_JSON, email=None):
         self.working_dir = working_dir
         self.repository = repository
         self.branch = branch
         self.womtool_path = womtool_path
         self.pipelines_filename = pipelines_filename
         self.email = email or self._get_email_from_config()
-        self.pipelines = {}
-        if initialize_pipelines:
-            self.pipelines = self.load_pipelines(self.pipelines_filename)
-            self.populate_pipelines()
+        self.pipelines = self.load_pipelines(self.pipelines_filename)
 
     def _get_email_from_config(self):
         config = self.call_carrot("config", "get", add_name=False)
@@ -106,11 +106,11 @@ class CarrotHelper:
 
     @staticmethod
     def _get_test_wdl_local_path(wdl):
-        return f"{WDLS_DIR_RELATIVE}/{wdl}.wdl"
+        return os.path.join(WDLS_LOCAL_DIR, wdl + ".wdl")
 
     @staticmethod
     def _get_eval_wdl_local_path(pipeline, template):
-        return f"{pipeline}/{template}/eval.wdl"
+        return os.path.join(TEST_WDLS_LOCAL_DIR, pipeline, template, "eval.wdl")
 
     def _get_wdl_outputs(self, wdl, include_supported_types_only=True):
         """
@@ -153,8 +153,7 @@ class CarrotHelper:
         and returns an empty dictionary.
 
         :param filename: A JSON file that contains pipelines.
-        :return: Loaded pipelines in the Dictionary<string, Pipeline>
-        format.
+        :return: Loaded pipelines in the Dictionary<string, Pipeline> format.
         """
         pipelines = {}
         if os.path.isfile(filename):
@@ -162,7 +161,7 @@ class CarrotHelper:
                 pipelines = json.loads(f.read())
                 # At this point, pipelines is loaded
                 # as a dictionary, and the following
-                # code converts it the object types
+                # code converts it to the object types
                 # as it was when serialized.
                 for pk, pv in pipelines.items():
                     pipeline = Pipeline(**pv)
@@ -179,80 +178,13 @@ class CarrotHelper:
             self.persist_object(pipelines, filename)
         return pipelines
 
-    def populate_pipelines(self):
-        """
-        Traverses the folders under the working directory
-        and constructs Pipelines, Templates, and Tests.
-        Any missing or modified pipeline, template, or test
-        in the self.pipelines will be updated. It uses
-        checksums to determine if any resource is updated.
-        The updated pipelines are persisted as a JSON objects
-        in the pipelines_filename.
-
-        The expected directory structure is:
-
-            ├── PIPELINE
-            │ └── TEMPLATE
-            │     ├── eval.wdl
-            │     ├── eval_input_defaults.json
-            │     ├── TEST
-            │     │ ├── eval_input.json
-            │     │ └── test_input.json
-            │     └── test_input_defaults.json
-
-        Please refer to the README for details on the
-        directory structure.
-        """
-        pipelines = {}
-        for root, dirs, _ in os.walk(self.working_dir, topdown=True):
-            if root == self.working_dir:
-                continue
-            pipelines[os.path.basename(root)] = dirs.copy()
-            # prevents os.walk to traverse any deeper.
-            dirs.clear()
-
-        for pipeline_name, template_names in pipelines.items():
-            self.pipelines[pipeline_name] = \
-                self.create_pipeline(pipeline_name, template_names)
-        self.persist_object(self.pipelines, self.pipelines_filename)
-
-    def create_pipeline(self, pipeline_name, template_names):
-        test_wdl_local = self._get_test_wdl_local_path(pipeline_name)
-        test_workflow_outputs = self._get_wdl_outputs(test_wdl_local)
-        if not bool(test_workflow_outputs):
-            # TODO: skip the pipeline instead
-            raise Exception("No supported result type for the pipeline.")
-        test_wdl = self._get_online_path(f"{WDLS_DIR}/{pipeline_name}.wdl")
-        test_wdl_checksum = self.get_checksum(test_wdl_local)
-
-        pipeline = self.pipelines.get(pipeline_name)
-        if not pipeline:
-            pipeline = Pipeline(
-                **self.call_carrot(
-                    "pipeline", "create", field_to_uuid="pipeline_id"))
-
-        for template_name in template_names:
-            if template_name in pipeline.templates and \
-                    (pipeline.templates[template_name].test_wdl_checksum ==
-                     test_wdl_checksum and
-                     pipeline.templates[template_name].eval_wdl_checksum ==
-                     self.get_checksum(self._get_eval_wdl_local_path(
-                         pipeline_name, template_name))):
-                continue
-            template = self.create_template(
-                pipeline_name, pipeline, template_name, test_wdl,
-                test_wdl_checksum, test_workflow_outputs)
-            pipeline.templates[template_name] = template
-
-        return pipeline
-
-    def get_pipelines_from_dirs(self, dirs):
+    @staticmethod
+    def get_pipelines_from_dirs(dirs):
         """
         Takes a list of directories as input, traverses every
-        directory and sub-directories and extracts pipelines.
+        directory and subdirectories and extracts pipelines.
         """
         pipelines = {}
-        wd = self.working_dir
         dirs = [x for x in dirs if os.path.isdir(x)]
 
         # Extend directories to include all the subdirectories.
@@ -282,6 +214,65 @@ class CarrotHelper:
                 pipelines[pipeline][template].append(run_dir)
 
         return pipelines
+
+    def create_pipelines(self, wdls_dir, tests_dirs):
+        """
+        Traverses the folders under the working directory
+        and constructs Pipelines, Templates, and Tests.
+        Any missing or modified pipeline, template, or test
+        in the self.pipelines will be updated. It uses
+        checksums to determine if any resource is updated.
+        The updated pipelines are persisted as a JSON objects
+        in the pipelines_filename.
+
+        The expected directory structure is:
+
+            ├── PIPELINE
+            │ └── TEMPLATE
+            │     ├── TEST
+            │     │ ├── eval_input.json
+            │     │ └── test_input.json
+            │     ├── eval.wdl
+            │     ├── eval_input_defaults.json
+            │     └── test_input_defaults.json
+        """
+        pipelines = self.get_pipelines_from_dirs(tests_dirs)
+
+        self.pipelines = {}
+        for pipeline_name, template_names in pipelines.items():
+            print(f"\npipeline name: {pipeline_name}\ttemplate name: {template_names}")
+            self.pipelines[pipeline_name] = self.create_pipeline(wdls_dir, pipeline_name, template_names)
+        self.persist_object(self.pipelines, self.pipelines_filename)
+
+    def create_pipeline(self, wdls_dir, pipeline_name, template_names):
+        test_wdl_local = os.path.join(wdls_dir, pipeline_name + ".wdl")
+        test_workflow_outputs = self._get_wdl_outputs(test_wdl_local)
+        if not bool(test_workflow_outputs):
+            # TODO: skip the pipeline instead
+            raise Exception("No supported result type for the pipeline.")
+        test_wdl = self._get_online_path(f"{WDLS_DIR}/{pipeline_name}.wdl")
+        test_wdl_checksum = self.get_checksum(test_wdl_local)
+
+        pipeline = self.pipelines.get(pipeline_name)
+        if not pipeline:
+            pipeline = Pipeline(
+                **self.call_carrot(
+                    "pipeline", "create", field_to_uuid="pipeline_id"))
+
+        for template_name in template_names:
+            if template_name in pipeline.templates and \
+                    (pipeline.templates[template_name].test_wdl_checksum ==
+                     test_wdl_checksum and
+                     pipeline.templates[template_name].eval_wdl_checksum ==
+                     self.get_checksum(self._get_eval_wdl_local_path(
+                         pipeline_name, template_name))):
+                continue
+            template = self.create_template(
+                pipeline_name, pipeline, template_name, test_wdl,
+                test_wdl_checksum, test_workflow_outputs)
+            pipeline.templates[template_name] = template
+
+        return pipeline
 
     @staticmethod
     def persist_object(obj, filename):
@@ -521,7 +512,7 @@ class CarrotHelper:
         self.persist_object(runs, RUNS_JSON)
         return updated_status
 
-    def submit_tests(self, tests_dir):
+    def submit_tests(self, wdls_dir, tests_dir):
         try:
             runs = {}
             with open(RUNS_JSON, "r") as runs_json:
@@ -539,11 +530,12 @@ class CarrotHelper:
             #  either delete it or fix the issue.
             raise e
 
+        self.create_pipelines(wdls_dir, tests_dir)
+
         c = 0
         print("Submitting tests ...")
         print('%-40s%-80s' % ("Run ID", "Test"))
-        pipelines = self.get_pipelines_from_dirs(tests_dir)
-        for pipeline, templates in pipelines.items():
+        for pipeline, templates in self.pipelines.items():
             for template, run_dirs in templates.items():
                 for run_dir in run_dirs:
                     c += 1
@@ -877,7 +869,7 @@ def main():
             branch=config[CONF_BRANCH], womtool_path=config[CONF_WOMTOOL])
         args_dict = vars(args)
         if args.test == "run":
-            carrot_helper.submit_tests(args_dict.get("tests_dir"))
+            carrot_helper.submit_tests(WDLS_LOCAL_DIR, args_dict.get("tests_dir"))
         elif args.test == "update_status":
             updated_status = carrot_helper.update_runs_status()
             carrot_helper.pretty_print_runs_status(updated_status)
