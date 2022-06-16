@@ -65,7 +65,7 @@ github:
 # Config for building custom docker images from git repos (optional)
 custom_image_build:
   # The host address for the docker image registry where we'll store custom docker images
-  image_registry_host: us.gcr.io/dsde-methods-carrot
+  image_registry_host: us.gcr.io/example_registry
   # Config for accessing private github repos (optional)
   private_github_access:
     # The github username for the user to use to access private repositories
