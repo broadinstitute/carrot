@@ -11,6 +11,7 @@ task build_and_push {
         File github_pass_encrypted
         String gcloud_kms_keyring
         String gcloud_kms_key
+        String machine_type
     }
 
     command <<<
@@ -23,7 +24,12 @@ task build_and_push {
         git clone ~{repo_url} .
         git checkout ~{commit_hash}
         echo -n "" >> .gcloudignore
-        gcloud builds submit --tag ~{registry_host}/~{software_name}:~{commit_hash} --timeout=24h
+        if [ -z ~{machine_type} ]
+        then
+            gcloud builds submit --tag ~{registry_host}/~{software_name}:~{commit_hash} --timeout=24h
+        else
+            gcloud builds submit --tag ~{registry_host}/~{software_name}:~{commit_hash} --timeout=24h --machine-type ~{machine_type}
+        fi
     >>>
 
     runtime {
@@ -43,6 +49,7 @@ workflow docker_build {
         File github_pass_encrypted # The location of the Google Cloud KMS encrypted password or personal access token for github authentication
         String gcloud_kms_keyring # The name of the Google Cloud KMS keyring used to encrypt github_pass_encrypted
         String gcloud_kms_key # The name of the Google Cloud KMS key used to encrypt github_pass_encrypted
+        String machine_type = "" # Optional machine type param to supply to google cloud build
     }
 
     call build_and_push {
@@ -54,7 +61,8 @@ workflow docker_build {
             github_user = github_user,
             github_pass_encrypted = github_pass_encrypted,
             gcloud_kms_keyring = gcloud_kms_keyring,
-            gcloud_kms_key = gcloud_kms_key
+            gcloud_kms_key = gcloud_kms_key,
+            machine_type = machine_type
     }
 
     output {

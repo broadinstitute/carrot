@@ -173,3 +173,31 @@ pub enum EntityTypeEnum {
     Template,
     Test,
 }
+
+/// Maps to the custom type `machine_type_enum` in the DB
+///
+/// Represents the enum used in the DB for representing google cloud build's machine_type option
+/// for building on a different machine than the default
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy)]
+#[DieselType = "Machine_type_enum"]
+pub enum MachineTypeEnum {
+    #[serde(rename = "n1-highcpu-8")]
+    #[db_rename = "n1-highcpu-8"]
+    N1HighCpu8,
+    #[serde(rename = "n1-highcpu-32")]
+    #[db_rename = "n1-highcpu-32"]
+    N1HighCpu32,
+    #[serde(rename = "standard")]
+    #[db_rename = "standard"]
+    Standard,
+}
+
+impl fmt::Display for MachineTypeEnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MachineTypeEnum::N1HighCpu8 => write!(f, "n1-highcpu-8"),
+            MachineTypeEnum::N1HighCpu32 => write!(f, "n1-highcpu-32"),
+            MachineTypeEnum::Standard => write!(f, "standard"),
+        }
+    }
+}

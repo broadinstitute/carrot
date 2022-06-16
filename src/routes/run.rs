@@ -9,6 +9,7 @@ use crate::manager::test_runner;
 use crate::manager::test_runner::TestRunner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultsAndErrorsData};
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::routes::util::parse_id;
 use crate::util::run_csv;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
@@ -22,7 +23,6 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
-use crate::routes::util::parse_id;
 
 /// Optional query parameters for the find_by_id mapping
 #[derive(Deserialize, Debug)]
@@ -196,7 +196,7 @@ async fn find_for_test(
     // Parse ID into Uuid
     let id = match parse_id(&*id) {
         Ok(id) => id,
-        Err(error_response) => return error_response
+        Err(error_response) => return error_response,
     };
 
     let return_csvs: bool = query.csv;
@@ -228,7 +228,7 @@ async fn find_for_template(
     // Parse ID into Uuid
     let id = match parse_id(&*id) {
         Ok(id) => id,
-        Err(error_response) => return error_response
+        Err(error_response) => return error_response,
     };
 
     let return_csvs: bool = query.csv;
@@ -260,7 +260,7 @@ async fn find_for_pipeline(
     // Parse ID into Uuid
     let id = match parse_id(&*id) {
         Ok(id) => id,
-        Err(error_response) => return error_response
+        Err(error_response) => return error_response,
     };
 
     let return_csvs: bool = query.csv;
@@ -277,11 +277,7 @@ async fn find_for_pipeline(
 /// appropriate HttpResponse containing either the retrieved run data (as binary data for a zip of
 /// csvs containing the data if `return_csvs` or as json if not) or an error message and status code
 /// if there is an error
-async fn find(
-    run_query: RunQuery,
-    return_csvs: bool,
-    pool: web::Data<db::DbPool>,
-) -> HttpResponse {
+async fn find(run_query: RunQuery, return_csvs: bool, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Query DB for runs in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -311,7 +307,7 @@ async fn find(
                     // Build csv files from results
                     match get_bytes_for_csv_zip_from_runs(&results) {
                         Ok(zip_bytes) => HttpResponse::Ok().body(zip_bytes),
-                        Err(error_response) => error_response
+                        Err(error_response) => error_response,
                     }
                 }
                 // Otherwise, just return the json

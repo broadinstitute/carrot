@@ -1,7 +1,7 @@
 //! This module contains functions for managing software builds
 
 use crate::config::CustomImageBuildConfig;
-use crate::custom_sql_types::BuildStatusEnum;
+use crate::custom_sql_types::{BuildStatusEnum, MachineTypeEnum};
 use crate::manager::util;
 use crate::models::software_build::{
     NewSoftwareBuild, SoftwareBuildChangeset, SoftwareBuildData, SoftwareBuildQuery,
@@ -12,7 +12,7 @@ use crate::models::software_version::{
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use crate::util::temp_storage;
 use diesel::PgConnection;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::fmt;
 use std::path::Path;
 use uuid::Uuid;
@@ -97,28 +97,44 @@ impl SoftwareBuilder {
         let wdl_file_path: &Path = &wdl_file.path();
 
         // Get necessary params for build wdl
-        let (software_name, repo_url, commit) =
-            SoftwareVersionData::find_name_repo_url_and_commit_by_id(conn, software_version_id)?;
+        let (software_name, repo_url, machine_type, commit) =
+            SoftwareVersionData::find_name_repo_url_machine_type_and_commit_by_id(
+                conn,
+                software_version_id,
+            )?;
 
         // Build input json, including github credential stuff if we might be accessing a private
         // github repo
-        let json_to_submit = match self.config.private_github_access() {
-            Some(private_github_config) => json!({
-                "docker_build.repo_url": repo_url,
-                "docker_build.software_name": software_name,
-                "docker_build.commit_hash": commit,
-                "docker_build.registry_host": self.config.image_registry_host(),
-                "docker_build.github_user": private_github_config.client_id(),
-                "docker_build.github_pass_encrypted": private_github_config.client_pass_uri(),
-                "docker_build.gcloud_kms_keyring": private_github_config.kms_keyring(),
-                "docker_build.gcloud_kms_key": private_github_config.kms_key()
-            }),
-            None => json!({
-                "docker_build.repo_url": repo_url,
-                "docker_build.software_name": software_name,
-                "docker_build.commit_hash": commit,
-                "docker_build.registry_host": self.config.image_registry_host()
-            }),
+        let json_to_submit = {
+            let mut working_json = match self.config.private_github_access() {
+                Some(private_github_config) => json!({
+                    "docker_build.repo_url": repo_url,
+                    "docker_build.software_name": software_name,
+                    "docker_build.commit_hash": commit,
+                    "docker_build.registry_host": self.config.image_registry_host(),
+                    "docker_build.github_user": private_github_config.client_id(),
+                    "docker_build.github_pass_encrypted": private_github_config.client_pass_uri(),
+                    "docker_build.gcloud_kms_keyring": private_github_config.kms_keyring(),
+                    "docker_build.gcloud_kms_key": private_github_config.kms_key()
+                }),
+                None => json!({
+                    "docker_build.repo_url": repo_url,
+                    "docker_build.software_name": software_name,
+                    "docker_build.commit_hash": commit,
+                    "docker_build.registry_host": self.config.image_registry_host()
+                }),
+            };
+            // Add machine_type if it's not standard
+            if !(machine_type == MachineTypeEnum::Standard) {
+                let working_json_map = working_json.as_object_mut().expect(
+                    "Failed to unwrap software build params json as map.  This should not happen.",
+                );
+                working_json_map.insert(
+                    String::from("docker_build.machine_type"),
+                    Value::String(machine_type.to_string()),
+                );
+            }
+            working_json
         };
 
         // Write json to temp file so it can be submitted to cromwell
@@ -263,7 +279,7 @@ pub fn get_or_create_software_build(
 #[cfg(test)]
 mod tests {
     use crate::config::CustomImageBuildConfig;
-    use crate::custom_sql_types::BuildStatusEnum;
+    use crate::custom_sql_types::{BuildStatusEnum, MachineTypeEnum};
     use crate::manager::software_builder::{
         get_or_create_software_build, get_or_create_software_version, SoftwareBuilder,
     };
@@ -281,6 +297,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -300,6 +317,7 @@ mod tests {
             name: String::from("Kevin's Software2"),
             description: Some(String::from("Kevin made this software for testing too")),
             repository_url: String::from("https://example.com/organization/project2"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin2@example.com")),
         };
 
@@ -311,6 +329,7 @@ mod tests {
             name: String::from("Kevin's Software3"),
             description: Some(String::from("Kevin even made this software for testing")),
             repository_url: String::from("https://example.com/organization/project3"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin3@example.com")),
         };
 
@@ -340,6 +359,7 @@ mod tests {
             name: String::from("Kevin's Software3"),
             description: Some(String::from("Kevin even made this software for testing")),
             repository_url: String::from("https://example.com/organization/project3"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin3@example.com")),
         };
 
@@ -371,6 +391,7 @@ mod tests {
                 "How does Kevin find time to make all this testing software?",
             )),
             repository_url: String::from("https://example.com/organization/project4"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin4@example.com")),
         };
 

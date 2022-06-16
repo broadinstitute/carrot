@@ -280,6 +280,7 @@ fn init_routes_software_building_disabled(cfg: &mut web::ServiceConfig) {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::MachineTypeEnum;
     use crate::routes::error_handling::ErrorBody;
     use crate::unit_test_util::*;
     use crate::util::git_repos::GitRepoChecker;
@@ -292,6 +293,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("git://example.com/example/example.git"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -516,6 +518,7 @@ mod tests {
             name: String::from("Kevin's test"),
             description: Some(String::from("Kevin's test description")),
             repository_url: String::from("https://github.com/broadinstitute/gatk.git"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -564,6 +567,7 @@ mod tests {
             name: software.name.clone(),
             description: Some(String::from("Kevin's test description")),
             repository_url: String::from("https://github.com/broadinstitute/gatk.git"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -601,6 +605,7 @@ mod tests {
             name: software.name.clone(),
             description: Some(String::from("Kevin's test description")),
             repository_url: String::from("git://example.com/example/example.git"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -638,6 +643,7 @@ mod tests {
             name: String::from("Kevin's test"),
             description: Some(String::from("Kevin's test description")),
             repository_url: String::from("https://github.com/broadinstitute/gatk.git"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -673,6 +679,7 @@ mod tests {
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
         };
 
         let req = test::TestRequest::put()
@@ -693,6 +700,10 @@ mod tests {
                 .expect("Created software missing description"),
             software_change.description.unwrap()
         );
+        assert_eq!(
+            test_software.machine_type,
+            software_change.machine_type.unwrap()
+        );
     }
 
     #[actix_rt::test]
@@ -711,6 +722,7 @@ mod tests {
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
         };
 
         let req = test::TestRequest::put()
@@ -746,6 +758,7 @@ mod tests {
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
         };
 
         let req = test::TestRequest::put()
@@ -780,6 +793,7 @@ mod tests {
         let software_change = SoftwareChangeset {
             name: Some(String::from("Kevin's test change")),
             description: Some(String::from("Kevin's test description2")),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
         };
 
         let req = test::TestRequest::put()

@@ -149,6 +149,7 @@ fn init_routes_software_building_disabled(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::custom_sql_types::MachineTypeEnum;
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_version::NewSoftwareVersion;
     use crate::unit_test_util::*;
@@ -161,6 +162,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

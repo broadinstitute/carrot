@@ -15,6 +15,7 @@ def find(
     name="",
     description="",
     repository_url="",
+    machine_type="",
     created_by="",
     created_before="",
     created_after="",
@@ -29,6 +30,7 @@ def find(
         ("name", name),
         ("description", description),
         ("repository_url", repository_url),
+        ("machine_type", machine_type),
         ("created_by", created_by),
         ("created_before", created_before),
         ("created_after", created_after),
@@ -39,23 +41,25 @@ def find(
     return request_handler.find("software", params)
 
 
-def create(name, description, repository_url, created_by):
+def create(name, description, repository_url, machine_type, created_by):
     """Submits a request to CARROT's software create mapping"""
     # Create parameter list
     params = [
         ("name", name),
         ("description", description),
         ("repository_url", repository_url),
+        ("machine_type", machine_type),
         ("created_by", created_by),
     ]
     return request_handler.create("software", params)
 
 
-def update(software_id, name, description):
+def update(software_id, name, description, machine_type):
     """Submits a request to CARROT's software update mapping"""
     # Create parameter list
     params = [
         ("name", name),
         ("description", description),
+        ("machine_type", machine_type),
     ]
     return request_handler.update("software", software_id, params)

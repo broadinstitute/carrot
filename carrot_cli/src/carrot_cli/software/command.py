@@ -35,6 +35,12 @@ def find_by_id(id):
     help="The url of the repository where the software code is hosted",
 )
 @click.option(
+    "--machine_type",
+    default="",
+    help="Optional machine type for Google Cloud Build to use for building this software.",
+    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", ''], case_sensitive=False)
+)
+@click.option(
     "--created_before",
     default="",
     help="Upper bound for software's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
@@ -74,6 +80,7 @@ def find(
     name,
     description,
     repository_url,
+    machine_type,
     created_by,
     created_before,
     created_after,
@@ -88,6 +95,7 @@ def find(
             name,
             description,
             repository_url,
+            machine_type,
             created_by,
             created_before,
             created_after,
@@ -108,11 +116,17 @@ def find(
     required=True,
 )
 @click.option(
+    "--machine_type",
+    default="",
+    help="Optional machine type for Google Cloud Build to use for building this software.",
+    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", ''], case_sensitive=False)
+)
+@click.option(
     "--created_by",
     default="",
     help="Email of the creator of the software.  Defaults to email config variable",
 )
-def create(name, description, repository_url, created_by):
+def create(name, description, repository_url, machine_type, created_by):
     """Create software definition with the specified parameters"""
     # If created_by is not set and there is an email config variable, fill with that
     if created_by == "":
@@ -125,18 +139,24 @@ def create(name, description, repository_url, created_by):
                 "there must be a value set for email."
             )
             sys.exit(1)
-    print(software_rest.create(name, description, repository_url, created_by))
+    print(software_rest.create(name, description, repository_url, machine_type, created_by))
 
 
 @main.command(name="update")
 @click.argument("software")
 @click.option("--name", default="", help="The name of the software")
 @click.option("--description", default="", help="The description of the software")
-def update(software, name, description):
+@click.option(
+    "--machine_type",
+    default="",
+    help="Optional machine type for Google Cloud Build to use for building this software.",
+    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", ''], case_sensitive=False)
+)
+def update(software, name, description, machine_type):
     """Update software definition for SOFTWARE (id or name) with the specified parameters"""
     # Process software to get id if it's a name
     id = dependency_util.get_id_from_id_or_name_and_handle_error(software, software_rest, "software_id", "software")
-    print(software_rest.update(id, name, description))
+    print(software_rest.update(id, name, description, machine_type))
 
 
 main.add_command(software_version.main)
