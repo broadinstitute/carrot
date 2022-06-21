@@ -178,6 +178,12 @@ pub enum EntityTypeEnum {
 ///
 /// Represents the enum used in the DB for representing google cloud build's machine_type option
 /// for building on a different machine than the default
+///
+/// Google's Cloud Build docs explain the machine-type argument here:
+/// https://cloud.google.com/sdk/gcloud/reference/builds/submit#--machine-type
+/// Notably, it mentions two other machine types: e2-highcpu-8 and e2-highcpu-32, but, when I
+/// tested building with those, I got an error message saying the machine-type was
+/// unrecognized so ¯\_(ツ)_/¯
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy)]
 #[DieselType = "Machine_type_enum"]
 pub enum MachineTypeEnum {
