@@ -18,6 +18,7 @@ setup(
     pysam
     dataclasses
     click
+    requests
     """.split(
         "\n"
     ),
