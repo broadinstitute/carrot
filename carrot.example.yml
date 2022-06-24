@@ -1,12 +1,15 @@
 # API Config
+# The host and port which carrot will listen on for requests to its REST API
 api:
   host: 127.0.0.1
   port: 8080
 # DB Config
+# The database in which carrot will store test configurations and results
 database:
   url: postgres://test_framework_admin:admin@localhost:5432/test_framework_db_dev
   threads: 4
 # Cromwell Config
+# The cromwell server carrot will run tests on
 cromwell:
   address: http://localhost:8000
 status_manager:
@@ -55,14 +58,14 @@ github:
   pubsub_subscription_name: projects/example/subscriptions/example
   # The maximum number of messages to retrieve from the pubsub subscription at once (optional)
   # Defaults to 20
-  pubsub_max_messages_per: 20,
+  pubsub_max_messages_per: 20
   # The number of time, in seconds, to wait between checks of the pubsub subscription (optional)
   # Defaults to 60
-  pubsub_wait_time_in_secs: 60,
+  pubsub_wait_time_in_secs: 60
 # Config for building custom docker images from git repos (optional)
 custom_image_build:
   # The host address for the docker image registry where we'll store custom docker images
-  image_registry_host: us.gcr.io/dsde-methods-carrot
+  image_registry_host: us.gcr.io/example_registry
   # Config for accessing private github repos (optional)
   private_github_access:
     # The github username for the user to use to access private repositories
