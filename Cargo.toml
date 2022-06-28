@@ -35,7 +35,7 @@ serde_yaml = "0.8"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"]}
 # For merging JSONs
-json-patch = "*"
+json-patch = "^0.2.6"
 # For loading static configuration info
 lazy_static = "1.4.0"
 # For creating temporary files for processing WDLs
@@ -60,7 +60,7 @@ yup-oauth2 = "^1.0"
 hyper = "^0.10"
 hyper-rustls = "^0.6"
 # For decoding pubsub messages
-base64 = "*"
+base64 = "^0.13"
 # For interacting with data stored in Google Cloud Storage
 google-storage1 = "^1.0"
 # For url encoding (necessary for interacting with the Google Cloud Storage API)
