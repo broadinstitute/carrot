@@ -38,7 +38,7 @@ def find_by_id(id):
     "--machine_type",
     default="",
     help="Optional machine type for Google Cloud Build to use for building this software.",
-    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", ''], case_sensitive=False)
+    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", "e2-highcpu-8", "e2-highcpu-32", ''], case_sensitive=False)
 )
 @click.option(
     "--created_before",
@@ -119,7 +119,7 @@ def find(
     "--machine_type",
     default="",
     help="Optional machine type for Google Cloud Build to use for building this software.",
-    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", ''], case_sensitive=False)
+    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", "e2-highcpu-8", "e2-highcpu-32", ''], case_sensitive=False)
 )
 @click.option(
     "--created_by",
@@ -150,7 +150,7 @@ def create(name, description, repository_url, machine_type, created_by):
     "--machine_type",
     default="",
     help="Optional machine type for Google Cloud Build to use for building this software.",
-    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", ''], case_sensitive=False)
+    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", "e2-highcpu-8", "e2-highcpu-32", ''], case_sensitive=False)
 )
 def update(software, name, description, machine_type):
     """Update software definition for SOFTWARE (id or name) with the specified parameters"""

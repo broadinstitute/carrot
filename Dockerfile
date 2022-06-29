@@ -1,4 +1,4 @@
-FROM rust:1.55.0 as builder
+FROM rust:1.57.0 as builder
 WORKDIR /usr/src/carrot
 COPY . .
 RUN cargo install --path .

@@ -33,7 +33,7 @@ task build_and_push {
     }
 
     runtime {
-        docker: "google/cloud-sdk:307.0.0"
+        docker: "google/cloud-sdk:392.0.0"
     }
 
 }

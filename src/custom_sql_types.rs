@@ -193,6 +193,12 @@ pub enum MachineTypeEnum {
     #[serde(rename = "n1-highcpu-32")]
     #[db_rename = "n1-highcpu-32"]
     N1HighCpu32,
+    #[serde(rename = "e2-highcpu-8")]
+    #[db_rename = "e2-highcpu-8"]
+    E2HighCpu8,
+    #[serde(rename = "e2-highcpu-32")]
+    #[db_rename = "e2-highcpu-32"]
+    E2HighCpu32,
     #[serde(rename = "standard")]
     #[db_rename = "standard"]
     Standard,
@@ -203,6 +209,8 @@ impl fmt::Display for MachineTypeEnum {
         match self {
             MachineTypeEnum::N1HighCpu8 => write!(f, "n1-highcpu-8"),
             MachineTypeEnum::N1HighCpu32 => write!(f, "n1-highcpu-32"),
+            MachineTypeEnum::E2HighCpu8 => write!(f, "e2-highcpu-8"),
+            MachineTypeEnum::E2HighCpu32 => write!(f, "e2-highcpu-32"),
             MachineTypeEnum::Standard => write!(f, "standard"),
         }
     }
