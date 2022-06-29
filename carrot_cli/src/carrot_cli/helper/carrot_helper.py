@@ -571,9 +571,9 @@ class CarrotHelper:
         # 36: UUID columns
         # 16: status columns
         # 15: (5 columns - 1) * 3, spaces between columns
-        run_dir_col_max_width = t_size.columns - (((36 * 3) + (16 * 2)) + 15)
-        row_format = f"{{:<36}}   {{:<{run_dir_col_max_width}}}   " \
-                     f"{{:<16}}   {{:<16}}   {{:<36}}   {{:<36}}"
+        run_dir_col_max_width = abs(t_size.columns - (((36 * 3) + (16 * 2)) + 15))
+        row_format = f'{{:<36}}   {{:<{run_dir_col_max_width}}}   ' \
+                     f'{{:<16}}   {{:<16}}   {{:<36}}   {{:<36}}'
 
         print(row_format.format(
             "Run UUID",
