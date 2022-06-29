@@ -239,12 +239,12 @@ class CarrotHelper:
         pipelines = self.get_pipelines_from_dirs(tests_dirs)
 
         self.pipelines = {}
-        for pipeline_name, template_names in pipelines.items():
-            print(f"\npipeline name: {pipeline_name}\ttemplate name: {template_names}")
-            self.pipelines[pipeline_name] = self.create_pipeline(wdls_dir, pipeline_name, template_names)
+        for pipeline_name, templates in pipelines.items():
+            print(f"\npipeline name: {pipeline_name}\ttemplates: {templates}")
+            self.pipelines[pipeline_name] = self.create_pipeline(wdls_dir, pipeline_name, templates)
         self.persist_object(self.pipelines, self.pipelines_filename)
 
-    def create_pipeline(self, wdls_dir, pipeline_name, template_names):
+    def create_pipeline(self, wdls_dir, pipeline_name, templates):
         test_wdl_local = os.path.join(wdls_dir, pipeline_name + ".wdl")
         test_workflow_outputs = self._get_wdl_outputs(test_wdl_local)
         if not bool(test_workflow_outputs):
@@ -259,7 +259,7 @@ class CarrotHelper:
                 **self.call_carrot(
                     "pipeline", "create", field_to_uuid="pipeline_id"))
 
-        for template_name in template_names:
+        for template_name, runs_dirs in templates.items():
             if template_name in pipeline.templates and \
                     (pipeline.templates[template_name].test_wdl_checksum ==
                      test_wdl_checksum and
@@ -270,6 +270,7 @@ class CarrotHelper:
             template = self.create_template(
                 pipeline_name, pipeline, template_name, test_wdl,
                 test_wdl_checksum, test_workflow_outputs)
+            template.runs_dirs = runs_dirs
             pipeline.templates[template_name] = template
 
         return pipeline
@@ -433,7 +434,7 @@ class CarrotHelper:
             if template_name in pipeline.templates else None
         template.test = self.create_test(
             template,
-            os.path.join(self.working_dir, pipeline_name, template_name))
+            os.path.join(TEST_WDLS_LOCAL_DIR, pipeline_name, template_name))
         return template
 
     def create_test(self, template, template_path):
@@ -513,8 +514,8 @@ class CarrotHelper:
         return updated_status
 
     def submit_tests(self, wdls_dir, tests_dir):
+        runs = {}
         try:
-            runs = {}
             with open(RUNS_JSON, "r") as runs_json:
                 runs = json.load(runs_json)
         except FileNotFoundError:
@@ -535,17 +536,15 @@ class CarrotHelper:
         c = 0
         print("Submitting tests ...")
         print('%-40s%-80s' % ("Run ID", "Test"))
-        for pipeline, templates in self.pipelines.items():
-            for template, run_dirs in templates.items():
-                for run_dir in run_dirs:
-                    c += 1
-                    test = self.pipelines[pipeline].templates[template].test
-                    run = self.create_run(test, run_dir)
+        for pipeline_name, pipeline in self.pipelines.items():
+            for template_name, template in pipeline.templates.items():
+                for run_dir in template.runs_dirs:
+                    abs_run_dir = os.path.join(TEST_WDLS_LOCAL_DIR, pipeline_name, template_name, run_dir)
+                    run = self.create_run(template.test, abs_run_dir)
                     runs[run.uuid] = run
                     self.persist_object(runs, RUNS_JSON)
-                    print('%-40s%-80s' %
-                          (run.uuid,
-                           pipeline + "/" + template + "/" + run_dir))
+                    print('%-40s%-80s' % (run.uuid, "/".join([pipeline_name, template_name, run_dir])))
+                    c += 1
         print(f"Submitted {c} test(s).")
 
     def create_run(self, test, run_dir):
@@ -553,10 +552,8 @@ class CarrotHelper:
             "test", "run",
             positional_args=[test.uuid],
             named_args={
-                "test_input": os.path.join(test.template_path, run_dir,
-                                           TEST_INPUTS_FILENAME),
-                "eval_input": os.path.join(test.template_path, run_dir,
-                                           EVAL_INPUTS_FILENAME)
+                "test_input": os.path.join(run_dir, TEST_INPUTS_FILENAME),
+                "eval_input": os.path.join(run_dir, EVAL_INPUTS_FILENAME)
             })
         return Run(**response, run_dir=os.path.join(
             test.template_path, run_dir))
@@ -705,7 +702,10 @@ class Template(BaseModel):
     eval_wdl: str
     eval_wdl_checksum: str
     results: List = field(default_factory=list)
-    test: str = None
+    runs_dirs: List = field(default_factory=list)
+    test: str = None  # TODO: change to Test
+    eval_wdl_dependencies: str = None  # The location of a zip archive containing the eval WDL dependencies.
+    test_wdl_dependencies: str = None  # The location of a zip archive containing the test WDL dependencies.
 
 
 @dataclass
@@ -722,12 +722,16 @@ class Test(BaseModel):
     template_path: str
     eval_input_defaults: dict = field(default_factory=dict)
     test_input_defaults: dict = field(default_factory=dict)
+    eval_option_defaults: str = None  # Options in JSON format encoded as a string.
+    test_option_defaults: str = None  # Options in JSON format encoded as a string.
 
 
 class Run(BaseModel):
     def __init__(self, name, test_id, test_cromwell_job_id,
                  eval_cromwell_job_id, status, finished_at,
-                 test_input, eval_input, created_at, created_by,
+                 test_input, test_options,
+                 eval_input, eval_options,
+                 created_at, created_by,
                  description=None, run_id=None, uuid=None,
                  results=None, run_dir=None):
         super().__init__(run_id or uuid, name, description,
@@ -738,7 +742,9 @@ class Run(BaseModel):
         self.status = status
         self.finished_at = finished_at
         self.test_input = test_input
+        self.test_options = test_options
         self.eval_input = eval_input
+        self.eval_options = eval_options
         self.results = results
         self.run_dir = run_dir
 
