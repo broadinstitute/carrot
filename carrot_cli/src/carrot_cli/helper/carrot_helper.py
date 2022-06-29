@@ -733,7 +733,8 @@ class Run(BaseModel):
                  eval_input, eval_options,
                  created_at, created_by,
                  description=None, run_id=None, uuid=None,
-                 results=None, run_dir=None):
+                 results=None, run_dir=None,
+                 errors=None):
         super().__init__(run_id or uuid, name, description,
                          created_at, created_by)
         self.test_id = test_id
@@ -747,6 +748,7 @@ class Run(BaseModel):
         self.eval_options = eval_options
         self.results = results
         self.run_dir = run_dir
+        self.errors = errors
 
 
 @dataclass
