@@ -1,12 +1,13 @@
-//! Defines REST APIs for operations on run_reports
+//! Defines REST APIs for operations on report_maps
 //!
-//! Contains functions for processing requests to create, update, and search run_report
+//! Contains functions for processing requests to create, update, and search report_map
 //!s, along with their URIs
 
+use crate::custom_sql_types::ReportableEnum;
 use crate::db;
 use crate::manager::report_builder;
 use crate::manager::report_builder::ReportBuilder;
-use crate::models::run_report::{RunReportData, RunReportQuery};
+use crate::models::report_map::{ReportMapData, ReportMapQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::util::parse_id;
@@ -18,9 +19,9 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-/// Represents the part of a new run_report that is received as a request body
+/// Represents the part of a new report_map that is received as a request body
 #[derive(Deserialize, Serialize)]
-struct NewRunReportIncomplete {
+struct NewReportMapIncomplete {
     created_by: Option<String>,
 }
 
@@ -30,24 +31,58 @@ struct CreateQueryParams {
     delete_failed: Option<bool>,
 }
 
-/// Handles requests to /runs/{id}/reports/{report_id} for retrieving run_report
+/// Handles requests to /runs/{id}/reports/{report_id} for retrieving report_map
 /// info by run_id and report_id
 ///
 /// This function is called by Actix-Web when a get request is made to the
 /// /runs/{id}/reports/{report_id}
 /// It parses the id and report_id from `req`, connects to the db via a connection from `pool`,
-/// and returns the retrieved run_report, or an error message if there is no matching
-/// run_report or some other error occurs
+/// and returns the retrieved report_map, or an error message if there is no matching
+/// report_map or some other error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
+async fn find_by_id_for_run(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
+    find_by_id(ReportableEnum::Run, id, report_id, pool).await
+}
+
+/// Handles requests to /run-groups/{id}/reports/{report_id} for retrieving report_map
+/// info by run_group_id and report_id
+///
+/// This function is called by Actix-Web when a get request is made to the
+/// /run-groups/{id}/reports/{report_id}
+/// It parses the id and report_id from `req`, connects to the db via a connection from `pool`,
+/// and returns the retrieved report_map, or an error message if there is no matching
+/// report_map or some other error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database reports in an error
+async fn find_by_id_for_run_group(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
+    // Pull id params from path
+    let id = &req.match_info().get("id").unwrap();
+    let report_id = &req.match_info().get("report_id").unwrap();
+
+    find_by_id(ReportableEnum::RunGroup, id, report_id, pool).await
+}
+
+/// Queries the database for a report_map record for `entity_type`, `entity_id`, and `report_id`,
+/// using `pool` for connecting to the DB.  Returns the found report_map record as an HttpResponse
+/// or an appropriate error message if something goes wrong or there is no matching record.
+///
+/// # Panics
+/// Panics if attempting to connect to the database reports in an error
+async fn find_by_id(
+    entity_type: ReportableEnum,
+    entity_id: &str,
+    report_id: &str,
+    pool: web::Data<db::DbPool>,
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match parse_id(id) {
+    let id = match parse_id(entity_id) {
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
@@ -62,8 +97,13 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunReportData::find_by_run_and_report(&conn, id, report_id) {
-            Ok(run_report) => Ok(run_report),
+        match ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            entity_type,
+            id,
+            report_id,
+        ) {
+            Ok(report_map) => Ok(report_map),
             Err(e) => {
                 error!("{}", e);
                 Err(e)
@@ -82,9 +122,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
                 // If no is found, return a 404
                 BlockingError::Error(diesel::NotFound) => {
                     HttpResponse::NotFound().json(ErrorBody {
-                        title: "No run_report found".to_string(),
+                        title: "No report_map found".to_string(),
                         status: 404,
-                        detail: "No run_report found with the specified ID".to_string(),
+                        detail: "No report_map found with the specified IDs".to_string(),
                     })
                 }
                 // For other errors, return a 500
@@ -99,15 +139,15 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
 ///
 /// This function is called by Actix-Web when a get request is made to the /runs/{id}/reports
 ///
-/// It deserializes the query params to a RunReportQuery, connects to the db via a connection
-/// from `pool`, and returns the retrieved run_reports, or an error message if there is no matching
+/// It deserializes the query params to a ReportMapQuery, connects to the db via a connection
+/// from `pool`, and returns the retrieved report_maps, or an error message if there is no matching
 /// or some other error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn find(
+async fn find_for_run(
     id: web::Path<String>,
-    web::Query(mut query): web::Query<RunReportQuery>,
+    web::Query(mut query): web::Query<ReportMapQuery>,
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
     // Parse ID into Uuid
@@ -116,14 +156,54 @@ async fn find(
         Err(error_response) => return error_response,
     };
 
-    // Set run_id as part of query object
-    query.run_id = Some(id);
+    // Set entity_id as part of query object
+    query.entity_id = Some(id);
+    query.entity_type = Some(ReportableEnum::Run);
 
+    find(query, pool).await
+}
+
+/// Handles requests to /run-groups/{id}/reports for retrieving info by query parameters
+/// and run id
+///
+/// This function is called by Actix-Web when a get request is made to the /run-groups/{id}/reports
+///
+/// It deserializes the query params to a ReportMapQuery, connects to the db via a connection
+/// from `pool`, and returns the retrieved report_maps, or an error message if there is no matching
+/// or some other error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database reports in an error
+async fn find_for_run_group(
+    id: web::Path<String>,
+    web::Query(mut query): web::Query<ReportMapQuery>,
+    pool: web::Data<db::DbPool>,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&id) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+
+    // Set entity_id as part of query object
+    query.entity_id = Some(id);
+    query.entity_type = Some(ReportableEnum::RunGroup);
+
+    find(query, pool).await
+}
+
+/// Queries the db for report_map records matching `query` via a connection from `pool`, and returns
+/// the retrieved report_maps, or an error message if there is no matching or some other error
+/// occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database reports in an error
+async fn find(query: ReportMapQuery, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Query DB for reports in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunReportData::find(&conn, query) {
+        match ReportMapData::find(&conn, query) {
             Ok(test) => Ok(test),
             Err(e) => {
                 error!("{}", e);
@@ -137,9 +217,9 @@ async fn find(
             if reports.is_empty() {
                 // If no is found, return a 404
                 HttpResponse::NotFound().json(ErrorBody {
-                    title: "No run_report found".to_string(),
+                    title: "No report_map found".to_string(),
                     status: 404,
-                    detail: "No run_report found with the specified parameters".to_string(),
+                    detail: "No report_map found with the specified parameters".to_string(),
                 })
             } else {
                 // If there is no error, return a response with the retrieved data
@@ -158,16 +238,16 @@ async fn find(
 ///
 /// This function is called by Actix-Web when a post request is made to the
 /// /runs/{id}/reports/{report_id} mapping
-/// It deserializes the request body to a NewRunReportIncomplete, assembles a report template and a
+/// It deserializes the request body to a NewReportMapIncomplete, assembles a report template and a
 /// wdl for filling it for the report specified by `report_id`, submits it to cromwell with
-/// data filled in from the run specified by `run_id`, and creates a RunReportData instance for it
+/// data filled in from the run specified by `run_id`, and creates a ReportMapData instance for it
 /// in the DB
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn create(
+async fn create_for_run(
     req: HttpRequest,
-    web::Json(run_report_inputs): web::Json<NewRunReportIncomplete>,
+    web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
     query_params: Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
     report_builder: web::Data<Option<ReportBuilder>>,
@@ -175,8 +255,71 @@ async fn create(
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
+
+    create(
+        ReportableEnum::Run,
+        id,
+        report_id,
+        report_map_inputs,
+        query_params,
+        pool,
+        report_builder,
+    )
+    .await
+}
+
+/// Handles requests to /run-groups/{id}/reports/{report_id} mapping for creating a run report
+///
+/// This function is called by Actix-Web when a post request is made to the
+/// /run-groups/{id}/reports/{report_id} mapping
+/// It deserializes the request body to a NewReportMapIncomplete, assembles a report template and a
+/// wdl for filling it for the report specified by `report_id`, submits it to cromwell with
+/// data filled in from the run-group specified by `id`, and creates a ReportMapData instance for it
+/// in the DB
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create_for_run_group(
+    req: HttpRequest,
+    web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
+    query_params: Query<CreateQueryParams>,
+    pool: web::Data<db::DbPool>,
+    report_builder: web::Data<Option<ReportBuilder>>,
+) -> HttpResponse {
+    // Pull id params from path
+    let id = &req.match_info().get("id").unwrap();
+    let report_id = &req.match_info().get("report_id").unwrap();
+
+    create(
+        ReportableEnum::RunGroup,
+        id,
+        report_id,
+        report_map_inputs,
+        query_params,
+        pool,
+        report_builder,
+    )
+    .await
+}
+
+/// Assembles a report template and a wdl for filling it for the report specified by `report_id`,
+/// submits it to cromwell with data filled in from the run or run_group specified by `entity_id`,
+/// and creates a ReportMapData instance for it in the DB.  Returns the created ReportMapData
+/// instance as an HttpResponse or an appropriate error response if anything goes wrong
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create(
+    entity_type: ReportableEnum,
+    entity_id: &str,
+    report_id: &str,
+    report_map_inputs: NewReportMapIncomplete,
+    query_params: Query<CreateQueryParams>,
+    pool: web::Data<db::DbPool>,
+    report_builder: web::Data<Option<ReportBuilder>>,
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match parse_id(id) {
+    let entity_id = match parse_id(entity_id) {
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
@@ -185,7 +328,7 @@ async fn create(
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
-    // Set whether to delete an existent failed run_report automatically based on query params
+    // Set whether to delete an existent failed report_map automatically based on query params
     let delete_failed: bool = matches!(query_params.delete_failed, Some(true));
     // Get DB connection
     let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -194,11 +337,12 @@ async fn create(
         match report_builder.as_ref() {
             Some(report_builder) => {
                 report_builder
-                    .create_run_report_for_ids(
+                    .create_report_map_for_ids(
                         &conn,
-                        id,
+                        entity_type,
+                        entity_id,
                         report_id,
-                        &run_report_inputs.created_by,
+                        &report_map_inputs.created_by,
                         delete_failed,
                     )
                     .await
@@ -217,7 +361,7 @@ async fn create(
             }
         }
     } {
-        Ok(run_report) => HttpResponse::Ok().json(run_report),
+        Ok(report_map) => HttpResponse::Ok().json(report_map),
         Err(err) => {
             error!("{}", err);
             let error_body = match err {
@@ -283,6 +427,11 @@ async fn create(
                     status: 500,
                     detail: format!("Error while attempting to convert run data into CSV to include in report: {}", e),
                 },
+                report_builder::Error::UnexpectedState(e) => ErrorBody {
+                    title: "Unexpected state".to_string(),
+                    status: 500,
+                    detail: format!("Encountered an unexpected state while attempting to generate report: {}", e),
+                },
             };
             HttpResponseBuilder::new(
                 StatusCode::from_u16(error_body.status)
@@ -293,24 +442,56 @@ async fn create(
     }
 }
 
-/// Handles DELETE requests to /runs/{id}/reports/{report_id} for deleting run_report
-///s
+/// Handles DELETE requests to /runs/{id}/reports/{report_id} for deleting report_maps
 ///
 /// This function is called by Actix-Web when a delete request is made to the
 /// /runs/{id}/reports/{report_id}
 /// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
-/// delete the specified run_report, returning the number or rows deleted or an error
+/// delete the specified report_map, returning the number or rows deleted or an error
 /// message if some error occurs
 ///
 /// # Panics
 /// Panics if attempting to connect to the database reports in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
+async fn delete_for_run(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
 
+    delete(ReportableEnum::Run, id, report_id, pool).await
+}
+
+/// Handles DELETE requests to /run-groups/{id}/reports/{report_id} for deleting report_maps
+///
+/// This function is called by Actix-Web when a delete request is made to the
+/// /run-groups/{id}/reports/{report_id}
+/// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
+/// delete the specified report_map, returning the number or rows deleted or an error
+/// message if some error occurs
+///
+/// # Panics
+/// Panics if attempting to connect to the database reports in an error
+async fn delete_for_run_group(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
+    // Pull id params from path
+    let id = &req.match_info().get("id").unwrap();
+    let report_id = &req.match_info().get("report_id").unwrap();
+
+    delete(ReportableEnum::RunGroup, id, report_id, pool).await
+}
+
+/// Queries the database to delete a report_map record for `entity_type`, `entity_id`, and
+/// `report_id`, using `pool` for connecting to the DB.  Returns a success message as an
+/// HttpResponse or an appropriate error message if something goes wrong.
+///
+/// # Panics
+/// Panics if attempting to connect to the database reports in an error
+async fn delete(
+    entity_type: ReportableEnum,
+    entity_id: &str,
+    report_id: &str,
+    pool: web::Data<db::DbPool>,
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match parse_id(id) {
+    let entity_id = match parse_id(entity_id) {
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
@@ -325,7 +506,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunReportData::delete(&conn, id, report_id) {
+        match ReportMapData::delete(&conn, entity_type, entity_id, report_id) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
                 error!("{}", e);
@@ -342,9 +523,9 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
                 HttpResponse::Ok().json(json!({ "message": message }))
             } else {
                 HttpResponse::NotFound().json(ErrorBody {
-                    title: "No run_report found".to_string(),
+                    title: "No report_map found".to_string(),
                     status: 404,
-                    detail: "No run_report found for the specified id".to_string(),
+                    detail: "No report_map found for the specified id".to_string(),
                 })
             }
         }
@@ -373,11 +554,18 @@ pub fn init_routes(cfg: &mut web::ServiceConfig, enable_reporting: bool) {
 fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/runs/{id}/reports/{report_id}")
-            .route(web::get().to(find_by_id))
-            .route(web::delete().to(delete_by_id))
-            .route(web::post().to(create)),
+            .route(web::get().to(find_by_id_for_run))
+            .route(web::delete().to(delete_for_run))
+            .route(web::post().to(create_for_run)),
     );
-    cfg.service(web::resource("/runs/{id}/reports").route(web::get().to(find)));
+    cfg.service(
+        web::resource("/run-groups/{id}/reports/{report_id}")
+            .route(web::get().to(find_by_id_for_run_group))
+            .route(web::delete().to(delete_for_run_group))
+            .route(web::post().to(create_for_run_group)),
+    );
+    cfg.service(web::resource("/runs/{id}/reports").route(web::get().to(find_for_run)));
+    cfg.service(web::resource("/run-groups/{id}/reports").route(web::get().to(find_for_run_group)));
 }
 
 /// Attaches a reporting-disabled error message REST mapping to a service cfg
@@ -390,18 +578,33 @@ fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
         web::resource("/runs/{id}/reports/{report_id}")
             .route(web::route().to(disabled_features::reporting_disabled_mapping)),
     );
+
+    cfg.service(
+        web::resource("/run-groups/{id}/reports")
+            .route(web::route().to(disabled_features::reporting_disabled_mapping)),
+    );
+    cfg.service(
+        web::resource("/run-groups/{id}/reports/{report_id}")
+            .route(web::route().to(disabled_features::reporting_disabled_mapping)),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::custom_sql_types::{ReportStatusEnum, ResultTypeEnum, RunStatusEnum};
+    use crate::custom_sql_types::{
+        ReportStatusEnum, ReportTriggerEnum, ResultTypeEnum, RunStatusEnum,
+    };
     use crate::db::DbPool;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData};
-    use crate::models::run_report::{NewRunReport, RunReportData};
+    use crate::models::run_group::RunGroupData;
+    use crate::models::run_group_is_from_github::{
+        NewRunGroupIsFromGithub, RunGroupIsFromGithubData,
+    };
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::template_report::{NewTemplateReport, TemplateReportData};
@@ -473,11 +676,11 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_test_run_report_failed(conn: &PgConnection) -> RunReportData {
+    fn insert_test_report_map_failed(conn: &PgConnection) -> ReportMapData {
         let run = insert_test_run(conn);
 
         let notebook: Value = serde_json::from_str(
-            &read_to_string("testdata/routes/run_report/report_notebook.ipynb").unwrap(),
+            &read_to_string("testdata/routes/report_map/report_notebook.ipynb").unwrap(),
         )
         .unwrap();
 
@@ -491,8 +694,9 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Failed,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -501,12 +705,12 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
     fn insert_test_report(conn: &PgConnection) -> ReportData {
         let notebook: Value = serde_json::from_str(
-            &read_to_string("testdata/routes/run_report/report_notebook.ipynb").unwrap(),
+            &read_to_string("testdata/routes/report_map/report_notebook.ipynb").unwrap(),
         )
         .unwrap();
 
@@ -642,6 +846,146 @@ mod tests {
         (pipeline, template, test, run)
     }
 
+    fn insert_test_run_group_with_results(
+        conn: &PgConnection,
+    ) -> (PipelineData, TemplateData, TestData, RunData) {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: None,
+            test_option_defaults: None,
+            eval_input_defaults: None,
+            eval_option_defaults: None,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run_group");
+
+        let new_run_group_is_from_github = NewRunGroupIsFromGithub {
+            run_group_id: run_group.run_group_id,
+            owner: String::from("ExampleOwner2"),
+            repo: String::from("ExampleRepo2"),
+            issue_number: 5,
+            author: String::from("ExampleUser2"),
+            base_commit: String::from("6aef1203ac82ba2af28f6979c2c36c07fa4eef7d"),
+            head_commit: String::from("9172a559ad93ac320b53951742eca69814594cc7"),
+            test_input_key: Some(String::from("greeting_workflow.docker")),
+            eval_input_key: None,
+        };
+
+        let run_group_is_from_github =
+            RunGroupIsFromGithubData::create(conn, new_run_group_is_from_github)
+                .expect("Failed to insert run_group_is_from_github");
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            run_group_id: None,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_input: json!({
+                "greeting_workflow.docker": "carrot_build:ExampleRepo2|6aef1203ac82ba2af28f6979c2c36c07fa4eef7d",
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "Jean-Paul Gasse"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let new_result = NewResult {
+            name: String::from("Greeting"),
+            result_type: ResultTypeEnum::Text,
+            description: Some(String::from("Description4")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result =
+            ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: new_result.result_id,
+            result_key: "greeting_workflow.out_greeting".to_string(),
+            created_by: None,
+        };
+        let _new_template_result = TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template result");
+
+        let new_run_result = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean Paul Gasse".to_string(),
+        };
+
+        let _new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_result2 = NewResult {
+            name: String::from("File Result"),
+            result_type: ResultTypeEnum::File,
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result2 =
+            ResultData::create(conn, new_result2).expect("Failed inserting test result");
+
+        let new_template_result2 = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: new_result2.result_id,
+            result_key: "greeting_file_workflow.out_file".to_string(),
+            created_by: None,
+        };
+        let _new_template_result2 = TemplateResultData::create(conn, new_template_result2)
+            .expect("Failed inserting test template result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result/greeting.txt"),
+        };
+
+        let _new_run_result2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        (pipeline, template, test, run)
+    }
+
     fn insert_test_template_report(
         conn: &PgConnection,
         template_id: Uuid,
@@ -650,6 +994,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             template_id,
             report_id,
+            report_trigger: ReportTriggerEnum::Single,
             created_by: Some(String::from("kevin@example.com")),
         };
 
@@ -657,7 +1002,7 @@ mod tests {
             .expect("Failed to insert test template report")
     }
 
-    fn insert_data_for_create_run_report_success(conn: &PgConnection) -> (Uuid, Uuid) {
+    fn insert_data_for_create_report_map_success(conn: &PgConnection) -> (Uuid, Uuid) {
         let report = insert_test_report(conn);
         let (_pipeline, template, _test, run) = insert_test_run_with_results(conn);
         let _template_report =
@@ -666,13 +1011,14 @@ mod tests {
         (report.report_id, run.run_id)
     }
 
-    fn insert_test_run_report_failed_for_run_and_report(
+    fn insert_test_report_map_failed_for_run_and_report(
         conn: &PgConnection,
         run_id: Uuid,
         report_id: Uuid,
-    ) -> RunReportData {
-        let new_run_report = NewRunReport {
-            run_id: run_id,
+    ) -> ReportMapData {
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run_id,
             report_id: report_id,
             status: ReportStatusEnum::Failed,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -681,16 +1027,17 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
-    fn insert_test_run_report_nonfailed_for_run_and_report(
+    fn insert_test_report_map_nonfailed_for_run_and_report(
         conn: &PgConnection,
         run_id: Uuid,
         report_id: Uuid,
-    ) -> RunReportData {
-        let new_run_report = NewRunReport {
-            run_id: run_id,
+    ) -> ReportMapData {
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run_id,
             report_id: report_id,
             status: ReportStatusEnum::Succeeded,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -699,7 +1046,7 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
     fn create_test_report_builder() -> ReportBuilder {
@@ -733,11 +1080,11 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn create_success() {
+    async fn create_for_run_success() {
         let pool = get_test_db_pool();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -761,7 +1108,7 @@ mod tests {
         // Make the request
         let req = test::TestRequest::post()
             .uri(&format!("/runs/{}/reports/{}", run_id, report_id))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -772,19 +1119,74 @@ mod tests {
         cromwell_mock.assert();
 
         let result = test::read_body(resp).await;
-        let result_run_report: RunReportData = serde_json::from_slice(&result).unwrap();
+        let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(result_run_report.run_id, run_id);
-        assert_eq!(result_run_report.report_id, report_id);
+        assert_eq!(result_report_map.entity_id, run_id);
+        assert_eq!(result_report_map.report_id, report_id);
         assert_eq!(
-            result_run_report.created_by,
+            result_report_map.created_by,
             Some(String::from("kevin@example.com"))
         );
         assert_eq!(
-            result_run_report.cromwell_job_id,
+            result_report_map.cromwell_job_id,
             Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
         );
-        assert_eq!(result_run_report.status, ReportStatusEnum::Submitted);
+        assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
+    }
+
+    #[actix_rt::test]
+    async fn create_for_run_group_success() {
+        let pool = get_test_db_pool();
+
+        // Set up data in DB
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
+        // Make mockito mapping for cromwell
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .configure(init_routes_reporting_enabled),
+        )
+        .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/runs/{}/reports/{}", run_id, report_id))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        cromwell_mock.assert();
+
+        let result = test::read_body(resp).await;
+        let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(result_report_map.entity_id, run_id);
+        assert_eq!(result_report_map.report_id, report_id);
+        assert_eq!(
+            result_report_map.created_by,
+            Some(String::from("kevin@example.com"))
+        );
+        assert_eq!(
+            result_report_map.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
+        assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
     }
 
     #[actix_rt::test]
@@ -793,7 +1195,7 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -817,7 +1219,7 @@ mod tests {
         // Make the request
         let req = test::TestRequest::post()
             .uri(&format!("/runs/{}/reports/{}", run_id, report_id))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -839,8 +1241,8 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
-        insert_test_run_report_failed_for_run_and_report(&pool.get().unwrap(), run_id, report_id);
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
+        insert_test_report_map_failed_for_run_and_report(&pool.get().unwrap(), run_id, report_id);
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -867,7 +1269,7 @@ mod tests {
                 "/runs/{}/reports/{}?delete_failed=true",
                 run_id, report_id
             ))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -879,19 +1281,19 @@ mod tests {
 
         let result = test::read_body(resp).await;
 
-        let result_run_report: RunReportData = serde_json::from_slice(&result).unwrap();
+        let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(result_run_report.run_id, run_id);
-        assert_eq!(result_run_report.report_id, report_id);
+        assert_eq!(result_report_map.entity_id, run_id);
+        assert_eq!(result_report_map.report_id, report_id);
         assert_eq!(
-            result_run_report.created_by,
+            result_report_map.created_by,
             Some(String::from("kevin@example.com"))
         );
         assert_eq!(
-            result_run_report.cromwell_job_id,
+            result_report_map.cromwell_job_id,
             Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
         );
-        assert_eq!(result_run_report.status, ReportStatusEnum::Submitted);
+        assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
     }
 
     #[actix_rt::test]
@@ -900,7 +1302,7 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let _cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
             .with_status(500)
@@ -919,7 +1321,7 @@ mod tests {
         // Make the request
         let req = test::TestRequest::post()
             .uri(&format!("/runs/{}/reports/{}", run_id, report_id))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -940,7 +1342,7 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, _run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (report_id, _run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -964,7 +1366,7 @@ mod tests {
         // Make the request
         let req = test::TestRequest::post()
             .uri(&format!("/runs/{}/reports/{}", Uuid::new_v4(), report_id))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -985,7 +1387,7 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (_report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
+        let (_report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1008,7 +1410,7 @@ mod tests {
         // Make the request
         let req = test::TestRequest::post()
             .uri(&format!("/runs/{}/reports/{}", run_id, Uuid::new_v4()))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -1029,8 +1431,8 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
-        insert_test_run_report_failed_for_run_and_report(&pool.get().unwrap(), run_id, report_id);
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
+        insert_test_report_map_failed_for_run_and_report(&pool.get().unwrap(), run_id, report_id);
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1053,7 +1455,7 @@ mod tests {
         // Make the request
         let req = test::TestRequest::post()
             .uri(&format!("/runs/{}/reports/{}", run_id, report_id))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -1074,8 +1476,8 @@ mod tests {
         let client = Client::default();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_run_report_success(&pool.get().unwrap());
-        insert_test_run_report_nonfailed_for_run_and_report(
+        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
+        insert_test_report_map_nonfailed_for_run_and_report(
             &pool.get().unwrap(),
             run_id,
             report_id,
@@ -1105,7 +1507,7 @@ mod tests {
                 "/runs/{}/reports/{}?delete_failed=true",
                 run_id, report_id
             ))
-            .set_json(&NewRunReportIncomplete {
+            .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
             .to_request();
@@ -1124,7 +1526,7 @@ mod tests {
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
 
-        let new_run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let new_report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1136,7 +1538,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/runs/{}/reports/{}",
-                new_run_report.run_id, new_run_report.report_id
+                new_report_map.entity_id, new_report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1144,16 +1546,16 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let report = test::read_body(resp).await;
-        let test_run_report: RunReportData = serde_json::from_slice(&report).unwrap();
+        let test_report_map: ReportMapData = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(test_run_report, new_run_report);
+        assert_eq!(test_report_map, new_report_map);
     }
 
     #[actix_rt::test]
     async fn find_by_id_failure_reporting_disabled() {
         let pool = get_test_db_pool();
 
-        let new_run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let new_report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1165,7 +1567,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/runs/{}/reports/{}",
-                new_run_report.run_id, new_run_report.report_id
+                new_report_map.entity_id, new_report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1184,7 +1586,7 @@ mod tests {
     async fn find_by_id_failure_not_found() {
         let pool = get_test_db_pool();
 
-        insert_test_run_report_failed(&pool.get().unwrap());
+        insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1207,11 +1609,11 @@ mod tests {
         let report = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(error_body.title, "No run_report found");
+        assert_eq!(error_body.title, "No report_map found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No run_report found with the specified ID"
+            "No report_map found with the specified IDs"
         );
     }
 
@@ -1219,7 +1621,7 @@ mod tests {
     async fn find_by_id_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        insert_test_run_report_failed(&pool.get().unwrap());
+        insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1247,7 +1649,7 @@ mod tests {
     async fn find_success() {
         let pool = get_test_db_pool();
 
-        let new_run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let new_report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1259,7 +1661,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/runs/{}/reports?report_id={}",
-                new_run_report.run_id, new_run_report.report_id
+                new_report_map.entity_id, new_report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1267,16 +1669,16 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let report = test::read_body(resp).await;
-        let test_run_reports: Vec<RunReportData> = serde_json::from_slice(&report).unwrap();
+        let test_report_maps: Vec<ReportMapData> = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(test_run_reports[0], new_run_report);
+        assert_eq!(test_report_maps[0], new_report_map);
     }
 
     #[actix_rt::test]
     async fn find_failure_reporting_disabled() {
         let pool = get_test_db_pool();
 
-        let new_run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let new_report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1288,7 +1690,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/runs/{}/reports?report_id={}",
-                new_run_report.run_id, new_run_report.report_id
+                new_report_map.entity_id, new_report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1307,7 +1709,7 @@ mod tests {
     async fn find_failure_not_found() {
         let pool = get_test_db_pool();
 
-        insert_test_run_report_failed(&pool.get().unwrap());
+        insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1326,11 +1728,11 @@ mod tests {
         let report = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(error_body.title, "No run_report found");
+        assert_eq!(error_body.title, "No report_map found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No run_report found with the specified parameters"
+            "No report_map found with the specified parameters"
         );
     }
 
@@ -1338,7 +1740,7 @@ mod tests {
     async fn find_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
-        insert_test_run_report_failed(&pool.get().unwrap());
+        insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1366,7 +1768,7 @@ mod tests {
     async fn delete_success() {
         let pool = get_test_db_pool();
 
-        let run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1378,7 +1780,7 @@ mod tests {
         let req = test::TestRequest::delete()
             .uri(&format!(
                 "/runs/{}/reports/{}",
-                run_report.run_id, run_report.report_id
+                report_map.entity_id, report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1399,7 +1801,7 @@ mod tests {
     async fn delete_failure_reporting_disabled() {
         let pool = get_test_db_pool();
 
-        let run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1411,7 +1813,7 @@ mod tests {
         let req = test::TestRequest::delete()
             .uri(&format!(
                 "/runs/{}/reports/{}",
-                run_report.run_id, run_report.report_id
+                report_map.entity_id, report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1427,10 +1829,10 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn delete_failure_no_run_report() {
+    async fn delete_failure_no_report_map() {
         let pool = get_test_db_pool();
 
-        let run_report = insert_test_run_report_failed(&pool.get().unwrap());
+        let report_map = insert_test_report_map_failed(&pool.get().unwrap());
 
         let mut app = test::init_service(
             App::new()
@@ -1443,7 +1845,7 @@ mod tests {
             .uri(&format!(
                 "/runs/{}/reports/{}",
                 Uuid::new_v4(),
-                run_report.report_id
+                report_map.report_id
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1453,11 +1855,11 @@ mod tests {
         let report = test::read_body(resp).await;
         let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
 
-        assert_eq!(error_body.title, "No run_report found");
+        assert_eq!(error_body.title, "No report_map found");
         assert_eq!(error_body.status, 404);
         assert_eq!(
             error_body.detail,
-            "No run_report found for the specified id"
+            "No report_map found for the specified id"
         );
     }
 

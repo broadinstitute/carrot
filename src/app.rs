@@ -125,6 +125,7 @@ pub fn routes_config(
     routes::template::init_routes(cfg);
     routes::test::init_routes(cfg);
     routes::run::init_routes(cfg);
+    routes::run_group::init_routes(cfg);
     routes::result::init_routes(cfg);
     routes::template_result::init_routes(cfg);
     routes::subscription::init_routes(cfg);
@@ -132,6 +133,6 @@ pub fn routes_config(
     routes::software_version::init_routes(cfg, enable_custom_image_builds);
     routes::software_build::init_routes(cfg, enable_custom_image_builds);
     routes::report::init_routes(cfg, enable_reporting);
-    routes::run_report::init_routes(cfg, enable_reporting);
+    routes::report_map::init_routes(cfg, enable_reporting);
     routes::template_report::init_routes(cfg, enable_reporting);
 }

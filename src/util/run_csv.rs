@@ -1,6 +1,7 @@
 //! Defines functions for writing run data to CSV files
 
 use crate::models::run::RunWithResultsAndErrorsData;
+use crate::models::run_group_is_from_github::RunGroupIsFromGithubData;
 use csv::Writer;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -83,8 +84,9 @@ enum CSVContentsType {
 /// https://github.com/zip-rs/zip/blob/5d0f198124946b7be4e5969719a7f29f363118cd/examples/write_dir.rs
 pub fn write_run_data_to_csvs_and_zip_in_temp_dir(
     runs: &[RunWithResultsAndErrorsData],
+    run_group_is_from_github: Option<&RunGroupIsFromGithubData>,
 ) -> Result<TempDir, Error> {
-    let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(runs)?;
+    let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(runs, run_group_is_from_github)?;
     // Create a file to write the data to
     let mut zip_file_path: PathBuf = PathBuf::from(csv_dir.path());
     zip_file_path.push("run_csvs.zip");
@@ -120,8 +122,9 @@ pub fn write_run_data_to_csvs_and_zip_in_temp_dir(
 /// an Error if anything goes wrong.
 ///
 /// The returned TempDir contains 6 files:
-/// - metadata.csv - contains a row for each run with metadata for that row (rund_id, name, test_id,
+/// - metadata.csv - contains a row for each run with metadata for that row (run_id, name, test_id,
 ///                  status, cromwell ids, created_at, created_by, finished_at, and errors)
+///                  optionally including whether the run is base or head in a github pr comparison
 /// - test_inputs.csv - contains a row for each run with its run id and the contents of the
 ///                     test_input json for that run, with input names as column headers
 /// - eval_inputs.csv - contains a row for each run with its run id and the contents of the
@@ -134,11 +137,12 @@ pub fn write_run_data_to_csvs_and_zip_in_temp_dir(
 ///                 json for that run, with the result names as column headers
 pub fn write_run_data_to_csvs_in_temp_dir(
     runs: &[RunWithResultsAndErrorsData],
+    run_group_is_from_github: Option<&RunGroupIsFromGithubData>,
 ) -> Result<TempDir, Error> {
     // Create the tempdir we'll put the files in
     let csv_dir = TempDir::new()?;
     // For each file, build the rows and write them to the file
-    let metadata_rows: Vec<Vec<String>> = build_metadata_rows(runs);
+    let metadata_rows: Vec<Vec<String>> = build_metadata_rows(runs, run_group_is_from_github);
     let mut metadata_writer: Writer<File> =
         init_writer_from_dir_and_name(csv_dir.path(), "metadata.csv")?;
     for row in metadata_rows {
@@ -165,25 +169,35 @@ pub fn write_run_data_to_csvs_in_temp_dir(
 }
 
 /// Builds and returns a vec of rows to write to a metadata csv file for `runs`
-fn build_metadata_rows(runs: &[RunWithResultsAndErrorsData]) -> Vec<Vec<String>> {
+fn build_metadata_rows(
+    runs: &[RunWithResultsAndErrorsData],
+    run_group_is_from_github: Option<&RunGroupIsFromGithubData>,
+) -> Vec<Vec<String>> {
     // Start by creating header row
-    let header_row: Vec<String> = vec![
-        String::from("run_id"),
-        String::from("test_id"),
-        String::from("name"),
-        String::from("status"),
-        String::from("test_cromwell_job_id"),
-        String::from("eval_cromwell_job_id"),
-        String::from("created_at"),
-        String::from("created_by"),
-        String::from("finished_at"),
-        String::from("errors"),
-    ];
+    let header_row: Vec<String> = {
+        let mut row = vec![
+            String::from("run_id"),
+            String::from("test_id"),
+            String::from("name"),
+            String::from("status"),
+            String::from("test_cromwell_job_id"),
+            String::from("eval_cromwell_job_id"),
+            String::from("created_at"),
+            String::from("created_by"),
+            String::from("finished_at"),
+            String::from("errors"),
+        ];
+        // Add a column for base_or_head if there is a run_group_is_from_github record
+        if run_group_is_from_github.is_some() {
+            row.push(String::from("base_or_head"));
+        }
+        row
+    };
     // Create our row vec and add the header
     let mut rows: Vec<Vec<String>> = vec![header_row];
     // Loop through the runs and add rows for each
     for run in runs {
-        rows.push(vec![
+        let mut row = vec![
             run.run_id.to_string(),
             run.test_id.to_string(),
             run.name.clone(),
@@ -209,10 +223,66 @@ fn build_metadata_rows(runs: &[RunWithResultsAndErrorsData]) -> Vec<Vec<String>>
                 Some(e) => e.to_string(),
                 None => String::from(""),
             },
-        ]);
+        ];
+        // Add base_or_head for this run if applicable
+        if let Some(github_data) = run_group_is_from_github {
+            row.push(get_base_or_head_or_not_for_run(run, github_data));
+        }
+
+        rows.push(row);
     }
     // Return our list of rows
     rows
+}
+
+/// Using the base and head commit in `github_info`, attempts to determine if `run` is the base or
+/// head run for the github pr comparison.  Returns "base" or "head" if the run is determined to be
+/// the base or head run, or returns an empty string in any other case
+fn get_base_or_head_or_not_for_run(
+    run: &RunWithResultsAndErrorsData,
+    github_info: &RunGroupIsFromGithubData,
+) -> String {
+    // Get the input value with the commit hash from run
+    let value: String = if let Some(test_input_key) = &github_info.test_input_key {
+        // Get the value for this input in run
+        match run.test_input.as_object() {
+            Some(object) => match object.get(test_input_key) {
+                Some(val) => match val.as_str() {
+                    Some(val_as_str) => String::from(val_as_str),
+                    None => return String::from(""),
+                },
+                None => return String::from(""),
+            },
+            None => return String::from(""),
+        }
+    } else if let Some(eval_input_key) = &github_info.eval_input_key {
+        // Get the value for this input in run
+        match run.eval_input.as_object() {
+            Some(object) => match object.get(eval_input_key) {
+                Some(val) => match val.as_str() {
+                    Some(val_as_str) => String::from(val_as_str),
+                    None => return String::from(""),
+                },
+                None => return String::from(""),
+            },
+            None => return String::from(""),
+        }
+    } else {
+        return String::from("");
+    };
+
+    // Check if the commit in value matches head or base (or none)
+    if value.len() > github_info.head_commit.len()
+        && &value[(value.len() - github_info.head_commit.len())..] == &github_info.head_commit
+    {
+        String::from("head")
+    } else if value.len() > github_info.base_commit.len()
+        && &value[(value.len() - github_info.base_commit.len())..] == &github_info.base_commit
+    {
+        String::from("base")
+    } else {
+        String::from("")
+    }
 }
 
 /// Builds and returns a vec of rows containing a header followed by one row for each run in `runs`
@@ -479,12 +549,104 @@ mod tests {
         ]
     }
 
+    fn create_test_runs_from_github_pr(
+    ) -> (Vec<RunWithResultsAndErrorsData>, RunGroupIsFromGithubData) {
+        let run_group_is_from_github = RunGroupIsFromGithubData {
+            run_group_id: Uuid::new_v4(),
+            owner: "examplesoft".to_string(),
+            repo: "example".to_string(),
+            issue_number: 0,
+            author: "some_cool_user".to_string(),
+            base_commit: "13c988d4f15e06bcdd0b0af290086a3079cdadb0".to_string(),
+            head_commit: "d240853866f20fc3e536cb3bca86c86c54b723ce".to_string(),
+            test_input_key: Some(String::from("test_workflow.docker")),
+            eval_input_key: None,
+            created_at: "2099-01-01T12:00:00".parse::<NaiveDateTime>().unwrap(),
+        };
+
+        (
+            vec![
+                RunWithResultsAndErrorsData {
+                    run_id: Uuid::parse_str("67e55044-10b1-426f-9247-bb680e5fe0c8").unwrap(),
+                    test_id: Uuid::parse_str("8dd6d043-e16c-406c-8828-ce7ec2143e7f").unwrap(),
+                    run_group_id: Some(run_group_is_from_github.run_group_id),
+                    name: "Test Run 1".to_string(),
+                    status: RunStatusEnum::Succeeded,
+                    test_input: json!({
+                        "test_workflow.string": "hello",
+                        "test_workflow.number": 4,
+                        "test_workflow.array": [1,2,3],
+                        "test_workflow.docker": "carrot_build:example|13c988d4f15e06bcdd0b0af290086a3079cdadb0"
+                    }),
+                    test_options: Some(json!({
+                        "docker": "ubuntu:latest"
+                    })),
+                    eval_input: json!({
+                        "eval_workflow.string": "goodbye",
+                        "eval_workflow.file": "test_output:test_workflow.output_file"
+                    }),
+                    eval_options: None,
+                    test_cromwell_job_id: Some(String::from(
+                        "0d0e02d5-070f-4240-a385-6c276bc07dd3",
+                    )),
+                    eval_cromwell_job_id: Some(String::from(
+                        "18a83622-3578-4266-b1b5-43faac6a00f1",
+                    )),
+                    created_at: "2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
+                    created_by: Some(String::from("test@example.com")),
+                    finished_at: Some("2099-01-01T12:00:00".parse::<NaiveDateTime>().unwrap()),
+                    results: Some(json!({
+                        "output_file": "gs://example/path/to/file.mp4",
+                        "output_number": 7
+                    })),
+                    errors: None,
+                },
+                RunWithResultsAndErrorsData {
+                    run_id: Uuid::parse_str("4f27abe7-2cfa-42c3-acc2-ce5344b0e471").unwrap(),
+                    test_id: Uuid::parse_str("8dd6d043-e16c-406c-8828-ce7ec2143e7f").unwrap(),
+                    run_group_id: Some(run_group_is_from_github.run_group_id),
+                    name: "Test Run 2".to_string(),
+                    status: RunStatusEnum::Succeeded,
+                    test_input: json!({
+                        "test_workflow.string": "bonjour",
+                        "test_workflow.number": 4,
+                        "test_workflow.array": [1,2,5,8],
+                        "test_workflow.docker": "carrot_build:example|d240853866f20fc3e536cb3bca86c86c54b723ce"
+                    }),
+                    test_options: Some(json!({
+                        "docker": "ubuntu:18.04"
+                    })),
+                    eval_input: json!({
+                        "eval_workflow.string": "au revoir",
+                        "eval_workflow.file": "test_output:test_workflow.output_file"
+                    }),
+                    eval_options: None,
+                    test_cromwell_job_id: Some(String::from(
+                        "f34b7d2a-d0f8-49d6-aace-3b82ccb4c084",
+                    )),
+                    eval_cromwell_job_id: Some(String::from(
+                        "4dc770b8-df72-4cb3-9599-f758cefb5788",
+                    )),
+                    created_at: "2099-01-01T23:00:00".parse::<NaiveDateTime>().unwrap(),
+                    created_by: Some(String::from("test@example.com")),
+                    finished_at: Some("2099-01-02T00:00:00".parse::<NaiveDateTime>().unwrap()),
+                    results: Some(json!({
+                        "output_file": "gs://example/path/to/different/file.mp4",
+                        "output_number": 5
+                    })),
+                    errors: None,
+                },
+            ],
+            run_group_is_from_github,
+        )
+    }
+
     #[test]
     fn write_run_data_to_csvs_in_temp_dir_with_zip_success() {
         // Get test runs to use
         let runs: Vec<RunWithResultsAndErrorsData> = create_test_runs();
         // Generate the csv files
-        let csv_dir: TempDir = write_run_data_to_csvs_and_zip_in_temp_dir(&runs).unwrap();
+        let csv_dir: TempDir = write_run_data_to_csvs_and_zip_in_temp_dir(&runs, None).unwrap();
 
         // Check that each file matches what we expect
         let test_file_contents = read_to_string(format!(
@@ -547,7 +709,7 @@ mod tests {
         // Get test runs to use
         let runs: Vec<RunWithResultsAndErrorsData> = create_test_runs();
         // Generate the csv files
-        let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(&runs).unwrap();
+        let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(&runs, None).unwrap();
 
         // Check that each file matches what we expect
         let test_file_contents = read_to_string(format!(
@@ -602,6 +764,77 @@ mod tests {
         ))
         .unwrap();
         let truth_file_contents = read_to_string("testdata/util/run_csv/eval_options.csv").unwrap();
+        assert_eq!(test_file_contents, truth_file_contents);
+    }
+
+    #[test]
+    fn write_run_data_to_csvs_in_temp_dir_success_with_github() {
+        // Get test runs to use
+        let (runs, github_data): (Vec<RunWithResultsAndErrorsData>, RunGroupIsFromGithubData) =
+            create_test_runs_from_github_pr();
+        // Generate the csv files
+        let csv_dir: TempDir =
+            write_run_data_to_csvs_in_temp_dir(&runs, Some(&github_data)).unwrap();
+
+        // Check that each file matches what we expect
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "metadata.csv"
+        ))
+        .unwrap();
+        let truth_file_contents =
+            read_to_string("testdata/util/run_csv/from_github_pr/metadata.csv").unwrap();
+        assert_eq!(test_file_contents, truth_file_contents);
+
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "test_inputs.csv"
+        ))
+        .unwrap();
+        let truth_file_contents =
+            read_to_string("testdata/util/run_csv/from_github_pr/test_inputs.csv").unwrap();
+        assert_eq!(test_file_contents, truth_file_contents);
+
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "eval_inputs.csv"
+        ))
+        .unwrap();
+        let truth_file_contents =
+            read_to_string("testdata/util/run_csv/from_github_pr/eval_inputs.csv").unwrap();
+        assert_eq!(test_file_contents, truth_file_contents);
+
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "results.csv"
+        ))
+        .unwrap();
+        let truth_file_contents =
+            read_to_string("testdata/util/run_csv/from_github_pr/results.csv").unwrap();
+        assert_eq!(test_file_contents, truth_file_contents);
+
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "test_options.csv"
+        ))
+        .unwrap();
+        let truth_file_contents =
+            read_to_string("testdata/util/run_csv/from_github_pr/test_options.csv").unwrap();
+        assert_eq!(test_file_contents, truth_file_contents);
+
+        let test_file_contents = read_to_string(format!(
+            "{}/{}",
+            csv_dir.path().to_string_lossy(),
+            "eval_options.csv"
+        ))
+        .unwrap();
+        let truth_file_contents =
+            read_to_string("testdata/util/run_csv/from_github_pr/eval_options.csv").unwrap();
         assert_eq!(test_file_contents, truth_file_contents);
     }
 }

@@ -486,7 +486,9 @@ fn get_bytes_for_csv_zip_from_runs(
     runs: &[RunWithResultsAndErrorsData],
 ) -> Result<Vec<u8>, HttpResponse> {
     // Build csv files from results
-    let run_csvs_dir: TempDir = match run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(runs) {
+    let run_csvs_dir: TempDir = match run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(
+        runs, None,
+    ) {
         Ok(csv_dir) => csv_dir,
         Err(e) => {
             error!("Encountered error while trying to generate csvs for runs (use debug level logging for more info) : {}", e);
@@ -910,7 +912,7 @@ mod tests {
 
     fn get_csv_zip_bytes_for_test_runs(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<u8> {
         let run_csvs_dir: TempDir =
-            run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(&runs).unwrap();
+            run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(&runs, None).unwrap();
         // Get zip of csvs as bytes to return as response body
         let mut zip_file_path: PathBuf = PathBuf::from(run_csvs_dir.path());
         zip_file_path.push("run_csvs.zip");

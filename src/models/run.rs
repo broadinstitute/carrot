@@ -47,7 +47,7 @@ pub struct RunData {
 /// respectively
 ///
 /// An instance of this struct will be returned by any queries for runs with results and errors.
-#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct RunWithResultsAndErrorsData {
     pub run_id: Uuid,
     pub test_id: Uuid,

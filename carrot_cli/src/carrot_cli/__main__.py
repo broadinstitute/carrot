@@ -9,6 +9,7 @@ from .pipeline import command as pipeline
 from .report import command as report
 from .result import command as result
 from .run import command as run
+from .run_group import command as run_group
 from .software import command as software
 from .subscription import command as subscription
 from .template import command as template
@@ -76,6 +77,7 @@ main_entry.add_command(test.main)
 main_entry.add_command(subscription.main)
 main_entry.add_command(result.main)
 main_entry.add_command(run.main)
+main_entry.add_command(run_group.main)
 main_entry.add_command(software.main)
 main_entry.add_command(config.main)
 main_entry.add_command(report.main)

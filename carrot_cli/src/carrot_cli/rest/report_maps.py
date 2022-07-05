@@ -5,14 +5,14 @@ from . import request_handler
 LOGGER = logging.getLogger(__name__)
 
 
-def create_map(run_id, report_id, created_by, delete_failed):
-    """Submits a request to CARROT's run_report create mapping"""
+def create_map(entity, run_id, report_id, created_by, delete_failed):
+    """Submits a request to CARROT's report_map create mapping"""
     if delete_failed:
         delete_failed = "true"
     else:
         delete_failed = "false"
     return request_handler.create_map(
-        "runs",
+        entity,
         run_id,
         "reports",
         report_id,
@@ -22,7 +22,8 @@ def create_map(run_id, report_id, created_by, delete_failed):
 
 
 def find_maps(
-    run_id,
+    entity,
+    entity_id,
     report_id,
     status,
     cromwell_job_id,
@@ -36,7 +37,7 @@ def find_maps(
     limit,
     offset,
 ):
-    """Submits a request to CARROT's run_report find mapping"""
+    """Submits a request to CARROT's report_map find mapping"""
     # Create parameter list
     params = [
         ("report_id", report_id),
@@ -52,14 +53,14 @@ def find_maps(
         ("limit", limit),
         ("offset", offset),
     ]
-    return request_handler.find_maps("runs", run_id, "reports", params)
+    return request_handler.find_maps(entity, entity_id, "reports", params)
 
 
-def find_map_by_ids(run_id, report_id):
-    """Submits a request to CARROT's run_report find_by_id mapping"""
-    return request_handler.find_map_by_ids("runs", run_id, "reports", report_id)
+def find_map_by_ids(entity, entity_id, report_id):
+    """Submits a request to CARROT's report_map find_by_id mapping"""
+    return request_handler.find_map_by_ids(entity, entity_id, "reports", report_id)
 
 
-def delete_map_by_ids(run_id, report_id):
-    """Submits a request to CARROT's run_report delete mapping"""
-    return request_handler.delete_map_by_ids("runs", run_id, "reports", report_id)
+def delete_map_by_ids(entity, entity_id, report_id):
+    """Submits a request to CARROT's report_map delete mapping"""
+    return request_handler.delete_map_by_ids(entity, entity_id, "reports", report_id)

@@ -32,17 +32,21 @@ def delete(id, yes, entity, entity_name):
 
     print(entity.delete(id))
 
-def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_name):
+def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_name, entity1_rest_name=None):
     """
     Calls map_entity's delete map function with entity1_id and entity2_id
     If yes is false, it first checks to see if the entity belongs to the user and prompts them to confirm the delete
-    if it does not.  Uses entity1_name and entity2_name in the prompt
+    if it does not.  Uses entity1_name and entity2_name in the prompt.  If entity1_rest_name is provided, uses that as
+    a first param to pass to delete_map_by_ids
     """
     # Unless user specifies --yes flag, check first to see if the record exists and prompt to user to confirm delete if
     # they are not the creator
     if not yes:
         # Try to find the record by id
-        record = json.loads(map_entity.find_map_by_ids(entity1_id, entity2_id))
+        if entity1_rest_name:
+            record = json.loads(map_entity.find_map_by_ids(entity1_rest_name, entity1_id, entity2_id))
+        else:
+            record = json.loads(map_entity.find_map_by_ids(entity1_id, entity2_id))
         # If the returned record has a created_by field that does not match the user email, prompt the user to confirm
         # the delete
         user_email = config.load_var("email")
@@ -54,5 +58,7 @@ def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_na
             ):
                 LOGGER.info("Okay, aborting delete operation")
                 sys.exit(0)
-
-    print(map_entity.delete_map_by_ids(entity1_id, entity2_id))
+    if entity1_rest_name:
+        print(map_entity.delete_map_by_ids(entity1_rest_name, entity1_id, entity2_id))
+    else:
+        print(map_entity.delete_map_by_ids(entity1_id, entity2_id))
