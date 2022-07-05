@@ -11,7 +11,7 @@ edition = "2018"
 actix-web = { version = "^3.3.2", features=["openssl"] }
 actix-rt = "1.0.0"
 actix-service = "1.0.5"
-actix-codec = "0.2.0"
+actix-codec = "0.3.0"
 actix-multipart = "0.3.0" # For receiving multipart data
 actix-multipart-rfc7578 = "0.4.0" # For sending files in requests
 # For SSL requests
@@ -41,11 +41,11 @@ lazy_static = "1.4.0"
 # For creating temporary files for processing WDLs
 tempfile = "3.1.0"
 # For some string parsing/matching
-regex = "1"
+regex = "1.5.5"
 # To simplify future handling a bit
 futures = "0.3.5"
 # To handle CTRL-C(SIGINT) signals
-ctrlc = "3.1.4"
+ctrlc = "3.2.2"
 # For validating user input (particularly email addresses)
 validator = "0.10.1"
 # For sending emails
