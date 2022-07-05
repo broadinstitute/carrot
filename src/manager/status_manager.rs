@@ -1316,7 +1316,7 @@ impl StatusManager {
 mod tests {
 
     use crate::custom_sql_types::{
-        BuildStatusEnum, ReportStatusEnum, ResultTypeEnum, RunStatusEnum,
+        BuildStatusEnum, MachineTypeEnum, ReportStatusEnum, ResultTypeEnum, RunStatusEnum,
     };
     use crate::db::DbPool;
     use crate::manager::notification_handler::NotificationHandler;
@@ -1563,6 +1563,7 @@ mod tests {
             name: String::from("Kevin's Software3"),
             description: Some(String::from("Kevin even made this software for testing")),
             repository_url: String::from("https://example.com/organization/project3"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin3@example.com")),
         };
 
@@ -1592,6 +1593,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("test_send_email@example.com")),
         };
 

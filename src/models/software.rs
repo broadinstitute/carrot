@@ -3,6 +3,7 @@
 //! A software represents a specific application stored in a code repository, such as GATK4.
 //! Represented in the database by the SOFTWARE table.
 
+use crate::custom_sql_types::MachineTypeEnum;
 use crate::models::sql_functions;
 use crate::schema::software;
 use crate::schema::software::dsl::*;
@@ -21,6 +22,7 @@ pub struct SoftwareData {
     pub name: String,
     pub description: Option<String>,
     pub repository_url: String,
+    pub machine_type: MachineTypeEnum,
     pub created_at: NaiveDateTime,
     pub created_by: Option<String>,
 }
@@ -36,6 +38,7 @@ pub struct SoftwareQuery {
     pub name: Option<String>,
     pub description: Option<String>,
     pub repository_url: Option<String>,
+    pub machine_type: Option<MachineTypeEnum>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -55,6 +58,7 @@ pub struct NewSoftware {
     pub name: String,
     pub description: Option<String>,
     pub repository_url: String,
+    pub machine_type: Option<MachineTypeEnum>,
     pub created_by: Option<String>,
 }
 
@@ -66,6 +70,7 @@ pub struct NewSoftware {
 pub struct SoftwareChangeset {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub machine_type: Option<MachineTypeEnum>,
 }
 
 impl SoftwareData {
@@ -120,6 +125,9 @@ impl SoftwareData {
         if let Some(param) = params.repository_url {
             query = query.filter(repository_url.eq(param));
         }
+        if let Some(param) = params.machine_type {
+            query = query.filter(machine_type.eq(param));
+        }
         if let Some(param) = params.created_before {
             query = query.filter(created_at.lt(param));
         }
@@ -161,6 +169,13 @@ impl SoftwareData {
                             query = query.then_order_by(repository_url.asc());
                         } else {
                             query = query.then_order_by(repository_url.desc());
+                        }
+                    }
+                    "machine_type" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(machine_type.asc());
+                        } else {
+                            query = query.then_order_by(machine_type.desc());
                         }
                     }
                     "created_at" => {
@@ -234,6 +249,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -247,6 +263,7 @@ mod tests {
             name: String::from("Name1"),
             description: Some(String::from("Description4")),
             repository_url: String::from("https://example.com/organization/project1"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Test@example.com")),
         };
 
@@ -258,6 +275,7 @@ mod tests {
             name: String::from("Name2"),
             description: Some(String::from("Description3")),
             repository_url: String::from("https://example.com/organization/project2"),
+            machine_type: Some(MachineTypeEnum::N1HighCpu8),
             created_by: Some(String::from("Test@example.com")),
         };
 
@@ -269,6 +287,7 @@ mod tests {
             name: String::from("Name4"),
             description: Some(String::from("Description3")),
             repository_url: String::from("https://example.com/organization/project4"),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
             created_by: Some(String::from("Test@example.com")),
         };
 
@@ -314,6 +333,7 @@ mod tests {
             name: None,
             description: None,
             repository_url: None,
+            machine_type: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -340,6 +360,7 @@ mod tests {
             name: Some(test_software[0].name.clone()),
             description: None,
             repository_url: None,
+            machine_type: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -366,6 +387,7 @@ mod tests {
             name: None,
             description: Some(test_software[0].description.clone().unwrap()),
             repository_url: None,
+            machine_type: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -382,6 +404,60 @@ mod tests {
     }
 
     #[test]
+    fn find_with_repository_url() {
+        let conn = get_test_db_connection();
+
+        let test_software = insert_test_softwares(&conn);
+
+        let test_query = SoftwareQuery {
+            software_id: None,
+            name: None,
+            description: None,
+            repository_url: Some(test_software[0].repository_url.clone()),
+            machine_type: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_software =
+            SoftwareData::find(&conn, test_query).expect("Failed to find software");
+
+        assert_eq!(found_software.len(), 1);
+        assert_eq!(found_software[0], test_software[0]);
+    }
+
+    #[test]
+    fn find_with_machine_type() {
+        let conn = get_test_db_connection();
+
+        let test_software = insert_test_softwares(&conn);
+
+        let test_query = SoftwareQuery {
+            software_id: None,
+            name: None,
+            description: None,
+            repository_url: None,
+            machine_type: Some(test_software[1].machine_type),
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_software =
+            SoftwareData::find(&conn, test_query).expect("Failed to find software");
+
+        assert_eq!(found_software.len(), 1);
+        assert_eq!(found_software[0], test_software[1]);
+    }
+
+    #[test]
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
 
@@ -392,6 +468,7 @@ mod tests {
             name: None,
             description: None,
             repository_url: None,
+            machine_type: None,
             created_before: None,
             created_after: None,
             created_by: Some(String::from("Test@example.com")),
@@ -412,6 +489,7 @@ mod tests {
             name: None,
             description: None,
             repository_url: None,
+            machine_type: None,
             created_before: None,
             created_after: None,
             created_by: Some(String::from("Test@example.com")),
@@ -438,6 +516,7 @@ mod tests {
             name: None,
             description: None,
             repository_url: None,
+            machine_type: None,
             created_before: None,
             created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_by: Some(String::from("Test@example.com")),
@@ -456,6 +535,7 @@ mod tests {
             name: None,
             description: None,
             repository_url: None,
+            machine_type: None,
             created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_after: None,
             created_by: Some(String::from("Test@example.com")),
@@ -501,6 +581,7 @@ mod tests {
             name: test_software.name,
             description: Some(String::from("test description")),
             repository_url: String::from("https://example.com/example/example"),
+            machine_type: None,
             created_by: Some(String::from("example@example.com")),
         };
 
@@ -525,6 +606,7 @@ mod tests {
             name: String::from("Test software name"),
             description: Some(String::from("test description")),
             repository_url: test_software.repository_url,
+            machine_type: None,
             created_by: Some(String::from("example@example.com")),
         };
 
@@ -548,6 +630,7 @@ mod tests {
         let changes = SoftwareChangeset {
             name: Some(String::from("TestTestTestTest")),
             description: Some(String::from("TESTTESTTESTTEST")),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
         };
 
         let updated_software = SoftwareData::update(&conn, test_software.software_id, changes)
@@ -569,6 +652,7 @@ mod tests {
         let changes = SoftwareChangeset {
             name: Some(test_software[0].name.clone()),
             description: None,
+            machine_type: None,
         };
 
         let updated_software = SoftwareData::update(&conn, test_software[1].software_id, changes);

@@ -20,6 +20,7 @@ def unstub():
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "repository_url": "example.com/swordofprotection",
+                    "machine_type": "standard",
                     "description": "This software will save Etheria",
                     "name": "Sword of Protection software",
                     "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -65,6 +66,7 @@ def test_find_by_id(find_by_id_data):
                 ("name", "Queen of Bright Moon software"),
                 ("description", ""),
                 ("repository_url", ""),
+                ("machine_type", ""),
                 ("created_by", ""),
                 ("created_before", ""),
                 ("created_after", ""),
@@ -77,6 +79,7 @@ def test_find_by_id(find_by_id_data):
                     {
                         "created_at": "2020-09-16T18:48:08.371563",
                         "created_by": "glimmer@example.com",
+                        "machine_type": "standard",
                         "repository_url": "example.com/queenofbrightmoon",
                         "description": "This software leads the Rebellion",
                         "name": "Queen of Bright Moon software",
@@ -93,6 +96,7 @@ def test_find_by_id(find_by_id_data):
                 ("name", ""),
                 ("description", ""),
                 ("repository_url", ""),
+                ("machine_type", ""),
                 ("created_by", ""),
                 ("created_before", ""),
                 ("created_after", ""),
@@ -134,6 +138,7 @@ def test_find(find_data):
         find_data["params"][7][1],
         find_data["params"][8][1],
         find_data["params"][9][1],
+        find_data["params"][10][1],
     )
     assert result == find_data["return"]
 
@@ -145,6 +150,7 @@ def test_find(find_data):
                 ("name", "Horde Emperor software"),
                 ("description", "This software rules the known universe"),
                 ("repository_url", "example.com/hordeemperor"),
+                ("machine_type", "n1-highcpu-8"),
                 ("created_by", "hordeprime@example.com"),
             ],
             "return": json.dumps(
@@ -152,6 +158,7 @@ def test_find(find_data):
                     "created_at": "2020-09-16T18:48:08.371563",
                     "created_by": "hordeprime@example.com",
                     "repository_url": "example.com/hordeemperor",
+                    "machine_type": "n1-highcpu-8",
                     "description": "This software rules the known universe",
                     "name": "Horde Emperor software",
                     "software_id": "bd132568-06fe-4b1a-9e96-47d4f36bf819",
@@ -165,6 +172,7 @@ def test_find(find_data):
                 ("name", "Horde Emperor software"),
                 ("description", "This software rules the known universe"),
                 ("repository_url", "example.com/hordeemperor"),
+                ("machine_type", "n1-highcpu-8"),
                 ("created_by", "hordeprime@example.com"),
             ],
             "return": json.dumps(
@@ -195,6 +203,7 @@ def test_create(create_data):
         create_data["params"][1][1],
         create_data["params"][2][1],
         create_data["params"][3][1],
+        create_data["params"][4][1],
     )
     assert result == create_data["return"]
 
@@ -209,12 +218,14 @@ def test_create(create_data):
                     "description",
                     "This software is trying to learn to process anger better",
                 ),
+                ("machine_type", "n1-highcpu-8"),
             ],
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:08.371563",
                     "created_by": "catra@example.com",
                     "repository_url": "example.com/catra",
+                    "machine_type": "n1-highcpu-8",
                     "description": "This software is trying to learn to process anger better",
                     "name": "Catra software",
                     "software_id": "bd132568-06fe-4b1a-9e96-47d4f36bf819",
@@ -225,7 +236,7 @@ def test_create(create_data):
         },
         {
             "id": "98536487-06fe-4b1a-9e96-47d4f36bf819",
-            "params": [("name", "Angella software"), ("description", "")],
+            "params": [("name", "Angella software"), ("description", ""), ("machine_type", "")],
             "return": json.dumps(
                 {
                     "title": "Server error",
@@ -253,5 +264,6 @@ def test_update(update_data):
         update_data["id"],
         update_data["params"][0][1],
         update_data["params"][1][1],
+        update_data["params"][2][1],
     )
     assert result == update_data["return"]

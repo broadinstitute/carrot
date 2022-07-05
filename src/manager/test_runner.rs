@@ -1027,7 +1027,7 @@ pub fn run_finished_building(conn: &PgConnection, run_id: Uuid) -> Result<RunBui
 
 #[cfg(test)]
 mod tests {
-    use crate::custom_sql_types::{BuildStatusEnum, RunStatusEnum};
+    use crate::custom_sql_types::{BuildStatusEnum, MachineTypeEnum, RunStatusEnum};
     use crate::manager::test_runner::{run_finished_building, Error, RunBuildStatus, TestRunner};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
@@ -1118,6 +1118,7 @@ mod tests {
             name: String::from("TestSoftware"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -1189,6 +1190,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

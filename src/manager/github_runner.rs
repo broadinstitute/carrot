@@ -221,7 +221,9 @@ impl GithubRunner {
 #[cfg(test)]
 mod tests {
     use crate::config::{EmailConfig, EmailSendmailConfig};
-    use crate::custom_sql_types::{BuildStatusEnum, EntityTypeEnum, RunStatusEnum};
+    use crate::custom_sql_types::{
+        BuildStatusEnum, EntityTypeEnum, MachineTypeEnum, RunStatusEnum,
+    };
     use crate::manager::github_runner::{GithubRunRequest, GithubRunner};
     use crate::manager::notification_handler::NotificationHandler;
     use crate::manager::test_runner::TestRunner;
@@ -339,6 +341,7 @@ mod tests {
             name: String::from("TestSoftware"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

@@ -29,6 +29,7 @@ def no_email():
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "repository_url": "example.com/repo.git",
+                    "machine_type": "standard",
                     "description": "This software will save Etheria",
                     "name": "Sword of Protection software",
                     "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -81,6 +82,8 @@ def test_find_by_id(find_by_id_data):
                 "This software will save Etheria",
                 "--repository_url",
                 "example.com/repo.git",
+                "--machine_type",
+                "n1-highcpu-8",
                 "--created_by",
                 "adora@example.com",
                 "--created_before",
@@ -99,6 +102,7 @@ def test_find_by_id(find_by_id_data):
                 "Sword of Protection software",
                 "This software will save Etheria",
                 "example.com/repo.git",
+                "n1-highcpu-8",
                 "adora@example.com",
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
@@ -111,6 +115,7 @@ def test_find_by_id(find_by_id_data):
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "repository_url": "example.com/repo.git",
+                    "machine_type": "n1-highcpu-8",
                     "description": "This software will save Etheria",
                     "name": "Sword of Protection software",
                     "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -128,6 +133,7 @@ def test_find_by_id(find_by_id_data):
             ],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
+                "",
                 "",
                 "",
                 "",
@@ -165,6 +171,7 @@ def find_data(request):
         request.param["params"][7],
         request.param["params"][8],
         request.param["params"][9],
+        request.param["params"][10],
     ).thenReturn(request.param["return"])
     return request.param
 
@@ -187,6 +194,8 @@ def test_find(find_data):
                 "This software will save Etheria",
                 "--repository_url",
                 "example.com/repo.git",
+                "--machine_type",
+                "n1-highcpu-8",
                 "--created_by",
                 "adora@example.com",
             ],
@@ -194,6 +203,7 @@ def test_find(find_data):
                 "Sword of Protection software",
                 "This software will save Etheria",
                 "example.com/repo.git",
+                "n1-highcpu-8",
                 "adora@example.com",
             ],
             "return": json.dumps(
@@ -201,6 +211,7 @@ def test_find(find_data):
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "repository_url": "example.com/repo.git",
+                    "machine_type": "n1-highcpu-8",
                     "description": "This software will save Etheria",
                     "name": "Sword of Protection software",
                     "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -219,6 +230,8 @@ def test_find(find_data):
                 "This software will save Etheria",
                 "--repository_url",
                 "example.com/repo.git",
+                "--machine_type",
+                "n1-highcpu-8",
             ],
             "params": [],
             "logging": "No email config variable set.  If a value is not specified for --created by, "
@@ -244,6 +257,7 @@ def create_data(request):
             request.param["params"][1],
             request.param["params"][2],
             request.param["params"][3],
+            request.param["params"][4],
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -266,6 +280,8 @@ def test_create(create_data, caplog):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "--description",
                 "This new software replaced the broken one",
+                "--machine_type",
+                "n1-highcpu-8",
                 "--name",
                 "New Sword of Protection software",
             ],
@@ -273,12 +289,14 @@ def test_create(create_data, caplog):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection software",
                 "This new software replaced the broken one",
+                "n1-highcpu-8",
             ],
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "repository_url": "example.com/repo.git",
+                    "machine_type": "n1-highcpu-8",
                     "description": "This new software replaced the broken one",
                     "name": "New Sword of Protection software",
                     "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -294,6 +312,8 @@ def test_create(create_data, caplog):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "--description",
                 "This new software replaced the broken one",
+                "--machine_type",
+                "n1-highcpu-8",
                 "--name",
                 "New Sword of Protection software",
             ],
@@ -301,6 +321,7 @@ def test_create(create_data, caplog):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection software",
                 "This new software replaced the broken one",
+                "n1-highcpu-8",
             ],
             "from_name": {
                 "name": "New Sword of Protection software",
@@ -310,6 +331,7 @@ def test_create(create_data, caplog):
                             "created_at": "2020-09-16T18:48:06.371563",
                             "created_by": "adora@example.com",
                             "repository_url": "example.com/repo.git",
+                            "machine_type": "standard",
                             "description": "This new software replaced the broken one",
                             "name": "New Sword of Protection software",
                             "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -324,6 +346,7 @@ def test_create(create_data, caplog):
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "repository_url": "example.com/repo.git",
+                    "machine_type": "n1-highcpu-8",
                     "description": "This new software replaced the broken one",
                     "name": "New Sword of Protection software",
                     "software_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -358,6 +381,7 @@ def update_data(request):
             request.param["params"][0],
             request.param["params"][1],
             request.param["params"][2],
+            request.param["params"][3],
         ).thenReturn(request.param["return"])
     return request.param
 

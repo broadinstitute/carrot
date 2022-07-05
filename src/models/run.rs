@@ -724,7 +724,7 @@ impl RunWithResultsAndErrorsData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::custom_sql_types::ResultTypeEnum;
+    use crate::custom_sql_types::{MachineTypeEnum, ResultTypeEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run_error::{NewRunError, RunErrorQuery};
@@ -1121,6 +1121,7 @@ mod tests {
             name: String::from("Kevin's Software2"),
             description: Some(String::from("Kevin made this software for testing also")),
             repository_url: String::from("https://example.com/organization/project2"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

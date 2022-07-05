@@ -3,6 +3,7 @@
 //! A software_version represents a specific commit of a software, with a commit hash. Represented
 //! in the database by the SOFTWARE_VERSION table.
 
+use crate::custom_sql_types::MachineTypeEnum;
 use crate::models::software::SoftwareData;
 use crate::schema::software;
 use crate::schema::software_version;
@@ -73,15 +74,20 @@ impl SoftwareVersionData {
     /// columns from the SOFTWARE table and the `commit` column for the SOFTWARE_VERSION table for
     /// the software_version with the software_version_id of `id`, or returns an error if thw query
     /// fails for some reason or if no record is found for those parameters
-    pub fn find_name_repo_url_and_commit_by_id(
+    pub fn find_name_repo_url_machine_type_and_commit_by_id(
         conn: &PgConnection,
         id: Uuid,
-    ) -> Result<(String, String, String), diesel::result::Error> {
+    ) -> Result<(String, String, MachineTypeEnum, String), diesel::result::Error> {
         software_version::table
             .inner_join(software::table)
             .filter(software_version_id.eq(id))
-            .select((software::name, software::repository_url, commit))
-            .first::<(String, String, String)>(conn)
+            .select((
+                software::name,
+                software::repository_url,
+                software::machine_type,
+                commit,
+            ))
+            .first::<(String, String, MachineTypeEnum, String)>(conn)
     }
 
     /// Queries the DB for software_versions matching the specified query criteria
@@ -210,6 +216,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -246,6 +253,7 @@ mod tests {
             name: String::from("Kevin's Other Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project2"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -257,6 +265,7 @@ mod tests {
             name: String::from("Kevin's Other Other Software"),
             description: Some(String::from("Kevin made this software for testing also")),
             repository_url: String::from("https://example.com/organization/project3"),
+            machine_type: Some(MachineTypeEnum::N1HighCpu32),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -337,7 +346,7 @@ mod tests {
 
         let test_software_version = insert_test_software_version(&conn);
 
-        let results = SoftwareVersionData::find_name_repo_url_and_commit_by_id(
+        let results = SoftwareVersionData::find_name_repo_url_machine_type_and_commit_by_id(
             &conn,
             test_software_version.software_version_id,
         )
@@ -348,6 +357,7 @@ mod tests {
             (
                 "Kevin's Software".to_string(),
                 "https://example.com/organization/project".to_string(),
+                MachineTypeEnum::Standard,
                 "9aac5e85f34921b2642beded8b3891b97c5a6dc7".to_string()
             )
         );

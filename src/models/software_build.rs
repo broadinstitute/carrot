@@ -278,7 +278,7 @@ impl SoftwareBuildData {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::RunStatusEnum;
+    use crate::custom_sql_types::{MachineTypeEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
@@ -295,6 +295,7 @@ mod tests {
             name: String::from("Kevin's Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -347,6 +348,7 @@ mod tests {
             name: String::from("Kevin's Other Software"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project2"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

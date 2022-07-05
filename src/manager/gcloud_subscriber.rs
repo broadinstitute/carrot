@@ -366,7 +366,9 @@ impl GCloudSubscriber {
 mod tests {
 
     use crate::config::{GCloudConfig, GithubConfig};
-    use crate::custom_sql_types::{BuildStatusEnum, EntityTypeEnum, RunStatusEnum};
+    use crate::custom_sql_types::{
+        BuildStatusEnum, EntityTypeEnum, MachineTypeEnum, RunStatusEnum,
+    };
     use crate::db::DbPool;
     use crate::manager::gcloud_subscriber::{GCloudSubscriber, ParseMessageError};
     use crate::manager::github_runner::GithubRunner;
@@ -488,6 +490,7 @@ mod tests {
             name: String::from("TestSoftware"),
             description: Some(String::from("Kevin made this software for testing")),
             repository_url: String::from("https://example.com/organization/project"),
+            machine_type: Some(MachineTypeEnum::Standard),
             created_by: Some(String::from("Kevin@example.com")),
         };
 

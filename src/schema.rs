@@ -146,11 +146,14 @@ table! {
 
 table! {
     use diesel::sql_types::*;
+    use crate::custom_sql_types::Machine_type_enum;
+
     software(software_id) {
         software_id -> Uuid,
         name -> Text,
         description -> Nullable<Text>,
         repository_url -> Text,
+        machine_type -> Machine_type_enum,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,
     }
