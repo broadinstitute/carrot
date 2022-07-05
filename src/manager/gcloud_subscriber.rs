@@ -6,7 +6,7 @@
 
 use crate::config::{Config, GCloudConfig, GithubConfig};
 use crate::db::DbPool;
-use crate::manager::github_runner::{GithubRunRequest, GithubRunner};
+use crate::manager::github::{GithubPrRequest, GithubRunRequest, GithubRunner};
 use crate::manager::notification_handler::NotificationHandler;
 use crate::manager::test_runner::TestRunner;
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
@@ -21,6 +21,8 @@ use base64;
 use diesel::PgConnection;
 use google_pubsub1::{AcknowledgeRequest, Pubsub, PullRequest, ReceivedMessage};
 use log::{debug, error};
+use serde::Deserialize;
+use serde_json::Value;
 use std::fmt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -34,6 +36,7 @@ enum ParseMessageError {
     Json(serde_json::Error),
     Base64(base64::DecodeError),
     Unicode(std::string::FromUtf8Error),
+    InvalidRequestType(String),
 }
 
 impl std::error::Error for ParseMessageError {}
@@ -44,6 +47,7 @@ impl fmt::Display for ParseMessageError {
             ParseMessageError::Json(e) => write!(f, "Error Json {}", e),
             ParseMessageError::Base64(e) => write!(f, "Error Base64 {}", e),
             ParseMessageError::Unicode(e) => write!(f, "Error Unicode {}", e),
+            ParseMessageError::InvalidRequestType(s) => write!(f, "Error InvalidRequestType {}", s),
         }
     }
 }
@@ -273,21 +277,16 @@ impl GCloudSubscriber {
         if let Some(contents) = &message.message {
             match &contents.data {
                 Some(message_data) => {
-                    // Parse message
-                    match GCloudSubscriber::parse_github_request_from_message(message_data) {
-                        Ok(message_request) => {
-                            // Attempt to start run from request
-                            self.github_runner
-                                .process_request(conn, message_request)
-                                .await;
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to parse GithubRunRequest from message {:?} due to error: {}",
-                                message, e
-                            );
-                        }
-                    }
+                    // Process message
+                    if let Err(e) = self
+                        .process_github_request_from_message(conn, &message_data)
+                        .await
+                    {
+                        error!(
+                            "Failed to parse GithubRequest from message {:?} due to error: {}",
+                            message, e
+                        );
+                    };
                 }
                 None => {
                     error!("Received message without data in body: {:?}", message);
@@ -329,36 +328,58 @@ impl GCloudSubscriber {
         }
     }
 
-    /// Parses `message` as a GithubRunRequest and returns it, or returns and error if the parsing
+    /// Parses `message` as a Value and returns it, or returns and error if the parsing
     /// fails
-    fn parse_github_request_from_message(
+    async fn process_github_request_from_message(
+        &self,
+        conn: &PgConnection,
         message: &str,
-    ) -> Result<GithubRunRequest, ParseMessageError> {
+    ) -> Result<(), ParseMessageError> {
+        /// Intermediate struct we'll use here for parsing
+        #[derive(Deserialize)]
+        struct PartiallyParsedMessage {
+            request_type: String,
+            body: Value,
+        }
         // Convert message from base64 to utf8 (pubsub sends messages as base64
         // but rust strings are utf8)
         let message_unicode: String = String::from_utf8(base64::decode(message)?)?;
         debug!("Received message: {}", message_unicode);
-        // Parse as a GithubRunRequest
-        let mut request: GithubRunRequest = serde_json::from_str(&message_unicode)?;
-        // If either of the input keys for docker images is an empty string, set it to null
-        match &request.test_input_key {
-            Some(key) => {
-                if key.is_empty() {
-                    request.test_input_key = None;
-                }
-            }
-            None => {}
+        // Parse it as json
+        let message_as_json: Value = serde_json::from_str(&message_unicode)?;
+        // First, try to parse it as a GithubRunRequest, since we're supporting the old format for
+        // those also
+        if let Ok(request) = GithubRunRequest::from_json(&message_as_json) {
+            // Attempt to start run from request
+            self.github_runner.process_run_request(conn, &request).await;
+            return Ok(());
         }
-        match &request.eval_input_key {
-            Some(key) => {
-                if key.is_empty() {
-                    request.eval_input_key = None;
-                }
+        // If that didn't work, try to parse it in the newer format, with request type
+        let partially_parsed_message: PartiallyParsedMessage =
+            serde_json::from_value(message_as_json)?;
+        match partially_parsed_message.request_type.as_str() {
+            "run" => {
+                let parsed_request: GithubRunRequest =
+                    GithubRunRequest::from_json(&partially_parsed_message.body)?;
+                // Attempt to start run from request
+                self.github_runner
+                    .process_run_request(conn, &parsed_request)
+                    .await;
+                Ok(())
             }
-            None => {}
+            "pr" => {
+                let parsed_request: GithubPrRequest =
+                    GithubPrRequest::from_json(&partially_parsed_message.body)?;
+                // Attempt to start run from request
+                self.github_runner
+                    .process_pr_run_request(conn, &parsed_request)
+                    .await;
+                Ok(())
+            }
+            _ => Err(ParseMessageError::InvalidRequestType(
+                partially_parsed_message.request_type,
+            )),
         }
-
-        Ok(request)
     }
 }
 
@@ -371,11 +392,11 @@ mod tests {
     };
     use crate::db::DbPool;
     use crate::manager::gcloud_subscriber::{GCloudSubscriber, ParseMessageError};
-    use crate::manager::github_runner::GithubRunner;
+    use crate::manager::github::GithubRunner;
     use crate::manager::notification_handler::NotificationHandler;
     use crate::manager::test_runner::TestRunner;
     use crate::models::pipeline::{NewPipeline, PipelineData};
-    use crate::models::run::RunData;
+    use crate::models::run::{RunData, RunQuery};
     use crate::models::run_software_version::RunSoftwareVersionData;
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{SoftwareBuildData, SoftwareBuildQuery};
@@ -511,11 +532,6 @@ mod tests {
         let http_client: Client = Client::default();
         // Make a gcloud client for interacting with gcs
         let gcloud_client: GCloudClient = GCloudClient::new(gcloud_config.gcloud_sa_key_file());
-        // Create an emailer (or not, if we don't have the config for one)
-        let emailer: Option<Emailer> = match carrot_config.email() {
-            Some(email_config) => Some(Emailer::new(email_config.clone())),
-            None => None,
-        };
         // Create a github commenter
         let github_client: GithubClient = GithubClient::new(
             github_config.client_id(),
@@ -525,7 +541,7 @@ mod tests {
         let github_commenter: GithubCommenter = GithubCommenter::new(github_client);
         // Create a notification handler
         let notification_handler: NotificationHandler =
-            NotificationHandler::new(emailer, Some(github_commenter));
+            NotificationHandler::new(None, Some(github_commenter));
         // Create a test resource client and cromwell client for the test runner
         let test_resource_client: TestResourceClient =
             TestResourceClient::new(http_client.clone(), Some(gcloud_client));
@@ -551,8 +567,55 @@ mod tests {
         )
     }
 
+    fn assert_run_mapped_to_software_with_commit(
+        conn: &PgConnection,
+        run_id: Uuid,
+        commit: &str,
+        software_id: Uuid,
+    ) {
+        let software_version_q = SoftwareVersionQuery {
+            software_version_id: None,
+            software_id: Some(software_id),
+            commit: Some(String::from(commit)),
+            software_name: None,
+            created_before: None,
+            created_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let created_software_version =
+            SoftwareVersionData::find(&conn, software_version_q).unwrap();
+        assert_eq!(created_software_version.len(), 1);
+
+        let software_build_q = SoftwareBuildQuery {
+            software_build_id: None,
+            software_version_id: Some(created_software_version[0].software_version_id),
+            build_job_id: None,
+            status: Some(BuildStatusEnum::Created),
+            image_url: None,
+            created_before: None,
+            created_after: None,
+            finished_before: None,
+            finished_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+        let created_software_build = SoftwareBuildData::find(&conn, software_build_q).unwrap();
+        assert_eq!(created_software_build.len(), 1);
+
+        let created_run_software_version =
+            RunSoftwareVersionData::find_by_run_and_software_version(
+                &conn,
+                run_id,
+                created_software_version[0].software_version_id,
+            )
+            .unwrap();
+    }
+
     #[actix_rt::test]
-    async fn test_start_run_from_message() {
+    async fn test_start_run_from_message_success_old_format() {
         let db_pool = get_test_db_pool();
         let conn = db_pool.get().unwrap();
         let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
@@ -599,190 +662,464 @@ mod tests {
         let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
         let eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
 
-        // Make temporary directory for the email
-        let email_path = tempfile::Builder::new()
-            .prefix("test_process_request_success")
-            .rand_bytes(0)
-            .tempdir_in(temp_dir())
-            .unwrap();
-
         test_gcloud_subscriber
             .start_run_from_message(&conn, &received_message)
             .await;
 
-        // Verify that the email was created correctly
-        let files_in_dir = read_dir(email_path.path())
-            .unwrap()
-            .collect::<Vec<std::io::Result<DirEntry>>>();
-
-        assert_eq!(files_in_dir.len(), 1);
-
-        let test_email_string =
-            read_to_string(files_in_dir.get(0).unwrap().as_ref().unwrap().path()).unwrap();
-        let test_email: ParsedEmailFile = serde_json::from_str(&test_email_string).unwrap();
-
-        assert_eq!(
-            test_email
-                .envelope
-                .get("forward_path")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .get(0)
-                .unwrap(),
-            "test_process_request_success@example.com"
-        );
-        assert_eq!(
-            test_email.envelope.get("reverse_path").unwrap(),
-            "kevin@example.com"
-        );
-
-        let parsed_mail = mailparse::parse_mail(&test_email.message).unwrap();
-
-        let message = String::from(parsed_mail.subparts[0].get_body().unwrap().trim());
-        let subject = parsed_mail.headers.get_first_value("Subject").unwrap();
-        assert_eq!(subject, "Successfully started run from GitHub");
-        let split_message: Vec<&str> = message.splitn(2, "\n").collect();
-        assert_eq!(
-            split_message[0],
-            "GitHub user ExampleKevin started a run for test Kevin's test test:"
-        );
-        let test_run: RunData = serde_json::from_str(split_message[1].trim()).unwrap();
+        // Get the run that was created
+        let test_run = RunData::find(
+            &conn,
+            RunQuery {
+                pipeline_id: None,
+                template_id: None,
+                test_id: Some(test_test.test_id),
+                run_group_id: None,
+                name: None,
+                status: None,
+                test_input: None,
+                test_options: None,
+                eval_input: None,
+                eval_options: None,
+                test_cromwell_job_id: None,
+                eval_cromwell_job_id: None,
+                created_before: None,
+                created_after: None,
+                created_by: None,
+                finished_before: None,
+                finished_after: None,
+                sort: None,
+                limit: None,
+                offset: None,
+            },
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
 
         assert_eq!(test_run.test_id, test_test.test_id);
         assert_eq!(test_run.status, RunStatusEnum::Building);
         assert_eq!(test_run.test_input, test_params);
         assert_eq!(test_run.eval_input, eval_params);
 
-        let software_version_q = SoftwareVersionQuery {
-            software_version_id: None,
-            software_id: Some(test_software.software_id),
-            commit: Some(String::from("764a00442ddb412eed331655cfd90e151f580518")),
-            software_name: None,
-            created_before: None,
-            created_after: None,
-            sort: None,
-            limit: None,
-            offset: None,
-        };
-        let created_software_version =
-            SoftwareVersionData::find(&conn, software_version_q).unwrap();
-        assert_eq!(created_software_version.len(), 1);
-
-        let software_build_q = SoftwareBuildQuery {
-            software_build_id: None,
-            software_version_id: Some(created_software_version[0].software_version_id),
-            build_job_id: None,
-            status: Some(BuildStatusEnum::Created),
-            image_url: None,
-            created_before: None,
-            created_after: None,
-            finished_before: None,
-            finished_after: None,
-            sort: None,
-            limit: None,
-            offset: None,
-        };
-        let created_software_build = SoftwareBuildData::find(&conn, software_build_q).unwrap();
-        assert_eq!(created_software_build.len(), 1);
-
-        let created_run_software_version =
-            RunSoftwareVersionData::find_by_run_and_software_version(
-                &conn,
-                test_run.run_id,
-                created_software_version[0].software_version_id,
-            )
-            .unwrap();
+        assert_run_mapped_to_software_with_commit(
+            &conn,
+            test_run.run_id,
+            "764a00442ddb412eed331655cfd90e151f580518",
+            test_software.software_id,
+        );
 
         mock.assert();
-
-        email_path.close().unwrap();
     }
 
-    #[test]
-    fn test_parse_github_request_from_message_success() {
-        let message_json = json!({
-            "test_name": "test_test",
-            "test_input_key": "test_key",
-            "eval_input_key": "eval_key",
-            "software_name": "test_software",
-            "commit": "ca82a6dff817ec66f44342007202690a93763949",
-            "owner":"TestOwner",
-            "repo":"TestRepo",
-            "issue_number":4,
-            "author": "me"
-        });
-        let message_string = serde_json::to_string(&message_json).unwrap();
-        let base64_message = base64::encode(&message_string);
-        let parsed_request =
-            GCloudSubscriber::parse_github_request_from_message(&base64_message).unwrap();
-        assert_eq!(parsed_request.test_name, "test_test");
-        assert_eq!(parsed_request.test_input_key.unwrap(), "test_key");
-        assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
-        assert_eq!(parsed_request.software_name, "test_software");
-        assert_eq!(
-            parsed_request.commit,
-            "ca82a6dff817ec66f44342007202690a93763949"
+    #[actix_rt::test]
+    async fn test_start_run_from_message_success_normal_run() {
+        let db_pool = get_test_db_pool();
+        let conn = db_pool.get().unwrap();
+        let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_success",
         );
-        assert_eq!(parsed_request.author, "me");
-    }
 
-    #[test]
-    fn test_parse_github_request_from_message_success_empty_key() {
-        let message_json = json!({
-            "test_name": "test_test",
-            "test_input_key": "",
-            "eval_input_key": "eval_key",
-            "software_name": "test_software",
-            "commit": "ca82a6dff817ec66f44342007202690a93763949",
-            "owner":"TestOwner",
-            "repo":"TestRepo",
-            "issue_number":4,
-            "author": "me"
+        let test_software = insert_test_software(&conn);
+
+        let request_data_json = json! ({
+            "request_type": "run",
+            "body": {
+                "test_name": test_test.name,
+                "test_input_key": "in_test_image",
+                "eval_input_key": "in_eval_image",
+                "software_name": test_software.name,
+                "commit": "764a00442ddb412eed331655cfd90e151f580518",
+                "owner":"TestOwner",
+                "repo":"TestRepo",
+                "issue_number":4,
+                "author": "ExampleKevin"
+            }
         });
-        let message_string = serde_json::to_string(&message_json).unwrap();
-        let base64_message = base64::encode(&message_string);
-        let parsed_request =
-            GCloudSubscriber::parse_github_request_from_message(&base64_message).unwrap();
-        assert_eq!(parsed_request.test_name, "test_test");
-        assert_eq!(parsed_request.test_input_key.is_none(), true);
-        assert_eq!(parsed_request.eval_input_key.unwrap(), "eval_key");
-        assert_eq!(parsed_request.software_name, "test_software");
-        assert_eq!(
-            parsed_request.commit,
-            "ca82a6dff817ec66f44342007202690a93763949"
+
+        // Define mockito mapping for github comment response
+        let mock = mockito::mock("POST", "/repos/TestOwner/TestRepo/issues/4/comments")
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let request_data_string = serde_json::to_string(&request_data_json).unwrap();
+        let base64_request_data = base64::encode(&request_data_string);
+
+        let pubsub_message = PubsubMessage {
+            attributes: None,
+            data: Some(base64_request_data),
+            publish_time: None,
+            message_id: None,
+        };
+        let received_message = ReceivedMessage {
+            ack_id: Some("test_id".to_string()),
+            message: Some(pubsub_message),
+            delivery_attempt: Some(1),
+        };
+
+        let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+
+        test_gcloud_subscriber
+            .start_run_from_message(&conn, &received_message)
+            .await;
+
+        // Get the run that was created
+        let test_run = RunData::find(
+            &conn,
+            RunQuery {
+                pipeline_id: None,
+                template_id: None,
+                test_id: Some(test_test.test_id),
+                run_group_id: None,
+                name: None,
+                status: None,
+                test_input: None,
+                test_options: None,
+                eval_input: None,
+                eval_options: None,
+                test_cromwell_job_id: None,
+                eval_cromwell_job_id: None,
+                created_before: None,
+                created_after: None,
+                created_by: None,
+                finished_before: None,
+                finished_after: None,
+                sort: None,
+                limit: None,
+                offset: None,
+            },
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+
+        assert_eq!(test_run.test_id, test_test.test_id);
+        assert_eq!(test_run.status, RunStatusEnum::Building);
+        assert_eq!(test_run.test_input, test_params);
+        assert_eq!(test_run.eval_input, eval_params);
+
+        assert_run_mapped_to_software_with_commit(
+            &conn,
+            test_run.run_id,
+            "764a00442ddb412eed331655cfd90e151f580518",
+            test_software.software_id,
         );
-        assert_eq!(parsed_request.author, "me");
+
+        mock.assert();
     }
 
-    #[test]
-    fn test_parse_github_request_from_message_failure_base64() {
-        let message_json = json!({
-            "test_name": "test_test",
-            "test_input_key": "test_key",
-            "eval_input_key": "eval_key",
-            "software_name": "test_software",
-            "commit": "ca82a6dff817ec66f44342007202690a93763949",
-            "owner":"TestOwner",
-            "repo":"TestRepo",
-            "issue_number":4,
-            "author": "me"
+    #[actix_rt::test]
+    async fn test_start_run_from_message_success_pr_run() {
+        let db_pool = get_test_db_pool();
+        let conn = db_pool.get().unwrap();
+        let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_success",
+        );
+        let test_software = insert_test_software(&conn);
+
+        let request_data_json = json! ({
+            "request_type": "pr",
+            "body": {
+                "test_name": test_test.name,
+                "test_input_key": "in_test_image",
+                "eval_input_key": "in_eval_image",
+                "software_name": test_software.name,
+                "base_commit": "764a00442ddb412eed331655cfd90e151f580518",
+                "head_commit": "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+                "owner":"TestOwner",
+                "repo":"TestRepo",
+                "issue_number":4,
+                "author": "ExampleKevin"
+            }
         });
-        let message_string = serde_json::to_string(&message_json).unwrap();
-        let parsed_request = GCloudSubscriber::parse_github_request_from_message(&message_string);
-        assert!(matches!(parsed_request, Err(ParseMessageError::Base64(_))));
+
+        // Define mockito mapping for github comment response
+        let mock = mockito::mock("POST", "/repos/TestOwner/TestRepo/issues/4/comments")
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let request_data_string = serde_json::to_string(&request_data_json).unwrap();
+        let base64_request_data = base64::encode(&request_data_string);
+
+        let pubsub_message = PubsubMessage {
+            attributes: None,
+            data: Some(base64_request_data),
+            publish_time: None,
+            message_id: None,
+        };
+        let received_message = ReceivedMessage {
+            ack_id: Some("test_id".to_string()),
+            message: Some(pubsub_message),
+            delivery_attempt: Some(1),
+        };
+
+        let base_test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let base_eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let head_test_params = json!({"in_test_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
+        let head_eval_params = json!({"in_eval_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
+
+        test_gcloud_subscriber
+            .start_run_from_message(&conn, &received_message)
+            .await;
+
+        // Get the runs that were created
+        let mut test_runs = RunData::find(
+            &conn,
+            RunQuery {
+                pipeline_id: None,
+                template_id: None,
+                test_id: Some(test_test.test_id),
+                run_group_id: None,
+                name: None,
+                status: None,
+                test_input: None,
+                test_options: None,
+                eval_input: None,
+                eval_options: None,
+                test_cromwell_job_id: None,
+                eval_cromwell_job_id: None,
+                created_before: None,
+                created_after: None,
+                created_by: None,
+                finished_before: None,
+                finished_after: None,
+                sort: None,
+                limit: None,
+                offset: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(test_runs[0].test_id, test_test.test_id);
+        assert_eq!(test_runs[0].status, RunStatusEnum::Building);
+        assert_eq!(test_runs[1].test_id, test_test.test_id);
+        assert_eq!(test_runs[1].status, RunStatusEnum::Building);
+
+        assert_eq!(test_runs.len(), 2);
+
+        let (base_run, head_run) = {
+            if test_runs[0].test_input == base_test_params {
+                let head_run = test_runs.pop().unwrap();
+                let base_run = test_runs.pop().unwrap();
+                (base_run, head_run)
+            } else {
+                let base_run = test_runs.pop().unwrap();
+                let head_run = test_runs.pop().unwrap();
+                (base_run, head_run)
+            }
+        };
+
+        assert_eq!(base_run.test_input, base_test_params);
+        assert_eq!(base_run.eval_input, base_eval_params);
+        assert_eq!(head_run.test_input, head_test_params);
+        assert_eq!(head_run.eval_input, head_eval_params);
+
+        assert_run_mapped_to_software_with_commit(
+            &conn,
+            base_run.run_id,
+            "764a00442ddb412eed331655cfd90e151f580518",
+            test_software.software_id,
+        );
+        assert_run_mapped_to_software_with_commit(
+            &conn,
+            head_run.run_id,
+            "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+            test_software.software_id,
+        );
+
+        mock.assert();
     }
 
-    #[test]
-    fn test_parse_github_request_from_message_failure_json() {
-        let message_json = json!({
-            "test_name": "test_test",
-            "test_input_key": "test_key",
-            "eval_input_key": "eval_key"
+    #[actix_rt::test]
+    async fn process_github_request_from_message_success() {
+        let db_pool = get_test_db_pool();
+        let conn = db_pool.get().unwrap();
+        let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_success",
+        );
+        let test_software = insert_test_software(&conn);
+
+        let request_data_json = json! ({
+            "request_type": "pr",
+            "body": {
+                "test_name": test_test.name,
+                "test_input_key": "in_test_image",
+                "eval_input_key": "in_eval_image",
+                "software_name": test_software.name,
+                "base_commit": "764a00442ddb412eed331655cfd90e151f580518",
+                "head_commit": "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+                "owner":"TestOwner",
+                "repo":"TestRepo",
+                "issue_number":4,
+                "author": "ExampleKevin"
+            }
         });
-        let message_string = serde_json::to_string(&message_json).unwrap();
-        let base64_message = base64::encode(&message_string);
-        let parsed_request = GCloudSubscriber::parse_github_request_from_message(&base64_message);
-        assert!(matches!(parsed_request, Err(ParseMessageError::Json(_))));
+
+        // Define mockito mapping for github comment response
+        let mock = mockito::mock("POST", "/repos/TestOwner/TestRepo/issues/4/comments")
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let request_data_string = serde_json::to_string(&request_data_json).unwrap();
+        let base64_request_data = base64::encode(&request_data_string);
+
+        let base_test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let base_eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let head_test_params = json!({"in_test_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
+        let head_eval_params = json!({"in_eval_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
+
+        test_gcloud_subscriber
+            .process_github_request_from_message(&conn, &base64_request_data)
+            .await
+            .unwrap();
+
+        // Get the runs that were created
+        let mut test_runs = RunData::find(
+            &conn,
+            RunQuery {
+                pipeline_id: None,
+                template_id: None,
+                test_id: Some(test_test.test_id),
+                run_group_id: None,
+                name: None,
+                status: None,
+                test_input: None,
+                test_options: None,
+                eval_input: None,
+                eval_options: None,
+                test_cromwell_job_id: None,
+                eval_cromwell_job_id: None,
+                created_before: None,
+                created_after: None,
+                created_by: None,
+                finished_before: None,
+                finished_after: None,
+                sort: None,
+                limit: None,
+                offset: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(test_runs[0].test_id, test_test.test_id);
+        assert_eq!(test_runs[0].status, RunStatusEnum::Building);
+        assert_eq!(test_runs[1].test_id, test_test.test_id);
+        assert_eq!(test_runs[1].status, RunStatusEnum::Building);
+
+        assert_eq!(test_runs.len(), 2);
+
+        let (base_run, head_run) = {
+            if test_runs[0].test_input == base_test_params {
+                let head_run = test_runs.pop().unwrap();
+                let base_run = test_runs.pop().unwrap();
+                (base_run, head_run)
+            } else {
+                let base_run = test_runs.pop().unwrap();
+                let head_run = test_runs.pop().unwrap();
+                (base_run, head_run)
+            }
+        };
+
+        assert_eq!(base_run.test_input, base_test_params);
+        assert_eq!(base_run.eval_input, base_eval_params);
+        assert_eq!(head_run.test_input, head_test_params);
+        assert_eq!(head_run.eval_input, head_eval_params);
+
+        assert_run_mapped_to_software_with_commit(
+            &conn,
+            base_run.run_id,
+            "764a00442ddb412eed331655cfd90e151f580518",
+            test_software.software_id,
+        );
+        assert_run_mapped_to_software_with_commit(
+            &conn,
+            head_run.run_id,
+            "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+            test_software.software_id,
+        );
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn process_github_request_from_message_failure_invalid_request_type() {
+        let db_pool = get_test_db_pool();
+        let conn = db_pool.get().unwrap();
+        let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_success",
+        );
+        let test_software = insert_test_software(&conn);
+
+        let request_data_json = json! ({
+            "request_type": "ugh",
+            "body": {
+                "test_name": test_test.name,
+                "test_input_key": "in_test_image",
+                "eval_input_key": "in_eval_image",
+                "software_name": test_software.name,
+                "commit": "764a00442ddb412eed331655cfd90e151f580518",
+                "owner":"TestOwner",
+                "repo":"TestRepo",
+                "issue_number":4,
+                "author": "ExampleKevin"
+            }
+        });
+
+        let request_data_string = serde_json::to_string(&request_data_json).unwrap();
+        let base64_request_data = base64::encode(&request_data_string);
+
+        let error = test_gcloud_subscriber
+            .process_github_request_from_message(&conn, &base64_request_data)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ParseMessageError::InvalidRequestType(_)));
+    }
+
+    #[actix_rt::test]
+    async fn process_github_request_from_message_failure_bad_message() {
+        let db_pool = get_test_db_pool();
+        let conn = db_pool.get().unwrap();
+        let test_gcloud_subscriber = create_test_gcloud_subscriber(db_pool);
+        let test_test = insert_test_test_with_subscriptions_with_entities(
+            &conn,
+            "test_process_request_success",
+        );
+        let test_software = insert_test_software(&conn);
+
+        let request_data_json = json! ({
+            "body": {
+                "test_name": test_test.name,
+                "test_input_key": "in_test_image",
+                "eval_input_key": "in_eval_image",
+                "software_name": test_software.name,
+                "commit": "764a00442ddb412eed331655cfd90e151f580518",
+                "owner":"TestOwner",
+                "repo":"TestRepo",
+                "issue_number":4,
+                "author": "ExampleKevin"
+            }
+        });
+
+        let request_data_string = serde_json::to_string(&request_data_json).unwrap();
+        let base64_request_data = base64::encode(&request_data_string);
+
+        let error = test_gcloud_subscriber
+            .process_github_request_from_message(&conn, &base64_request_data)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ParseMessageError::Json(_)));
     }
 }

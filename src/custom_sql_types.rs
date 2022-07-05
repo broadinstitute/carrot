@@ -74,6 +74,16 @@ pub static RUN_FAILURE_STATUSES: [RunStatusEnum; 6] = [
     RunStatusEnum::EvalAborted,
 ];
 
+pub static RUN_TERMINAL_STATUSES: [RunStatusEnum; 7] = [
+    RunStatusEnum::BuildFailed,
+    RunStatusEnum::CarrotFailed,
+    RunStatusEnum::TestFailed,
+    RunStatusEnum::EvalFailed,
+    RunStatusEnum::TestAborted,
+    RunStatusEnum::EvalAborted,
+    RunStatusEnum::Succeeded,
+];
+
 /// Maps to the custom type `build_status_enum` in the DB
 ///
 /// Represents the enum used in the DB for storing the status of a build

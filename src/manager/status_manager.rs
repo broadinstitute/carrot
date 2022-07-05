@@ -620,6 +620,7 @@ impl StatusManager {
                 // Set the changes based on the status
                 let run_update: RunChangeset = match status {
                     RunStatusEnum::TestFailed | RunStatusEnum::TestAborted => RunChangeset {
+                        run_group_id: None,
                         name: None,
                         status: Some(status.clone()),
                         test_cromwell_job_id: None,
@@ -627,6 +628,7 @@ impl StatusManager {
                         finished_at: Some(StatusManager::get_end(&metadata)?),
                     },
                     _ => RunChangeset {
+                        run_group_id: None,
                         name: None,
                         status: Some(status.clone()),
                         test_cromwell_job_id: None,
@@ -696,6 +698,7 @@ impl StatusManager {
                 RunStatusEnum::Succeeded
                 | RunStatusEnum::EvalFailed
                 | RunStatusEnum::EvalAborted => RunChangeset {
+                    run_group_id: None,
                     name: None,
                     status: Some(status.clone()),
                     test_cromwell_job_id: None,
@@ -703,6 +706,7 @@ impl StatusManager {
                     finished_at: Some(StatusManager::get_end(&metadata)?),
                 },
                 _ => RunChangeset {
+                    run_group_id: None,
                     name: None,
                     status: Some(status.clone()),
                     test_cromwell_job_id: None,
@@ -1467,6 +1471,7 @@ mod tests {
         id: Uuid,
     ) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
@@ -1488,6 +1493,7 @@ mod tests {
         id: Uuid,
     ) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::EvalSubmitted,
@@ -1510,6 +1516,7 @@ mod tests {
         status: RunStatusEnum,
     ) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status,
@@ -1646,6 +1653,7 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
+            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),

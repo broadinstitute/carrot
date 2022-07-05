@@ -700,6 +700,7 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
+            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: json!({
@@ -1397,6 +1398,7 @@ mod tests {
         let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
+            run_group_id: None,
             name: "Test run".to_string(),
             status: RunStatusEnum::Succeeded,
             test_input: json!({

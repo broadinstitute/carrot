@@ -361,6 +361,7 @@ mod tests {
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("67e55044-10b1-426f-9247-bb680e5fe0c8").unwrap(),
                 test_id: Uuid::parse_str("8dd6d043-e16c-406c-8828-ce7ec2143e7f").unwrap(),
+                run_group_id: None,
                 name: "Test Run 1".to_string(),
                 status: RunStatusEnum::Succeeded,
                 test_input: json!({
@@ -390,6 +391,7 @@ mod tests {
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("4f27abe7-2cfa-42c3-acc2-ce5344b0e471").unwrap(),
                 test_id: Uuid::parse_str("8dd6d043-e16c-406c-8828-ce7ec2143e7f").unwrap(),
+                run_group_id: None,
                 name: "Test Run 2".to_string(),
                 status: RunStatusEnum::Succeeded,
                 test_input: json!({
@@ -419,6 +421,7 @@ mod tests {
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("4b2d5150-7d86-4a11-888c-b78dc030ba4f").unwrap(),
                 test_id: Uuid::parse_str("8dd6d043-e16c-406c-8828-ce7ec2143e7f").unwrap(),
+                run_group_id: None,
                 name: "Test Run 3".to_string(),
                 status: RunStatusEnum::Succeeded,
                 test_input: json!({
@@ -450,6 +453,7 @@ mod tests {
             RunWithResultsAndErrorsData {
                 run_id: Uuid::parse_str("cf4b5cb2-976e-4f9c-91ba-2b421d61199b").unwrap(),
                 test_id: Uuid::parse_str("8dd6d043-e16c-406c-8828-ce7ec2143e7f").unwrap(),
+                run_group_id: None,
                 name: "Test Run 4".to_string(),
                 status: RunStatusEnum::CarrotFailed,
                 test_input: json!({

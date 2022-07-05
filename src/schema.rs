@@ -37,6 +37,7 @@ table! {
     run (run_id) {
         run_id -> Uuid,
         test_id -> Uuid,
+        run_group_id -> Nullable<Uuid>,
         name -> Text,
         status -> Run_status_enum,
         test_input -> Jsonb,
@@ -115,6 +116,7 @@ table! {
     run_with_results_and_errors (run_id) {
         run_id -> Uuid,
         test_id -> Uuid,
+        run_group_id -> Nullable<Uuid>,
         name -> Text,
         status -> Run_status_enum,
         test_input -> Jsonb,
@@ -211,6 +213,23 @@ table! {
 table! {
     use diesel::sql_types::*;
 
+    run_group_is_from_github(run_group_id) {
+        run_group_id -> Uuid,
+        owner -> Text,
+        repo -> Text,
+        issue_number -> Integer,
+        author -> Text,
+        base_commit -> Text,
+        head_commit -> Text,
+        test_input_key -> Nullable<Text>,
+        eval_input_key -> Nullable<Text>,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
     report(report_id) {
         report_id -> Uuid,
         name -> Text,
@@ -270,6 +289,15 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    run_group(run_group_id) {
+        run_group_id -> Uuid,
+        created_at -> Timestamptz,
+    }
+}
+
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
 
@@ -292,4 +320,6 @@ allow_tables_to_appear_in_same_query!(
     template_report,
     run_report,
     run_error,
+    run_group,
+    run_group_is_from_github
 );
