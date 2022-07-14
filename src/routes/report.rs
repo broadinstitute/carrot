@@ -7,10 +7,10 @@ use crate::db;
 use crate::models::report::{NewReport, ReportChangeset, ReportData, ReportQuery, UpdateError};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use crate::routes::util::parse_id;
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use serde_json::json;
-use uuid::Uuid;
 
 /// Handles requests to /reports/{id} for retrieving report info by report_id
 ///
@@ -21,29 +21,17 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(
-    req: HttpRequest,
-    pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
-    // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        // If it doesn't parse successfully, return an error to the user
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Query DB for report in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ReportData::find_by_id(&conn, id) {
@@ -52,23 +40,25 @@ async fn find_by_id(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no report is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No report found".to_string(),
-                status: 404,
-                detail: "No report found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no report is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No report found".to_string(),
+                        status: 404,
+                        detail: "No report found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })?;
-
-    Ok(res)
+    }
 }
 
 /// Handles requests to /reports for retrieving report info by query parameters
@@ -83,9 +73,9 @@ async fn find_by_id(
 async fn find(
     web::Query(query): web::Query<ReportQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Query DB for reports in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ReportData::find(&conn, query) {
@@ -97,26 +87,26 @@ async fn find(
         }
     })
     .await
-    .map(|results| {
-        // If there are no results, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No reports found".to_string(),
-                status: 404,
-                detail: "No reports found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If there are no results, return a 404
+            if results.is_empty() {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No reports found".to_string(),
+                    status: 404,
+                    detail: "No reports found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(results)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-
-    Ok(res)
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /reports for creating reports
@@ -131,9 +121,9 @@ async fn find(
 async fn create(
     web::Json(new_report): web::Json<NewReport>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Insert in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ReportData::create(&conn, new_report) {
@@ -145,14 +135,15 @@ async fn create(
         }
     })
     .await
-    // If there is no error, return a response with the created report
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-    Ok(res)
+    {
+        // If there is no error, return a response with the created report
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /reports/{id} for updating a report
@@ -168,23 +159,15 @@ async fn update(
     id: web::Path<String>,
     web::Json(report_changes): web::Json<ReportChangeset>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Update in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ReportData::update(&conn, id, report_changes) {
@@ -195,10 +178,11 @@ async fn update(
             }
         }
     })
-        .await
+    .await
+    {
         // If there is no error, return a response with the updated report
-        .map(|results| HttpResponse::Ok().json(results))
-        .map_err(|e| {
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
             error!("{}", e);
             match e {
                 BlockingError::Error(UpdateError::Prohibited(_)) => {
@@ -210,9 +194,8 @@ async fn update(
                 },
                 _ => default_500(&e)
             }
-        })?;
-
-    Ok(res)
+        }
+    }
 }
 
 /// Handles DELETE requests to /reports/{id} for deleting report rows by report_id
@@ -225,26 +208,18 @@ async fn update(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Query DB for report in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match ReportData::delete(&conn, id) {
@@ -255,9 +230,10 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
             }
         }
     })
-        .await
+    .await
+    {
         // If there is no error, verify that a row was deleted
-        .map(|results| {
+        Ok(results) => {
             if results > 0 {
                 let message = format!("Successfully deleted {} row", results);
                 HttpResponse::Ok().json(json!({ "message": message }))
@@ -268,8 +244,8 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                     detail: "No report found for the specified id".to_string(),
                 })
             }
-        })
-        .map_err(|e| {
+        }
+        Err(e) => {
             error!("{}", e);
             match e {
                 // If no template is found, return a 404
@@ -284,7 +260,8 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
                 // For other errors, return a 500
                 _ => default_500(&e),
             }
-        })
+        }
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

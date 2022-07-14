@@ -98,7 +98,7 @@ impl RunSoftwareVersionData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -258,8 +258,8 @@ mod tests {
             .expect("Failed inserting test software_version");
 
         let new_run_software_version = NewRunSoftwareVersion {
-            run_id: new_run.run_id.clone(),
-            software_version_id: new_software_version.software_version_id.clone(),
+            run_id: new_run.run_id,
+            software_version_id: new_software_version.software_version_id,
         };
 
         RunSoftwareVersionData::create(conn, new_run_software_version)
@@ -316,7 +316,7 @@ mod tests {
 
         let new_software_version = NewSoftwareVersion {
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
-            software_id: new_software.software_id.clone(),
+            software_id: new_software.software_id,
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version)
@@ -324,15 +324,15 @@ mod tests {
 
         let new_software_version2 = NewSoftwareVersion {
             commit: String::from("c9d1a4eb7d1c49428b03bee19a72401b02cec466 "),
-            software_id: new_software.software_id.clone(),
+            software_id: new_software.software_id,
         };
 
         let new_software_version2 = SoftwareVersionData::create(conn, new_software_version2)
             .expect("Failed inserting test software_version");
 
         let new_run_software_version = NewRunSoftwareVersion {
-            run_id: new_run.run_id.clone(),
-            software_version_id: new_software_version.software_version_id.clone(),
+            run_id: new_run.run_id,
+            software_version_id: new_software_version.software_version_id,
         };
 
         run_software_versions.push(
@@ -341,8 +341,8 @@ mod tests {
         );
 
         let new_run_software_version = NewRunSoftwareVersion {
-            run_id: new_run2.run_id.clone(),
-            software_version_id: new_software_version.software_version_id.clone(),
+            run_id: new_run2.run_id,
+            software_version_id: new_software_version.software_version_id,
         };
 
         run_software_versions.push(
@@ -351,8 +351,8 @@ mod tests {
         );
 
         let new_run_software_version = NewRunSoftwareVersion {
-            run_id: new_run2.run_id.clone(),
-            software_version_id: new_software_version2.software_version_id.clone(),
+            run_id: new_run2.run_id,
+            software_version_id: new_software_version2.software_version_id,
         };
 
         run_software_versions.push(
@@ -557,8 +557,8 @@ mod tests {
 
         let test_run_software_version2 = RunSoftwareVersionData::find_by_run_and_software_version(
             &conn,
-            test_run_software_version.run_id.clone(),
-            test_run_software_version.software_version_id.clone(),
+            test_run_software_version.run_id,
+            test_run_software_version.software_version_id,
         )
         .unwrap();
 
@@ -602,8 +602,8 @@ mod tests {
 
         let test_run_software_version2 = RunSoftwareVersionData::find_by_run_and_software_version(
             &conn,
-            test_run_software_version.run_id.clone(),
-            test_run_software_version.software_version_id.clone(),
+            test_run_software_version.run_id,
+            test_run_software_version.software_version_id,
         );
 
         assert!(matches!(

@@ -20,14 +20,8 @@ pub async fn start_job_from_file(
     inputs_file_path: &Path,
     options_file_path: Option<&Path>,
 ) -> Result<WorkflowIdAndStatus, CromwellRequestError> {
-    let options_file_path = match options_file_path {
-        Some(file_path) => Some(PathBuf::from(file_path)),
-        None => None,
-    };
-    let wdl_deps_file_path: Option<PathBuf> = match wdl_deps_file_path {
-        Some(file_path) => Some(PathBuf::from(file_path)),
-        None => None,
-    };
+    let options_file_path = options_file_path.map(PathBuf::from);
+    let wdl_deps_file_path: Option<PathBuf> = wdl_deps_file_path.map(PathBuf::from);
     // Build request parameters
     let cromwell_params = cromwell_requests::StartJobParams {
         labels: None,
@@ -41,7 +35,7 @@ pub async fn start_job_from_file(
         workflow_options: options_file_path,
         workflow_root: None,
         workflow_source: Some(PathBuf::from(wdl_file_path)),
-        workflow_type: Some(WorkflowTypeEnum::WDL),
+        workflow_type: Some(WorkflowTypeEnum::Wdl),
         workflow_type_version: None,
         workflow_url: None,
     };

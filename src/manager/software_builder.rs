@@ -69,7 +69,7 @@ impl SoftwareBuilder {
     ) -> SoftwareBuilder {
         SoftwareBuilder {
             cromwell_client,
-            config: config.to_owned(),
+            config: config.clone(),
         }
     }
     /// Starts a cromwell job for building the software associated with the software_build specified
@@ -94,7 +94,7 @@ impl SoftwareBuilder {
         let wdl_file = temp_storage::get_temp_file(wdl_to_use.as_bytes())?;
 
         // Create path to wdl that builds docker images
-        let wdl_file_path: &Path = &wdl_file.path();
+        let wdl_file_path: &Path = wdl_file.path();
 
         // Get necessary params for build wdl
         let (software_name, repo_url, machine_type, commit) =
@@ -138,14 +138,14 @@ impl SoftwareBuilder {
         };
 
         // Write json to temp file so it can be submitted to cromwell
-        let json_file = temp_storage::get_temp_file(&json_to_submit.to_string().as_bytes())?;
+        let json_file = temp_storage::get_temp_file(json_to_submit.to_string().as_bytes())?;
 
         // Send job request to cromwell
         let start_job_response = util::start_job_from_file(
             &self.cromwell_client,
             wdl_file_path,
             None,
-            &json_file.path(),
+            json_file.path(),
             None,
         )
         .await?;
@@ -190,7 +190,7 @@ pub fn get_or_create_software_version(
         let mut software_version = SoftwareVersionData::find(conn, software_version_query)?;
 
         // If we found it, return it
-        if software_version.len() > 0 {
+        if !software_version.is_empty() {
             return Ok(software_version.pop().unwrap());
         }
         // If not, create it
@@ -204,7 +204,7 @@ pub fn get_or_create_software_version(
 
     // Call in a transaction
     #[cfg(not(test))]
-    return conn.build_transaction().run(|| software_version_closure());
+    return conn.build_transaction().run(software_version_closure);
 
     // Tests do all database stuff in transactions that are not committed so they don't interfere
     // with other tests. An unfortunate side effect of this is that we can't use transactions in
@@ -246,7 +246,7 @@ pub fn get_or_create_software_build(
             SoftwareBuildData::find(conn, software_build_query)?;
 
         // If we found it, return it as long as it's not aborted, expired, or failed
-        if result.len() > 0 {
+        if !result.is_empty() {
             let software_build = result.pop().unwrap();
             match software_build.status {
                 BuildStatusEnum::Aborted | BuildStatusEnum::Expired | BuildStatusEnum::Failed => {}
@@ -266,7 +266,7 @@ pub fn get_or_create_software_build(
     };
 
     #[cfg(not(test))]
-    return conn.build_transaction().run(|| software_build_closure());
+    return conn.build_transaction().run(software_build_closure);
 
     // Tests do all database stuff in transactions that are not committed so they don't interfere
     // with other tests. An unfortunate side effect of this is that we can't use transactions in

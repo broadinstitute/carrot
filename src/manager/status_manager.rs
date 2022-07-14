@@ -25,10 +25,10 @@ use crate::notifications::emailer::Emailer;
 use crate::notifications::github_commenter::GithubCommenter;
 use crate::requests::cromwell_requests;
 use crate::requests::cromwell_requests::CromwellClient;
+use crate::requests::gcloud_storage::GCloudClient;
 use crate::requests::github_requests::GithubClient;
 use crate::requests::test_resource_requests::TestResourceClient;
 use crate::run_error_logger;
-use crate::storage::gcloud_storage::GCloudClient;
 use actix_web::client::Client;
 use chrono::{NaiveDateTime, Utc};
 use diesel::PgConnection;
@@ -176,28 +176,22 @@ pub async fn init_and_run(
     // Make a client that'll be used for http requests
     let http_client: Client = Client::default();
     // Make a gcloud client for interacting with gcs
-    let gcloud_client: Option<GCloudClient> = match carrot_config.gcloud() {
-        Some(gcloud_config) => Some(GCloudClient::new(gcloud_config.gcloud_sa_key_file())),
-        None => None,
-    };
+    let gcloud_client: Option<GCloudClient> = carrot_config
+        .gcloud()
+        .map(|gcloud_config| GCloudClient::new(gcloud_config.gcloud_sa_key_file()));
     // Create an emailer (or not, if we don't have the config for one)
-    let emailer: Option<Emailer> = match carrot_config.email() {
-        Some(email_config) => Some(Emailer::new(email_config.clone())),
-        None => None,
-    };
+    let emailer: Option<Emailer> = carrot_config
+        .email()
+        .map(|email_config| Emailer::new(email_config.clone()));
     // Create a github commenter (or not, if we don't have the config for one)
-    let github_client: Option<GithubClient> = match carrot_config.github() {
-        Some(github_config) => Some(GithubClient::new(
+    let github_client: Option<GithubClient> = carrot_config.github().map(|github_config| {
+        GithubClient::new(
             github_config.client_id(),
             github_config.client_token(),
             http_client.clone(),
-        )),
-        None => None,
-    };
-    let github_commenter: Option<GithubCommenter> = match github_client {
-        Some(github_client) => Some(GithubCommenter::new(github_client)),
-        None => None,
-    };
+        )
+    });
+    let github_commenter: Option<GithubCommenter> = github_client.map(GithubCommenter::new);
     // Create a notification handler
     let notification_handler: NotificationHandler =
         NotificationHandler::new(emailer, github_commenter);
@@ -216,25 +210,27 @@ pub async fn init_and_run(
         None => TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), None),
     };
     // Create a software builder
-    let software_builder: Option<SoftwareBuilder> = match carrot_config.custom_image_build() {
-        Some(image_build_config) => Some(SoftwareBuilder::new(
-            cromwell_client.clone(),
-            &image_build_config,
-        )),
-        None => None,
-    };
+    let software_builder: Option<SoftwareBuilder> =
+        carrot_config
+            .custom_image_build()
+            .map(|image_build_config| {
+                SoftwareBuilder::new(cromwell_client.clone(), image_build_config)
+            });
     // Create report builder
-    let report_builder: Option<ReportBuilder> = match carrot_config.reporting() {
-        Some(reporting_config) => {
-            // We can unwrap gcloud_client because reporting won't work without it
-            Some(ReportBuilder::new(cromwell_client.clone(), gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen").clone(), reporting_config))
-        }
-        None => None,
-    };
+    let report_builder: Option<ReportBuilder> = carrot_config.reporting().map(|reporting_config| {
+        // We can unwrap gcloud_client because reporting won't work without it
+        ReportBuilder::new(
+            cromwell_client.clone(),
+            gcloud_client.expect(
+                "Failed to unwrap gcloud_client to create report builder.  This should not happen",
+            ),
+            reporting_config,
+        )
+    });
     // Create a status manager and start it managing in its own thread
     let status_manager: StatusManager = StatusManager::new(
         db_pool,
-        carrot_config.status_manager().to_owned(),
+        carrot_config.status_manager().clone(),
         channel_recv,
         notification_handler,
         test_runner,
@@ -251,6 +247,7 @@ impl StatusManager {
     /// `notification_handler` for sending notifications, `test_runner` for running tests,
     /// `software_builder` for building docker images, `cromwell_client` for sending requests to
     /// cromwell (for retrieving statuses), and `report_builder` for starting report build jobs
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: DbPool,
         config: StatusManagerConfig,
@@ -295,9 +292,9 @@ impl StatusManager {
                         debug!("Checking status of {} run_reports", run_reports.len());
                         for run_report in run_reports {
                             // Check for message from main thread to exit
-                            if let Some(_) = check_for_terminate_message(&self.channel_recv) {
+                            if check_for_terminate_message(&self.channel_recv).is_some() {
                                 return Ok(());
-                            };
+                            }
                             // Check and update status
                             debug!(
                                 "Checking status of run_report with run_id {} and report_id: {}",
@@ -344,9 +341,9 @@ impl StatusManager {
                     debug!("Checking status of {} runs", runs.len());
                     for run in runs {
                         // Check for message from main thread to exit
-                        if let Some(_) = check_for_terminate_message(&self.channel_recv) {
+                        if check_for_terminate_message(&self.channel_recv).is_some() {
                             return Ok(());
-                        };
+                        }
                         // Check and update status in new thread
                         debug!("Checking status of run with id: {}", run.run_id);
                         if let Err(e) = self
@@ -357,7 +354,7 @@ impl StatusManager {
                             run_error_logger::log_error(
                                 &self.db_pool.get().unwrap(),
                                 run.run_id,
-                                error_message,
+                                &error_message,
                             );
                             self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                         }
@@ -382,7 +379,7 @@ impl StatusManager {
                         debug!("Checking status of {} builds", builds.len());
                         for build in builds {
                             // Check for message from main thread to exit
-                            if let Some(_) = check_for_terminate_message(&self.channel_recv) {
+                            if check_for_terminate_message(&self.channel_recv).is_some() {
                                 return Ok(());
                             };
                             // Check and update status
@@ -424,14 +421,12 @@ impl StatusManager {
             let wait_timeout = Duration::new(self.config.status_check_wait_time_in_secs(), 0)
                 .checked_sub(Instant::now() - query_time);
             if let Some(timeout) = wait_timeout {
-                if let Some(_) =
-                    check_for_terminate_message_with_timeout(&self.channel_recv, timeout)
-                {
+                if check_for_terminate_message_with_timeout(&self.channel_recv, timeout).is_some() {
                     return Ok(());
                 }
             }
             // Check for message from main thread to exit
-            if let Some(_) = check_for_terminate_message(&self.channel_recv) {
+            if check_for_terminate_message(&self.channel_recv).is_some() {
                 return Ok(());
             }
         }
@@ -443,7 +438,7 @@ impl StatusManager {
         consecutive_failures: &mut u32,
         e: impl Error,
     ) -> Result<(), StatusManagerError> {
-        *consecutive_failures = *consecutive_failures + 1;
+        *consecutive_failures += 1;
         error!(
             "Encountered status update error {} time(s), this time due to: {}",
             consecutive_failures, e
@@ -551,7 +546,7 @@ impl StatusManager {
         }
 
         // Otherwise, just return ()
-        return Ok(());
+        Ok(())
     }
 
     /// Handles updating the run status of a run that is in the testing phase (i.e. the test wdl is
@@ -567,7 +562,7 @@ impl StatusManager {
     ) -> Result<(), UpdateStatusError> {
         // Get metadata
         let metadata = self
-            .get_status_metadata_from_cromwell(&run.test_cromwell_job_id.as_ref().unwrap())
+            .get_status_metadata_from_cromwell(run.test_cromwell_job_id.as_ref().unwrap())
             .await?;
         // If the status is different from what's stored in the DB currently, update it
         let status = match metadata.get("status") {
@@ -595,7 +590,7 @@ impl StatusManager {
             // If it succeeded, fill results in the DB and start the eval job
             if status == RunStatusEnum::Succeeded {
                 let outputs = match metadata.get("outputs") {
-                    Some(outputs) => outputs.as_object().unwrap().to_owned(),
+                    Some(outputs) => outputs.as_object().unwrap().clone(),
                     None => {
                         return Err(UpdateStatusError::Cromwell(String::from(
                             "Cromwell metadata request did not return outputs",
@@ -640,15 +635,12 @@ impl StatusManager {
                     },
                 };
                 // Update
-                match RunData::update(conn, run.run_id.clone(), run_update) {
-                    Err(e) => {
-                        return Err(UpdateStatusError::DB(format!(
-                            "Updating run in DB failed with error {}",
-                            e
-                        )))
-                    }
-                    _ => {}
-                };
+                if let Err(e) = RunData::update(conn, run.run_id, run_update) {
+                    return Err(UpdateStatusError::DB(format!(
+                        "Updating run in DB failed with error {}",
+                        e
+                    )));
+                }
                 // If it ended unsuccessfully, send notifications
                 if status == RunStatusEnum::TestFailed || status == RunStatusEnum::TestAborted {
                     self.notification_handler
@@ -674,7 +666,7 @@ impl StatusManager {
     ) -> Result<(), UpdateStatusError> {
         // Get metadata
         let metadata = self
-            .get_status_metadata_from_cromwell(&run.eval_cromwell_job_id.as_ref().unwrap())
+            .get_status_metadata_from_cromwell(run.eval_cromwell_job_id.as_ref().unwrap())
             .await?;
         // If the status is different from what's stored in the DB currently, update it
         let status = match metadata.get("status") {
@@ -719,20 +711,17 @@ impl StatusManager {
                 },
             };
             // Update
-            match RunData::update(conn, run.run_id, run_update) {
-                Err(e) => {
-                    return Err(UpdateStatusError::DB(format!(
-                        "Updating run in DB failed with error {}",
-                        e
-                    )))
-                }
-                _ => {}
-            };
+            if let Err(e) = RunData::update(conn, run.run_id, run_update) {
+                return Err(UpdateStatusError::DB(format!(
+                    "Updating run in DB failed with error {}",
+                    e
+                )));
+            }
 
             // If it succeeded, fill results in DB also, and start generating reports
             if status == RunStatusEnum::Succeeded {
                 let outputs = match metadata.get("outputs") {
-                    Some(outputs) => outputs.as_object().unwrap().to_owned(),
+                    Some(outputs) => outputs.as_object().unwrap().clone(),
                     None => {
                         return Err(UpdateStatusError::Cromwell(String::from(
                             "Cromwell metadata request did not return outputs",
@@ -881,25 +870,20 @@ impl StatusManager {
                         finished_at: Some(Utc::now().naive_utc()),
                     };
                     // Update
-                    match SoftwareBuildData::update(
-                        conn,
-                        build.software_build_id.clone(),
-                        changeset,
-                    ) {
-                        Err(e) => {
-                            return Err(UpdateStatusError::DB(format!(
-                                "Updating build {} in DB failed with error {}",
-                                build.software_build_id, e
-                            )))
-                        }
-                        _ => {}
-                    };
+                    if let Err(e) =
+                        SoftwareBuildData::update(conn, build.software_build_id, changeset)
+                    {
+                        return Err(UpdateStatusError::DB(format!(
+                            "Updating build {} in DB failed with error {}",
+                            build.software_build_id, e
+                        )));
+                    }
                 }
             }
         }
         // Get metadata
         let metadata = self
-            .get_status_metadata_from_cromwell(&build.build_job_id.as_ref().unwrap())
+            .get_status_metadata_from_cromwell(build.build_job_id.as_ref().unwrap())
             .await?;
         // If the status is different from what's stored in the DB currently, update it
         let status = match metadata.get("status") {
@@ -928,7 +912,7 @@ impl StatusManager {
                 BuildStatusEnum::Succeeded => {
                     // Get the outputs so we can get the image_url
                     let outputs = match metadata.get("outputs") {
-                        Some(outputs) => outputs.as_object().unwrap().to_owned(),
+                        Some(outputs) => outputs.as_object().unwrap().clone(),
                         None => {
                             return Err(UpdateStatusError::Cromwell(String::from(
                                 "Cromwell metadata request did not return outputs",
@@ -954,34 +938,31 @@ impl StatusManager {
 
                     SoftwareBuildChangeset {
                         image_url: Some(image_url),
-                        status: Some(status.clone()),
+                        status: Some(status),
                         build_job_id: None,
                         finished_at: Some(StatusManager::get_end(&metadata)?),
                     }
                 }
                 BuildStatusEnum::Failed | BuildStatusEnum::Aborted => SoftwareBuildChangeset {
                     image_url: None,
-                    status: Some(status.clone()),
+                    status: Some(status),
                     build_job_id: None,
                     finished_at: Some(StatusManager::get_end(&metadata)?),
                 },
                 _ => SoftwareBuildChangeset {
                     image_url: None,
-                    status: Some(status.clone()),
+                    status: Some(status),
                     build_job_id: None,
                     finished_at: None,
                 },
             };
             // Update
-            match SoftwareBuildData::update(conn, build.software_build_id.clone(), build_update) {
-                Err(e) => {
-                    return Err(UpdateStatusError::DB(format!(
-                        "Updating build {} in DB failed with error {}",
-                        build.software_build_id, e
-                    )))
-                }
-                _ => {}
-            };
+            if let Err(e) = SoftwareBuildData::update(conn, build.software_build_id, build_update) {
+                return Err(UpdateStatusError::DB(format!(
+                    "Updating build {} in DB failed with error {}",
+                    build.software_build_id, e
+                )));
+            }
         }
 
         Ok(())
@@ -1000,7 +981,7 @@ impl StatusManager {
     ) -> Result<(), UpdateStatusError> {
         // Get metadata
         let metadata = self
-            .get_status_metadata_from_cromwell(&run_report.cromwell_job_id.as_ref().unwrap())
+            .get_status_metadata_from_cromwell(run_report.cromwell_job_id.as_ref().unwrap())
             .await?;
         // If the status is different from what's stored in the DB currently, update it
         let status = match metadata.get("status") {
@@ -1081,7 +1062,7 @@ impl StatusManager {
     ) -> Result<RunReportChangeset, UpdateStatusError> {
         // Get the outputs so we can get the report file locations
         let outputs = match metadata.get("outputs") {
-            Some(outputs) => outputs.as_object().unwrap().to_owned(),
+            Some(outputs) => outputs.as_object().unwrap().clone(),
             None => {
                 return Err(UpdateStatusError::Cromwell(String::from(
                     "Cromwell metadata request did not return outputs",
@@ -1093,7 +1074,7 @@ impl StatusManager {
         let mut run_report_outputs_map: Map<String, Value> = Map::new();
         // Loop through the four outputs we want, get them from `outputs`, and put them in our outputs
         // map
-        for output_key in vec![
+        for output_key in &[
             "populated_notebook",
             "html_report",
             "empty_notebook",
@@ -1119,7 +1100,7 @@ impl StatusManager {
                     }
                 };
             // Add it to our output map
-            run_report_outputs_map.insert(String::from(output_key), Value::String(output_val));
+            run_report_outputs_map.insert(String::from(*output_key), Value::String(output_val));
         }
 
         Ok(RunReportChangeset {
@@ -1155,7 +1136,7 @@ impl StatusManager {
             .get_metadata(cromwell_job_id, &params)
             .await;
         match metadata {
-            Ok(value) => Ok(value.as_object().unwrap().to_owned()),
+            Ok(value) => Ok(value.as_object().unwrap().clone()),
             Err(e) => Err(UpdateStatusError::Cromwell(e.to_string())),
         }
     }
@@ -1278,30 +1259,31 @@ impl StatusManager {
         // Loop through template_results, check for each of the keys in outputs, and add them to list to write
         for template_result in template_results {
             // Check outputs for this result
-            match outputs.get(&template_result.result_key) {
+            if let Some(output) = outputs.get(&template_result.result_key) {
                 // If we found it, add it to the list of results to write to the DB
-                Some(output) => {
-                    // We have to parse some of the possible result so they're not enclosed in the
-                    // redundant quotes that would be there if we used output.to_string() for
-                    // everything
-                    let parsed_output: String = match output {
-                        Value::String(string_val) => string_val.to_string(),
-                        Value::Bool(bool_val) => bool_val.to_string(),
-                        Value::Number(number_val) => number_val.to_string(),
-                        _ => output.to_string(),
-                    };
-                    result_list.push(NewRunResult {
-                        run_id: run.run_id.clone(),
-                        result_id: template_result.result_id.clone(),
-                        value: parsed_output,
-                    });
-                }
-                None => {}
+                // We have to parse some of the possible result so they're not enclosed in the
+                // redundant quotes that would be there if we used output.to_string() for
+                // everything
+                let parsed_output: String = match output {
+                    Value::String(string_val) => string_val.to_string(),
+                    Value::Bool(bool_val) => bool_val.to_string(),
+                    Value::Number(number_val) => number_val.to_string(),
+                    _ => output.to_string(),
+                };
+                result_list.push(NewRunResult {
+                    run_id: run.run_id,
+                    result_id: template_result.result_id,
+                    value: parsed_output,
+                });
             }
         }
 
         // Write result_list to the DB (return error if it fails)
-        if let Err(_) = RunResultData::batch_create(conn, result_list) {
+        if let Err(e) = RunResultData::batch_create(conn, result_list) {
+            error!(
+                "Failed to write results to DB for run {} with error {}",
+                run.run_id, e
+            );
             return Err(UpdateStatusError::DB(format!(
                 "Failed to write results to DB for run {}",
                 run.run_id
@@ -1341,9 +1323,9 @@ mod tests {
     use crate::notifications::emailer::Emailer;
     use crate::notifications::github_commenter::GithubCommenter;
     use crate::requests::cromwell_requests::CromwellClient;
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::github_requests::GithubClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::storage::gcloud_storage::GCloudClient;
     use crate::unit_test_util::{get_test_db_pool, load_default_config};
     use actix_web::client::Client;
     use chrono::{NaiveDateTime, Utc};
@@ -1767,12 +1749,12 @@ mod tests {
                     |f: &File,
                      address: &str,
                      name: &str|
-                     -> Result<String, crate::storage::gcloud_storage::Error> {
+                     -> Result<String, crate::requests::gcloud_storage::Error> {
                         Ok(String::from("example.com/report/template/location.ipynb"))
                     },
                 ));
                 gcloud_client.set_retrieve_object(Box::new(
-                    |address: &str| -> Result<Object, crate::storage::gcloud_storage::Error> {
+                    |address: &str| -> Result<Object, crate::requests::gcloud_storage::Error> {
                         let object_metadata = {
                             let mut test_object = google_storage1::Object::default();
                             test_object.size = Some(String::from("610035000"));
@@ -1922,11 +1904,9 @@ mod tests {
             test_result.result_id,
             String::from("greeting_workflow.ObjectKey"),
         );
-        let test_test = insert_test_test_with_template_id(&conn, template_id.clone());
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_test = insert_test_test_with_template_id(&conn, template_id);
+        let test_run =
+            insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
         // Create results map
         let results_map = json!({
             "greeting_workflow.TestKey": "TestVal",
@@ -1971,19 +1951,17 @@ mod tests {
             String::from("Kevin's Result"),
             ResultTypeEnum::Text,
         );
-        let test_test = insert_test_test_with_template_id(&conn, template.template_id.clone());
+        let test_test = insert_test_test_with_template_id(&conn, template.template_id);
         insert_test_template_result_with_template_id_and_result_id_and_result_key(
             &conn,
             template.template_id,
             test_result.result_id,
             String::from("greeting_workflow.TestKey"),
         );
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_run =
+            insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
         let test_run_is_from_github =
-            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         // Define mockito mapping for wdl
         let wdl_mock = mockito::mock("GET", "/eval.wdl")
             .with_status(200)
@@ -2046,10 +2024,8 @@ mod tests {
         let template_id = template.template_id;
         let test_test = insert_test_test_with_template_id(&conn, template_id);
         insert_test_results_mapped_to_template(&conn, template_id);
-        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_run =
+            insert_test_run_with_test_id_and_status_eval_submitted(&conn, test_test.test_id);
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         // Define and map a report to this template
@@ -2128,10 +2104,8 @@ mod tests {
         let template_id = template.template_id;
         let test_test = insert_test_test_with_template_id(&conn, template_id);
         insert_test_results_mapped_to_template(&conn, template_id);
-        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_run =
+            insert_test_run_with_test_id_and_status_eval_submitted(&conn, test_test.test_id);
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         // Define and map a report to this template
@@ -2195,12 +2169,10 @@ mod tests {
         let template = insert_test_template(&conn);
         let template_id = template.template_id;
         let test_test = insert_test_test_with_template_id(&conn, template_id);
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_run =
+            insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
         let test_run_is_from_github =
-            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id.clone());
+            insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -2242,10 +2214,8 @@ mod tests {
         let template = insert_test_template(&conn);
         let template_id = template.template_id;
         let test_test = insert_test_test_with_template_id(&conn, template_id);
-        let test_run = insert_test_run_with_test_id_and_status_test_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_run =
+            insert_test_run_with_test_id_and_status_test_submitted(&conn, test_test.test_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -2281,10 +2251,8 @@ mod tests {
         let template = insert_test_template(&conn);
         let template_id = template.template_id;
         let test_test = insert_test_test_with_template_id(&conn, template_id);
-        let test_run = insert_test_run_with_test_id_and_status_eval_submitted(
-            &conn,
-            test_test.test_id.clone(),
-        );
+        let test_run =
+            insert_test_run_with_test_id_and_status_eval_submitted(&conn, test_test.test_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "12345612-d114-4194-a7f7-9e41211ca2ce",
@@ -2324,7 +2292,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, template_id);
         let test_run = insert_test_run_with_test_id_and_status(
             &conn,
-            test_test.test_id.clone(),
+            test_test.test_id,
             RunStatusEnum::Building,
         );
         let test_software_version = insert_test_software_version(&conn);
@@ -2371,7 +2339,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
         let test_run = insert_test_run_with_test_id_and_status(
             &conn,
-            test_test.test_id.clone(),
+            test_test.test_id,
             RunStatusEnum::Building,
         );
         let test_software_version = insert_test_software_version(&conn);
@@ -2428,7 +2396,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
         let test_run = insert_test_run_with_test_id_and_status(
             &conn,
-            test_test.test_id.clone(),
+            test_test.test_id,
             RunStatusEnum::Building,
         );
         let test_software_version = insert_test_software_version(&conn);

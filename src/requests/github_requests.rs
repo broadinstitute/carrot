@@ -7,7 +7,7 @@ use mockito;
 use serde_json::json;
 use std::{error, fmt};
 
-static GITHUB_BASE_ADDRESS: &'static str = "https://api.github.com";
+static GITHUB_BASE_ADDRESS: &str = "https://api.github.com";
 
 /// Struct for interacting with the GitHub api
 pub struct GithubClient {

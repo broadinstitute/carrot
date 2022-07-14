@@ -71,7 +71,7 @@ impl Emailer {
     /// it is `Sendmail`.
     pub fn send_email(
         &self,
-        addresses: Vec<&str>,
+        addresses: &[&str],
         subject: &str,
         message: &str,
     ) -> Result<(), Error> {
@@ -81,11 +81,11 @@ impl Emailer {
             EmailConfig::Server(email_server_config) => {
                 // Set up email to send
                 let email =
-                    Emailer::build_email(&addresses, subject, message, email_server_config.from())?;
+                    Emailer::build_email(addresses, subject, message, email_server_config.from())?;
                 // Send it
                 Emailer::send_email_server_mode(
                     email,
-                    &email_server_config.domain(),
+                    email_server_config.domain(),
                     email_server_config.username(),
                     email_server_config.password(),
                 )
@@ -93,7 +93,7 @@ impl Emailer {
             EmailConfig::Sendmail(email_sendmail_config) => {
                 // Set up email to send
                 let email = Emailer::build_email(
-                    &addresses,
+                    addresses,
                     subject,
                     message,
                     email_sendmail_config.from(),
@@ -125,7 +125,7 @@ impl Emailer {
     /// Assembles and returns a lettre email based on `addresses`, `subject`, `message`, and `from`.
     /// Values in `addresses` will be bcc'd (instead of just sticking them all in the `to` field)
     fn build_email(
-        addresses: &Vec<&str>,
+        addresses: &[&str],
         subject: &str,
         message: &str,
         from: &str,
@@ -137,7 +137,7 @@ impl Emailer {
             .text(message);
 
         for address in addresses {
-            email = email.bcc(*address)
+            email = email.bcc(*address);
         }
 
         let email = email.build()?;
@@ -161,11 +161,13 @@ impl Emailer {
             SmtpClient::new_simple(domain).expect("Failed to create smtp client for sending email");
 
         // If we have credentials, add those to the client setup
-        if username.is_some() && password.is_some() {
-            mailer = mailer.credentials(Credentials::new(
-                String::from(username.unwrap()),
-                String::from(password.unwrap()),
-            ));
+        if let Some(username_val) = username {
+            if let Some(password_val) = password {
+                mailer = mailer.credentials(Credentials::new(
+                    String::from(username_val),
+                    String::from(password_val),
+                ));
+            }
         }
 
         // Convert to transport to prepare to send
@@ -242,7 +244,7 @@ mod tests {
         let test_subject = "Test Subject";
         let test_message = "This is a test message";
 
-        if let Err(e) = test_emailer.send_email(vec![test_address], test_subject, test_message) {
+        if let Err(e) = test_emailer.send_email(&vec![test_address], test_subject, test_message) {
             panic!("Send email failed with error: {}", e);
         };
 
@@ -300,7 +302,7 @@ mod tests {
         let test_subject = "Test Subject";
         let test_message = "This is a test message";
 
-        match test_emailer.send_email(test_addresses, test_subject, test_message) {
+        match test_emailer.send_email(&test_addresses, test_subject, test_message) {
             Err(e) => match e {
                 super::Error::Build(_) => {}
                 _ => panic!("Send email failed with unexpected error: {}", e),

@@ -121,10 +121,10 @@ impl From<std::io::Error> for Error {
 /// 4. A field is encountered that is not present in either of the expected field lists
 pub async fn extract_data_from_multipart(
     mut payload: Multipart,
-    expected_text_fields: &Vec<&str>,
-    expected_file_fields: &Vec<&str>,
-    required_text_fields: &Vec<&str>,
-    required_file_fields: &Vec<&str>,
+    expected_text_fields: &[&str],
+    expected_file_fields: &[&str],
+    required_text_fields: &[&str],
+    required_file_fields: &[&str],
 ) -> Result<(HashMap<String, String>, HashMap<String, NamedTempFile>), Error> {
     // Build maps of the fields we process to return
     let mut string_map: HashMap<String, String> = HashMap::new();
@@ -236,8 +236,8 @@ pub fn multipart_content_type_guard(req: &RequestHead) -> bool {
 /// Returns () if `string_map` contains all the keys in `required_text_fields` and `file_map`
 /// contains all the keys in `required_file_fields`.  Otherwise, returns an error
 fn check_for_required_fields(
-    required_text_fields: &Vec<&str>,
-    required_file_fields: &Vec<&str>,
+    required_text_fields: &[&str],
+    required_file_fields: &[&str],
     string_map: &HashMap<String, String>,
     file_map: &HashMap<String, NamedTempFile>,
 ) -> Result<(), Error> {

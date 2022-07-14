@@ -34,6 +34,7 @@ impl Config {
     /// 1. A value for `github` and None for `custom_image_build`,
     /// 2. A value for `custom_image_builds` and None for `gcloud`, or
     /// 3. A value for `reporting` and None for `gcloud`
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         logging: LoggingConfig,
         api: ApiConfig,
@@ -323,10 +324,7 @@ pub enum EmailConfig {
 
 impl EmailConfig {
     pub fn is_server(&self) -> bool {
-        match self {
-            EmailConfig::Server(_) => true,
-            _ => false,
-        }
+        matches!(self, EmailConfig::Server(_))
     }
     pub fn as_server(&self) -> Option<&EmailServerConfig> {
         match self {
@@ -335,10 +333,7 @@ impl EmailConfig {
         }
     }
     pub fn is_sendmail(&self) -> bool {
-        match self {
-            EmailConfig::Sendmail(_) => true,
-            _ => false,
-        }
+        matches!(self, EmailConfig::Sendmail(_))
     }
     pub fn as_sendmail(&self) -> Option<&EmailSendmailConfig> {
         match self {
@@ -437,15 +432,12 @@ pub enum WdlStorageConfig {
     Local(LocalWdlStorageConfig),
     /// Mode for storing wdls in a GCS bucket
     #[serde(rename = "gcs")]
-    GCS(GCSWdlStorageConfig),
+    Gcs(GCSWdlStorageConfig),
 }
 
 impl WdlStorageConfig {
     pub fn is_local(&self) -> bool {
-        match self {
-            WdlStorageConfig::Local(_) => true,
-            _ => false,
-        }
+        matches!(self, WdlStorageConfig::Local(_))
     }
     pub fn as_local(&self) -> Option<&LocalWdlStorageConfig> {
         match self {
@@ -454,14 +446,11 @@ impl WdlStorageConfig {
         }
     }
     pub fn is_gcs(&self) -> bool {
-        match self {
-            WdlStorageConfig::GCS(_) => true,
-            _ => false,
-        }
+        matches!(self, WdlStorageConfig::Gcs(_))
     }
     pub fn as_gcs(&self) -> Option<&GCSWdlStorageConfig> {
         match self {
-            WdlStorageConfig::GCS(s) => Some(s),
+            WdlStorageConfig::Gcs(s) => Some(s),
             _ => None,
         }
     }
@@ -469,7 +458,7 @@ impl WdlStorageConfig {
     /// gs uri
     pub fn wdl_location(&self) -> &String {
         match self {
-            WdlStorageConfig::GCS(gcs_config) => gcs_config.wdl_location(),
+            WdlStorageConfig::Gcs(gcs_config) => gcs_config.wdl_location(),
             WdlStorageConfig::Local(local_config) => local_config.wdl_location(),
         }
     }

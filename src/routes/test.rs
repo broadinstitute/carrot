@@ -6,10 +6,10 @@
 use crate::db;
 use crate::models::test::{NewTest, TestChangeset, TestData, TestQuery, UpdateError};
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use crate::routes::util::parse_id;
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
 use serde_json::json;
-use uuid::Uuid;
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
 ///
@@ -19,26 +19,18 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Query DB for test in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TestData::find_by_id(&conn, id) {
@@ -50,23 +42,27 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    .map(|results| {
-        // If there is no error, return a response with the retrieved data
-        HttpResponse::Ok().json(results)
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no test is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No test found".to_string(),
-                status: 404,
-                detail: "No test found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        Ok(results) => {
+            // If there is no error, return a response with the retrieved data
+            HttpResponse::Ok().json(results)
         }
-    })
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no test is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No test found".to_string(),
+                        status: 404,
+                        detail: "No test found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
+        }
+    }
 }
 
 /// Handles requests to /tests for retrieving test info by query parameters
@@ -81,9 +77,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 async fn find(
     web::Query(query): web::Query<TestQuery>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Query DB for tests in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TestData::find(&conn, query) {
@@ -95,24 +91,26 @@ async fn find(
         }
     })
     .await
-    .map(|results| {
-        if results.len() < 1 {
-            // If no test is found, return a 404
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No test found".to_string(),
-                status: 404,
-                detail: "No tests found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            if results.is_empty() {
+                // If no test is found, return a 404
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No test found".to_string(),
+                    status: 404,
+                    detail: "No tests found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(results)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // For any errors, return a 500
-        default_500(&e)
-    })
+        Err(e) => {
+            error!("{}", e);
+            // For any errors, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /tests for creating tests
@@ -127,9 +125,9 @@ async fn find(
 async fn create(
     web::Json(new_test): web::Json<NewTest>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     //Insert in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TestData::create(&conn, new_test) {
@@ -141,13 +139,15 @@ async fn create(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // For any errors, return a 500
-        default_500(&e)
-    })
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // For any errors, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /tests/{id} for updating a test
@@ -163,23 +163,15 @@ async fn update(
     id: web::Path<String>,
     web::Json(test_changes): web::Json<TestChangeset>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     //Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Update in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TestData::update(&conn, id, test_changes) {
@@ -191,21 +183,23 @@ async fn update(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            BlockingError::Error(UpdateError::Prohibited(_)) => {
-                HttpResponse::Forbidden().json(ErrorBody {
-                    title: "Update params not allowed".to_string(),
-                    status: 403,
-                    detail: "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded".to_string(),
-                })
-            },
-            _ => default_500(&e)
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                BlockingError::Error(UpdateError::Prohibited(_)) => {
+                    HttpResponse::Forbidden().json(ErrorBody {
+                        title: "Update params not allowed".to_string(),
+                        status: 403,
+                        detail: "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded".to_string(),
+                    })
+                },
+                _ => default_500(&e)
+            }
         }
-    })
+    }
 }
 
 /// Handles DELETE requests to /tests/{id} for deleting test rows by test_id
@@ -217,26 +211,18 @@ async fn update(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Query DB for template in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match TestData::delete(&conn, id) {
@@ -248,35 +234,37 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
         }
     })
     .await
-    // If there is no error, verify that a row was deleted
-    .map(|results| {
-        if results > 0 {
-            let message = format!("Successfully deleted {} row", results);
-            HttpResponse::Ok().json(json!({ "message": message }))
-        } else {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No test found".to_string(),
-                status: 404,
-                detail: "No test found for the specified id".to_string(),
-            })
+    {
+        // If there is no error, verify that a row was deleted
+        Ok(results) => {
+            if results > 0 {
+                let message = format!("Successfully deleted {} row", results);
+                HttpResponse::Ok().json(json!({ "message": message }))
+            } else {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No test found".to_string(),
+                    status: 404,
+                    detail: "No test found for the specified id".to_string(),
+                })
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no template is found, return a 404
-            BlockingError::Error(diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                _,
-            )) => HttpResponse::Forbidden().json(ErrorBody {
-                title: "Cannot delete".to_string(),
-                status: 403,
-                detail: "Cannot delete a test if there are runs mapped to it".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no template is found, return a 404
+                BlockingError::Error(diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                    _,
+                )) => HttpResponse::Forbidden().json(ErrorBody {
+                    title: "Cannot delete".to_string(),
+                    status: 403,
+                    detail: "Cannot delete a test if there are runs mapped to it".to_string(),
+                }),
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

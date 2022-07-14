@@ -7,9 +7,9 @@ use crate::db;
 use crate::models::software_version::{SoftwareVersionData, SoftwareVersionQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use crate::routes::util::parse_id;
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
-use uuid::Uuid;
 
 /// Handles requests to /software_versions/{id} for retrieving software_version info by software_version_id
 ///
@@ -20,26 +20,18 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database software_versions in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Query DB for software_version in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareVersionData::find_by_id(&conn, id) {
@@ -51,21 +43,25 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|software_versions| HttpResponse::Ok().json(software_versions))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no software_version is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No software_version found".to_string(),
-                status: 404,
-                detail: "No software_version found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(software_versions) => HttpResponse::Ok().json(software_versions),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no software_version is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No software_version found".to_string(),
+                        status: 404,
+                        detail: "No software_version found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })
+    }
 }
 
 /// Handles requests to /software_versions for retrieving software_version info by query parameters
@@ -80,9 +76,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Respo
 async fn find(
     web::Query(query): web::Query<SoftwareVersionQuery>,
     pool: web::Data<db::DbPool>,
-) -> impl Responder {
+) -> HttpResponse {
     // Query DB for software_versions in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareVersionData::find(&conn, query) {
@@ -94,24 +90,26 @@ async fn find(
         }
     })
     .await
-    .map(|software_versions| {
-        // If no software_version is found, return a 404
-        if software_versions.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No software_version found".to_string(),
-                status: 404,
-                detail: "No software_versions found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(software_versions)
+    {
+        Ok(software_versions) => {
+            // If no software_version is found, return a 404
+            if software_versions.is_empty() {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No software_version found".to_string(),
+                    status: 404,
+                    detail: "No software_versions found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(software_versions)
+            }
         }
-    })
-    .map_err(|e| {
-        // For any errors, return a 500
-        error!("{}", e);
-        default_500(&e)
-    })
+        Err(e) => {
+            // For any errors, return a 500
+            error!("{}", e);
+            default_500(&e)
+        }
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

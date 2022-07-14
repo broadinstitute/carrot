@@ -2,8 +2,8 @@
 
 use crate::config::{GCSWdlStorageConfig, LocalWdlStorageConfig, WdlStorageConfig};
 use crate::models::wdl_hash::{WdlDataToHash, WdlHashData};
-use crate::storage::gcloud_storage;
-use crate::storage::gcloud_storage::GCloudClient;
+use crate::requests::gcloud_storage;
+use crate::requests::gcloud_storage::GCloudClient;
 use crate::util::gs_uri_parsing;
 use diesel::PgConnection;
 use std::fmt;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 pub enum Error {
     IO(std::io::Error),
     DB(diesel::result::Error),
-    GCS(gcloud_storage::Error),
+    Gcs(gcloud_storage::Error),
 }
 
 impl fmt::Display for Error {
@@ -24,7 +24,7 @@ impl fmt::Display for Error {
         match self {
             Error::IO(e) => write!(f, "WDL Storage Error IO {}", e),
             Error::DB(e) => write!(f, "WDL Storage Error DB {}", e),
-            Error::GCS(e) => write!(f, "WDL Storage Error GCS {}", e),
+            Error::Gcs(e) => write!(f, "WDL Storage Error GCS {}", e),
         }
     }
 }
@@ -43,7 +43,7 @@ impl From<diesel::result::Error> for Error {
 }
 impl From<gcloud_storage::Error> for Error {
     fn from(e: gcloud_storage::Error) -> Error {
-        Error::GCS(e)
+        Error::Gcs(e)
     }
 }
 
@@ -66,7 +66,7 @@ impl WdlStorageClient {
     /// in gcs and `gcloud_client` to communicate with gcs
     pub fn new_gcs(config: GCSWdlStorageConfig, gcloud_client: GCloudClient) -> WdlStorageClient {
         WdlStorageClient {
-            config: WdlStorageConfig::GCS(config),
+            config: WdlStorageConfig::Gcs(config),
             gcloud_client: Some(gcloud_client),
         }
     }
@@ -98,7 +98,7 @@ impl WdlStorageClient {
                     }),
                 )
             }
-            WdlStorageConfig::GCS(_) => self.store_wdl_in_gcs(wdl_contents, wdl_file_name).await?,
+            WdlStorageConfig::Gcs(_) => self.store_wdl_in_gcs(wdl_contents, wdl_file_name).await?,
         };
         // Write a hash record for it
         WdlHashData::create(
@@ -152,7 +152,7 @@ impl WdlStorageClient {
         let mut wdl_file: fs::File = fs::File::create(&file_path)?;
         wdl_file.write_all(wdl_contents)?;
         // Return a path to the file
-        return Ok(file_path);
+        Ok(file_path)
     }
 
     /// Hashes wdl_string and checks if a record of it already exists.  If so, returns the existing
@@ -170,10 +170,10 @@ impl WdlStorageClient {
         for wdl_hash in existing_wdl_hashes {
             if wdl_hash.location.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
                 if self.config.is_gcs() {
-                    return Ok(Some(wdl_hash.location.to_owned()));
+                    return Ok(Some(wdl_hash.location));
                 }
             } else if self.config.is_local() {
-                return Ok(Some(wdl_hash.location.to_owned()));
+                return Ok(Some(wdl_hash.location));
             }
         }
         // If we didn't find a hash matching the current scheme for wdl storage, return None
@@ -185,8 +185,8 @@ impl WdlStorageClient {
 mod tests {
     use crate::config::{GCSWdlStorageConfig, WdlStorageConfig};
     use crate::models::wdl_hash::{WdlDataToHash, WdlHashData};
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::storage::gcloud_storage::GCloudClient;
     use crate::unit_test_util;
     use crate::util::wdl_storage::{Error, WdlStorageClient};
     use actix_web::client::Client;
@@ -314,7 +314,7 @@ mod tests {
             |data: &[u8],
              address: &str,
              name: &str|
-             -> Result<String, crate::storage::gcloud_storage::Error> {
+             -> Result<String, crate::requests::gcloud_storage::Error> {
                 // We'll check here to make sure we sent the correct data to GCloudClient
                 assert_eq!(data, b"Test");
                 assert_eq!(name, "test.wdl");
@@ -358,7 +358,7 @@ mod tests {
             |data: &[u8],
              address: &str,
              name: &str|
-             -> Result<String, crate::storage::gcloud_storage::Error> {
+             -> Result<String, crate::requests::gcloud_storage::Error> {
                 // We'll check here to make sure we sent the correct data to GCloudClient
                 assert_eq!(data, b"Test");
                 assert_eq!(name, "test.wdl");
@@ -420,7 +420,7 @@ mod tests {
             |data: &[u8],
              address: &str,
              name: &str|
-             -> Result<String, crate::storage::gcloud_storage::Error> {
+             -> Result<String, crate::requests::gcloud_storage::Error> {
                 // We'll check here to make sure we sent the correct data to GCloudClient
                 assert_eq!(data, b"Test");
                 assert_eq!(name, "test.wdl");
@@ -432,9 +432,9 @@ mod tests {
                 // Try to parse uuid
                 Uuid::parse_str(uuid).expect("Failed to parse uuid component of address as uuid");
                 // Now we'll return a failure
-                Err(crate::storage::gcloud_storage::Error::Failed(String::from(
-                    "Didn't work",
-                )))
+                Err(crate::requests::gcloud_storage::Error::Failed(
+                    String::from("Didn't work"),
+                ))
             },
         ));
 
@@ -452,7 +452,7 @@ mod tests {
 
         // Verify that we got the error we expected
         match store_wdl_error {
-            Error::GCS(crate::storage::gcloud_storage::Error::Failed(message)) => {
+            Error::Gcs(crate::requests::gcloud_storage::Error::Failed(message)) => {
                 assert_eq!(message, "Didn't work");
             }
             _ => panic!("Did not get failed gcs error"),

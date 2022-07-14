@@ -3,9 +3,7 @@
 //! A template_report is a mapping from a template to a report that can be generated from its runs,
 //! along with associated metadata.  Represented in the database by the TEMPLATE_REPORT table.
 
-use crate::custom_sql_types::{
-    ReportStatusEnum, RunStatusEnum, REPORT_FAILURE_STATUSES, RUN_FAILURE_STATUSES,
-};
+use crate::custom_sql_types::{REPORT_FAILURE_STATUSES, RUN_FAILURE_STATUSES};
 use crate::schema::run;
 use crate::schema::run_report;
 use crate::schema::template_report;
@@ -139,7 +137,7 @@ impl TemplateReportData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "template_id" => {
@@ -272,24 +270,14 @@ impl TemplateReportData {
             .select(test::dsl::test_id);
         let run_subquery = run::dsl::run
             .filter(run::dsl::test_id.eq(any(test_subquery)))
-            .filter(
-                run::dsl::status.ne(all(RUN_FAILURE_STATUSES
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<RunStatusEnum>>())),
-            )
+            .filter(run::dsl::status.ne(all(RUN_FAILURE_STATUSES.to_vec())))
             .select(run::dsl::run_id);
         // Get any non-failed run_reports associated the specified report and any non-failed runs
         // associated with the specified template
         let relevant_run_reports_result = run_report::dsl::run_report
             .filter(run_report::dsl::report_id.eq(query_report_id))
             .filter(run_report::dsl::run_id.eq(any(run_subquery)))
-            .filter(
-                run_report::dsl::status.ne(all(REPORT_FAILURE_STATUSES
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<ReportStatusEnum>>())),
-            )
+            .filter(run_report::dsl::status.ne(all(REPORT_FAILURE_STATUSES.to_vec())))
             .select(run_report::dsl::run_id)
             .first::<Uuid>(conn);
 

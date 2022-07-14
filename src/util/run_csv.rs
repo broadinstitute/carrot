@@ -17,7 +17,7 @@ use zip::ZipWriter;
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
-    CSV(csv::Error),
+    Csv(csv::Error),
     Zip(zip::result::ZipError),
 }
 
@@ -27,7 +27,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Error::IO(e) => write!(f, "run_csv Error IO {}", e),
-            Error::CSV(e) => write!(f, "run_csv Error CSV {}", e),
+            Error::Csv(e) => write!(f, "run_csv Error CSV {}", e),
             Error::Zip(e) => write!(f, "run_csv Error Zip {:?}", e),
         }
     }
@@ -41,7 +41,7 @@ impl From<std::io::Error> for Error {
 
 impl From<csv::Error> for Error {
     fn from(e: csv::Error) -> Error {
-        Error::CSV(e)
+        Error::Csv(e)
     }
 }
 
@@ -52,6 +52,7 @@ impl From<zip::result::ZipError> for Error {
 }
 
 /// Enum for type of csv file (of the types that are processed using build_rows)
+#[derive(Copy, Clone)]
 enum CSVContentsType {
     TestInput,
     EvalInput,
@@ -81,7 +82,7 @@ enum CSVContentsType {
 /// Zipping functionality is partially adapted from
 /// https://github.com/zip-rs/zip/blob/5d0f198124946b7be4e5969719a7f29f363118cd/examples/write_dir.rs
 pub fn write_run_data_to_csvs_and_zip_in_temp_dir(
-    runs: &Vec<RunWithResultsAndErrorsData>,
+    runs: &[RunWithResultsAndErrorsData],
 ) -> Result<TempDir, Error> {
     let csv_dir: TempDir = write_run_data_to_csvs_in_temp_dir(runs)?;
     // Create a file to write the data to
@@ -132,7 +133,7 @@ pub fn write_run_data_to_csvs_and_zip_in_temp_dir(
 /// - results.csv - contains a row for each run with its run id and the contents of the results
 ///                 json for that run, with the result names as column headers
 pub fn write_run_data_to_csvs_in_temp_dir(
-    runs: &Vec<RunWithResultsAndErrorsData>,
+    runs: &[RunWithResultsAndErrorsData],
 ) -> Result<TempDir, Error> {
     // Create the tempdir we'll put the files in
     let csv_dir = TempDir::new()?;
@@ -164,7 +165,7 @@ pub fn write_run_data_to_csvs_in_temp_dir(
 }
 
 /// Builds and returns a vec of rows to write to a metadata csv file for `runs`
-fn build_metadata_rows(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<Vec<String>> {
+fn build_metadata_rows(runs: &[RunWithResultsAndErrorsData]) -> Vec<Vec<String>> {
     // Start by creating header row
     let header_row: Vec<String> = vec![
         String::from("run_id"),
@@ -185,7 +186,7 @@ fn build_metadata_rows(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<Vec<Strin
         rows.push(vec![
             run.run_id.to_string(),
             run.test_id.to_string(),
-            run.name.to_owned(),
+            run.name.clone(),
             run.status.to_string(),
             match &run.test_cromwell_job_id {
                 Some(t) => t.to_string(),
@@ -218,7 +219,7 @@ fn build_metadata_rows(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<Vec<Strin
 /// with its run_id and values corresponding to `csv_contents_type` (e.g. if `csv_contents_type` is
 /// CSVContentsType::TestInputs, the row will contain the values in the run's test_input field)
 fn build_rows(
-    runs: &Vec<RunWithResultsAndErrorsData>,
+    runs: &[RunWithResultsAndErrorsData],
     csv_contents_type: CSVContentsType,
 ) -> Vec<Vec<String>> {
     // First, we'll build our header row
@@ -249,7 +250,7 @@ fn build_rows(
         // Loop through its keys and add any new ones to headers
         for key in processed_map.keys() {
             if !headers.contains(key) {
-                headers.insert(key.to_owned());
+                headers.insert(key.clone());
             }
         }
         // Make sure we hold on to processed_map for later
@@ -288,7 +289,7 @@ fn build_rows(
                 )
             });
             // Insert the value into the row
-            row[index] = val.to_owned();
+            row[index] = val.clone();
         }
         rows.push(row);
     }
@@ -307,7 +308,7 @@ fn get_object_as_map_with_string_values(value: &Value) -> HashMap<String, String
             let mut processed_map: HashMap<String, String> = HashMap::new();
             // Loop through key,val pairs in object_map and add them to processed map
             for (key, val) in object_map.iter() {
-                processed_map.insert(key.to_owned(), get_string_for_json_value(val));
+                processed_map.insert(key.clone(), get_string_for_json_value(val));
             }
             processed_map
         }
@@ -326,7 +327,7 @@ fn get_object_as_map_with_string_values(value: &Value) -> HashMap<String, String
 fn get_string_for_json_value(value: &Value) -> String {
     match value {
         // If it's a string, get the actual string value
-        Value::String(s) => s.to_owned(),
+        Value::String(s) => s.clone(),
         // Any other type, just get the string representation of the json value
         _ => value.to_string(),
     }

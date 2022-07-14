@@ -11,8 +11,8 @@ use crate::models::template::TemplateData;
 use crate::models::template_report::{TemplateReportData, TemplateReportQuery};
 use crate::models::test::TestData;
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
-use crate::storage::gcloud_storage;
-use crate::storage::gcloud_storage::GCloudClient;
+use crate::requests::gcloud_storage;
+use crate::requests::gcloud_storage::GCloudClient;
 use crate::util::{run_csv, temp_storage};
 use core::fmt;
 use diesel::PgConnection;
@@ -39,12 +39,12 @@ pub enum Error {
     Parse(String),
     Json(serde_json::Error),
     FromUtf8(std::string::FromUtf8Error),
-    GCS(gcloud_storage::Error),
+    Gcs(gcloud_storage::Error),
     IO(std::io::Error),
     Cromwell(CromwellRequestError),
     Prohibited(String),
     Autosize(String),
-    CSV(run_csv::Error),
+    Csv(run_csv::Error),
 }
 
 impl std::error::Error for Error {}
@@ -56,12 +56,12 @@ impl fmt::Display for Error {
             Error::Parse(e) => write!(f, "report_builder Error Parse {}", e),
             Error::Json(e) => write!(f, "report_builder Error Json {}", e),
             Error::FromUtf8(e) => write!(f, "report_builder Error FromUtf8 {}", e),
-            Error::GCS(e) => write!(f, "report_builder Error GCS {}", e),
+            Error::Gcs(e) => write!(f, "report_builder Error GCS {}", e),
             Error::IO(e) => write!(f, "report_builder Error IO {}", e),
             Error::Cromwell(e) => write!(f, "report_builder Error Cromwell {}", e),
             Error::Prohibited(e) => write!(f, "report_builder Error Exists {}", e),
             Error::Autosize(e) => write!(f, "report_builder Error Autosize {}", e),
-            Error::CSV(e) => write!(f, "report_builder Error CSV {}", e),
+            Error::Csv(e) => write!(f, "report_builder Error CSV {}", e),
         }
     }
 }
@@ -86,7 +86,7 @@ impl From<std::string::FromUtf8Error> for Error {
 
 impl From<gcloud_storage::Error> for Error {
     fn from(e: gcloud_storage::Error) -> Error {
-        Error::GCS(e)
+        Error::Gcs(e)
     }
 }
 
@@ -104,15 +104,15 @@ impl From<CromwellRequestError> for Error {
 
 impl From<run_csv::Error> for Error {
     fn from(e: run_csv::Error) -> Error {
-        Error::CSV(e)
+        Error::Csv(e)
     }
 }
 
 /// The name of the workflow in the jupyter_report_generator_template.wdl file
-const GENERATOR_WORKFLOW_NAME: &'static str = "generate_report_file_workflow";
+const GENERATOR_WORKFLOW_NAME: &str = "generate_report_file_workflow";
 
 /// A list of all optional runtime attributes that can be supplied to the report generator wdl
-const GENERATOR_WORKFLOW_RUNTIME_ATTRS: [&'static str; 9] = [
+const GENERATOR_WORKFLOW_RUNTIME_ATTRS: [&str; 9] = [
     "cpu",
     "memory",
     "disks",
@@ -136,7 +136,7 @@ impl ReportBuilder {
         ReportBuilder {
             cromwell_client,
             gcloud_client,
-            config: config.to_owned(),
+            config: config.clone(),
         }
     }
 
@@ -171,7 +171,7 @@ impl ReportBuilder {
         // Write data to csvs and upload so the reports can use them
         let run_csv_zip_location: String = self.create_and_upload_run_csvs(&run_in_vec).await?;
         // If there are reports to generate, generate them
-        if template_reports.len() > 0 {
+        if !template_reports.is_empty() {
             // Loop through the mappings and create a report for each
             for mapping in template_reports {
                 debug!(
@@ -255,33 +255,32 @@ impl ReportBuilder {
         let report = ReportData::find_by_id(conn, report_id)?;
         let test = TestData::find_by_id(conn, run.test_id)?;
         // Build the notebook we will submit from the notebook specified in the report and the run data
-        let report_json =
-            ReportBuilder::create_report_template(&report.notebook, &run, &test.name)?;
+        let report_json = ReportBuilder::create_report_template(&report.notebook, run, &test.name)?;
         // Upload the report json as a file to a GCS location where cromwell will be able to read it
         let report_template_location = self
             .upload_report_template(&report_json, &report.name, &run.name)
             .await?;
         // Figure out how much disk space we need
-        let disk_space = self.get_disk_size_based_on_results(&run).await?;
+        let disk_space = self.get_disk_size_based_on_results(run).await?;
         // Build the input json we'll include in the cromwell request, with the docker and report
         // locations and any config attributes from the report config
         let input_json = ReportBuilder::create_input_json(
             &report_template_location,
-            &self.config.report_docker_location(),
+            self.config.report_docker_location(),
             &format!("local-disk {} HDD", disk_space),
             run_csv_zip_location,
             &report.config,
         )?;
         // Write it to a file
-        let json_file = temp_storage::get_temp_file(&input_json.to_string().as_bytes())?;
+        let json_file = temp_storage::get_temp_file(input_json.to_string().as_bytes())?;
         // Write the wdl to a file
         let wdl_file = temp_storage::get_temp_file(generator_wdl.as_bytes())?;
         // Submit report generation job to cromwell
         let start_job_response = util::start_job_from_file(
             &self.cromwell_client,
-            &wdl_file.path(),
+            wdl_file.path(),
             None,
-            &json_file.path(),
+            json_file.path(),
             None,
         )
         .await?;
@@ -304,7 +303,7 @@ impl ReportBuilder {
     /// the uploaded zip
     async fn create_and_upload_run_csvs(
         &self,
-        runs: &Vec<RunWithResultsAndErrorsData>,
+        runs: &[RunWithResultsAndErrorsData],
     ) -> Result<String, Error> {
         // First make the csvs
         let runs_csvs_dir: TempDir = run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(runs)?;
@@ -317,7 +316,7 @@ impl ReportBuilder {
         // Upload the zip to GCS
         Ok(self
             .gcloud_client
-            .upload_file_to_gs_uri(&zip_file, &self.config.report_location(), &zip_location)
+            .upload_file_to_gs_uri(&zip_file, self.config.report_location(), &zip_location)
             .await?)
     }
 
@@ -374,7 +373,7 @@ impl ReportBuilder {
         let notebook_cells = ReportBuilder::get_cells_array_from_notebook(&report_template)?;
         // Our new cells array will contain the metadata cell followed by the current cells
         let mut cells: Vec<Value> = vec![metadata_cell];
-        cells.extend(notebook_cells.to_owned());
+        cells.extend(notebook_cells.clone());
         // Add our new cells array back to report_template (we can unwrap here because we already
         match report_template.as_object_mut() {
             Some(report_as_map) => {
@@ -475,7 +474,7 @@ impl ReportBuilder {
         run_name: &str,
     ) -> Result<String, Error> {
         // Write the json to a temporary file
-        let report_file = match temp_storage::get_temp_file(&report_json.to_string().as_bytes()) {
+        let report_file = match temp_storage::get_temp_file(report_json.to_string().as_bytes()) {
             Ok(file) => file,
             Err(e) => {
                 error!("Failed to create temp file for uploading report template");
@@ -488,7 +487,7 @@ impl ReportBuilder {
         // Upload that file to GCS
         Ok(self
             .gcloud_client
-            .upload_file_to_gs_uri(&report_file, &self.config.report_location(), &report_name)
+            .upload_file_to_gs_uri(&report_file, self.config.report_location(), &report_name)
             .await?)
     }
 
@@ -544,7 +543,7 @@ impl ReportBuilder {
                     // report_config contains the key)
                     inputs_map.insert(
                         format!("{}.{}", GENERATOR_WORKFLOW_NAME, attribute),
-                        report_config_map.get(*attribute).unwrap().to_owned(),
+                        report_config_map.get(*attribute).unwrap().clone(),
                     );
                 }
             }
@@ -649,7 +648,7 @@ mod tests {
     use crate::models::template_result::{NewTemplateResult, TemplateResultData};
     use crate::models::test::{NewTest, TestData};
     use crate::requests::cromwell_requests::CromwellClient;
-    use crate::storage::gcloud_storage::GCloudClient;
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::unit_test_util::{get_test_db_connection, load_default_config};
     use actix_web::client::Client;
     use chrono::{NaiveDateTime, Utc};
@@ -742,7 +741,7 @@ mod tests {
 
         let new_run_result = NewRunResult {
             run_id: run.run_id,
-            result_id: new_result.result_id.clone(),
+            result_id: new_result.result_id,
             value: "Yo, Jean-Paul Gasse".to_string(),
         };
 
@@ -911,7 +910,7 @@ mod tests {
         // report builder
         let mut gcloud_client = GCloudClient::new(&String::from("Test"));
         gcloud_client.set_retrieve_object(Box::new(
-            |address: &str| -> Result<Object, crate::storage::gcloud_storage::Error> {
+            |address: &str| -> Result<Object, crate::requests::gcloud_storage::Error> {
                 let object_metadata = {
                     let mut test_object = google_storage1::Object::default();
                     test_object.size = Some(String::from("610035000"));
@@ -924,7 +923,7 @@ mod tests {
             |f: &File,
              address: &str,
              name: &str|
-             -> Result<String, crate::storage::gcloud_storage::Error> {
+             -> Result<String, crate::requests::gcloud_storage::Error> {
                 Ok(String::from(address.to_owned() + "/" + name))
             },
         ));

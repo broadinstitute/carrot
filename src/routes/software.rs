@@ -7,10 +7,10 @@ use crate::db;
 use crate::models::software::{NewSoftware, SoftwareChangeset, SoftwareData, SoftwareQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
+use crate::routes::util::parse_id;
 use crate::util::git_repos;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
-use uuid::Uuid;
 
 /// Handles requests to /software/{id} for retrieving software info by software_id
 ///
@@ -21,29 +21,18 @@ use uuid::Uuid;
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(
-    req: HttpRequest,
-    pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        // If it doesn't parse successfully, return an error to the user
-        Err(e) => {
-            error!("{}", e);
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Query DB for software in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareData::find_by_id(&conn, id) {
@@ -52,23 +41,25 @@ async fn find_by_id(
         }
     })
     .await
-    // If there is no error, return a response with the retrieved data
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If no software is found, return a 404
-            BlockingError::Error(diesel::NotFound) => HttpResponse::NotFound().json(ErrorBody {
-                title: "No software found".to_string(),
-                status: 404,
-                detail: "No software found with the specified ID".to_string(),
-            }),
-            // For other errors, return a 500
-            _ => default_500(&e),
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If no software is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No software found".to_string(),
+                        status: 404,
+                        detail: "No software found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
         }
-    })?;
-
-    Ok(res)
+    }
 }
 
 /// Handles requests to /software for retrieving software info by query parameters
@@ -83,9 +74,9 @@ async fn find_by_id(
 async fn find(
     web::Query(query): web::Query<SoftwareQuery>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Query DB for software in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareData::find(&conn, query) {
@@ -97,26 +88,26 @@ async fn find(
         }
     })
     .await
-    .map(|results| {
-        // If there are no results, return a 404
-        if results.len() < 1 {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No software found".to_string(),
-                status: 404,
-                detail: "No software found with the specified parameters".to_string(),
-            })
-        } else {
-            // If there is no error, return a response with the retrieved data
-            HttpResponse::Ok().json(results)
+    {
+        Ok(results) => {
+            // If there are no results, return a 404
+            if results.is_empty() {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No software found".to_string(),
+                    status: 404,
+                    detail: "No software found with the specified parameters".to_string(),
+                })
+            } else {
+                // If there is no error, return a response with the retrieved data
+                HttpResponse::Ok().json(results)
+            }
         }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-
-    Ok(res)
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /software for creating software
@@ -132,7 +123,7 @@ async fn create(
     web::Json(new_software): web::Json<NewSoftware>,
     pool: web::Data<db::DbPool>,
     git_repo_checker: web::Data<git_repos::GitRepoChecker>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Verify the repository_url points to a valid git repo
     match git_repo_checker.git_repo_exists(&new_software.repository_url) {
         Ok(val) => {
@@ -142,27 +133,27 @@ async fn create(
                     "Failed to validate existence of git repo at {}",
                     &new_software.repository_url
                 );
-                return Ok(HttpResponse::BadRequest().json(ErrorBody {
+                return HttpResponse::BadRequest().json(ErrorBody {
                     title: "Git Repo does not exist".to_string(),
                     status: 400,
                     detail:
                         "Failed to verify the existence of a git repository at the specified url"
                             .to_string(),
-                }));
+                });
             }
         }
         Err(e) => {
             // If there was some error when attempting to find it, inform the user
             error!("Encountered an error while trying to verify the existence of a git repo at {} : {}", &new_software.repository_url, e);
-            return Ok(HttpResponse::InternalServerError().json(ErrorBody {
+            return HttpResponse::InternalServerError().json(ErrorBody {
                 title: "Server error".to_string(),
                 status: 500,
                 detail: "Error while attempting to verify the existence of a git repository at the specified url".to_string(),
-            }));
+            });
         }
     }
     // Insert in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareData::create(&conn, new_software) {
@@ -174,14 +165,15 @@ async fn create(
         }
     })
     .await
-    // If there is no error, return a response with the created software
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-    Ok(res)
+    {
+        // If there is no error, return a response with the created software
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Handles requests to /software/{id} for updating a software
@@ -197,23 +189,15 @@ async fn update(
     id: web::Path<String>,
     web::Json(software_changes): web::Json<SoftwareChangeset>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, actix_web::Error> {
+) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     // Update in new thread
-    let res = web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match SoftwareData::update(&conn, id, software_changes) {
@@ -225,15 +209,15 @@ async fn update(
         }
     })
     .await
-    // If there is no error, return a response with the updated software
-    .map(|results| HttpResponse::Ok().json(results))
-    .map_err(|e| {
-        error!("{}", e);
-        // If there is an error, return a 500
-        default_500(&e)
-    })?;
-
-    Ok(res)
+    {
+        // If there is no error, return a response with the updated software
+        Ok(results) => HttpResponse::Ok().json(results),
+        Err(e) => {
+            error!("{}", e);
+            // If there is an error, return a 500
+            default_500(&e)
+        }
+    }
 }
 
 /// Attaches the REST mappings in this file to a service config

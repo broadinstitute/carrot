@@ -13,7 +13,7 @@ use crate::routes::util::parse_id;
 use crate::util::run_csv;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
-use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use chrono::NaiveDateTime;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,6 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use uuid::Uuid;
 
 /// Optional query parameters for the find_by_id mapping
 #[derive(Deserialize, Debug)]
@@ -115,22 +114,14 @@ async fn find_by_id(
     req: HttpRequest,
     web::Query(query): web::Query<FindByIdQueryParams>,
     pool: web::Data<db::DbPool>,
-) -> Result<HttpResponse, HttpResponse> {
+) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     let return_csvs: bool = query.csv;
@@ -153,12 +144,15 @@ async fn find_by_id(
             // Return it as csvs if the user requested that
             if return_csvs {
                 // Build csv files from results
-                let zip_bytes: Vec<u8> = get_bytes_for_csv_zip_from_runs(&vec![results])?;
-                Ok(HttpResponse::Ok().body(zip_bytes))
+                let zip_bytes: Vec<u8> = match get_bytes_for_csv_zip_from_runs(&vec![results]) {
+                    Ok(zip_bytes) => zip_bytes,
+                    Err(error_response) => return error_response,
+                };
+                HttpResponse::Ok().body(zip_bytes)
             }
             // Otherwise, just return the json
             else {
-                Ok(HttpResponse::Ok().json(results))
+                HttpResponse::Ok().json(results)
             }
         }
         Err(e) => {
@@ -166,14 +160,14 @@ async fn find_by_id(
             match e {
                 // If no run is found, return a 404
                 BlockingError::Error(diesel::NotFound) => {
-                    Err(HttpResponse::NotFound().json(ErrorBody {
+                    HttpResponse::NotFound().json(ErrorBody {
                         title: "No run found".to_string(),
                         status: 404,
                         detail: "No run found with the specified ID".to_string(),
-                    }))
+                    })
                 }
                 // For other errors, return a 500
-                _ => Err(default_500(&e)),
+                _ => default_500(&e),
             }
         }
     }
@@ -194,7 +188,7 @@ async fn find_for_test(
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match parse_id(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
@@ -226,7 +220,7 @@ async fn find_for_template(
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match parse_id(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
@@ -258,7 +252,7 @@ async fn find_for_pipeline(
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
     // Parse ID into Uuid
-    let id = match parse_id(&*id) {
+    let id = match parse_id(&id) {
         Ok(id) => id,
         Err(error_response) => return error_response,
     };
@@ -294,7 +288,7 @@ async fn find(run_query: RunQuery, return_csvs: bool, pool: web::Data<db::DbPool
     {
         Ok(results) => {
             // If no run is found, return a 404
-            if results.len() < 1 {
+            if results.is_empty() {
                 HttpResponse::NotFound().json(ErrorBody {
                     title: "No run found".to_string(),
                     status: 404,
@@ -427,26 +421,18 @@ async fn run_for_test(
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Responder {
+async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
 
     // Parse ID into Uuid
-    let id = match Uuid::parse_str(id) {
+    let id = match parse_id(id) {
         Ok(id) => id,
-        Err(e) => {
-            error!("{}", e);
-            // If it doesn't parse successfully, return an error to the user
-            return Ok(HttpResponse::BadRequest().json(ErrorBody {
-                title: "ID formatted incorrectly".to_string(),
-                status: 400,
-                detail: "ID must be formatted as a Uuid".to_string(),
-            }));
-        }
+        Err(error_response) => return error_response,
     };
 
     //Query DB for pipeline in new thread
-    web::block(move || {
+    match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
         match RunData::delete(&conn, id) {
@@ -458,43 +444,45 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> impl Res
         }
     })
     .await
-    // If there is no error, verify that a row was deleted
-    .map(|results| {
-        if results > 0 {
-            let message = format!("Successfully deleted {} row", results);
-            HttpResponse::Ok().json(json!({ "message": message }))
-        } else {
-            HttpResponse::NotFound().json(ErrorBody {
-                title: "No run found".to_string(),
-                status: 404,
-                detail: "No run found for the specified id".to_string(),
-            })
-        }
-    })
-    .map_err(|e| {
-        error!("{}", e);
-        match e {
-            // If the run is not allowed to be deleted, return a forbidden status
-            BlockingError::Error(DeleteError::Prohibited(_)) => {
-                HttpResponse::Forbidden().json(ErrorBody {
-                    title: "Cannot delete".to_string(),
-                    status: 403,
-                    detail: "Cannot delete a run if it has a non-failed status".to_string(),
+    {
+        // If there is no error, verify that a row was deleted
+        Ok(results) => {
+            if results > 0 {
+                let message = format!("Successfully deleted {} row", results);
+                HttpResponse::Ok().json(json!({ "message": message }))
+            } else {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No run found".to_string(),
+                    status: 404,
+                    detail: "No run found for the specified id".to_string(),
                 })
             }
-            // For other errors, return a 500
-            _ => default_500(&e),
         }
-    })
+        Err(e) => {
+            error!("{}", e);
+            match e {
+                // If the run is not allowed to be deleted, return a forbidden status
+                BlockingError::Error(DeleteError::Prohibited(_)) => {
+                    HttpResponse::Forbidden().json(ErrorBody {
+                        title: "Cannot delete".to_string(),
+                        status: 403,
+                        detail: "Cannot delete a run if it has a non-failed status".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
+        }
+    }
 }
 
 /// Generates csv files from `runs` and returns a zip of the csvs as bytes.  If an error occurs,
 /// logs the error and returns an appropriate error response
 fn get_bytes_for_csv_zip_from_runs(
-    runs: &Vec<RunWithResultsAndErrorsData>,
+    runs: &[RunWithResultsAndErrorsData],
 ) -> Result<Vec<u8>, HttpResponse> {
     // Build csv files from results
-    let run_csvs_dir: TempDir = match run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(&runs) {
+    let run_csvs_dir: TempDir = match run_csv::write_run_data_to_csvs_and_zip_in_temp_dir(runs) {
         Ok(csv_dir) => csv_dir,
         Err(e) => {
             error!("Encountered error while trying to generate csvs for runs (use debug level logging for more info) : {}", e);
@@ -695,7 +683,7 @@ mod tests {
 
         let new_run_result = NewRunResult {
             run_id: id.clone(),
-            result_id: new_result.result_id.clone(),
+            result_id: new_result.result_id,
             value: rand_result.to_string(),
         };
 
@@ -720,7 +708,7 @@ mod tests {
 
         let new_run_result2 = NewRunResult {
             run_id: id.clone(),
-            result_id: new_result2.result_id.clone(),
+            result_id: new_result2.result_id,
             value: String::from(rand_result),
         };
 

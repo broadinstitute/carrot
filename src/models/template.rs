@@ -5,7 +5,7 @@
 //! WDL (but not new inputs) for execution or evaluation, a new template is required.  Represented
 //! in the database by the TEMPLATE table.
 
-use crate::custom_sql_types::{RunStatusEnum, RUN_FAILURE_STATUSES};
+use crate::custom_sql_types::RUN_FAILURE_STATUSES;
 use crate::models::pipeline::PipelineData;
 use crate::schema::pipeline;
 use crate::schema::run;
@@ -200,7 +200,7 @@ impl TemplateData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "template_id" => {
@@ -399,12 +399,7 @@ impl TemplateData {
         // Query the run table
         let non_failed_runs_count = run::dsl::run
             .filter(run::dsl::test_id.eq(any(template_subquery)))
-            .filter(
-                run::dsl::status.ne(all(RUN_FAILURE_STATUSES
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<RunStatusEnum>>())),
-            )
+            .filter(run::dsl::status.ne(all(RUN_FAILURE_STATUSES.to_vec())))
             .select(run::dsl::run_id)
             .first::<Uuid>(conn);
 
@@ -423,6 +418,7 @@ impl TemplateData {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::NewPipeline;
     use crate::models::pipeline::PipelineData;
     use crate::models::run::{NewRun, RunData};

@@ -13,9 +13,9 @@ use crate::manager::util::{check_for_terminate_message, check_for_terminate_mess
 use crate::notifications::emailer::Emailer;
 use crate::notifications::github_commenter::GithubCommenter;
 use crate::requests::cromwell_requests::CromwellClient;
+use crate::requests::gcloud_storage::GCloudClient;
 use crate::requests::github_requests::GithubClient;
 use crate::requests::test_resource_requests::TestResourceClient;
-use crate::storage::gcloud_storage::GCloudClient;
 use actix_web::client::Client;
 use base64;
 use diesel::PgConnection;
@@ -80,13 +80,16 @@ pub struct GCloudSubscriber {
 /// Creates and returns a Pubsub instance that will connect to the subscription specified by
 /// PUBSUB_SUBSCRIPTION_NAME and authenticate using the service account key in the file specified
 /// by GCLOUD_SA_KEY_FILE
-fn initialize_pubsub(gcloud_sa_key_file_location: &String) -> PubsubClient {
+fn initialize_pubsub(gcloud_sa_key_file_location: &str) -> PubsubClient {
     // Load GCloud SA key so we can use it for authentication
-    let client_secret = yup_oauth2::service_account_key_from_file(gcloud_sa_key_file_location)
-        .expect(&format!(
-            "Failed to load service account key from file at: {}",
-            gcloud_sa_key_file_location
-        ));
+    let client_secret =
+        yup_oauth2::service_account_key_from_file(&String::from(gcloud_sa_key_file_location))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to load service account key from file at: {}",
+                    gcloud_sa_key_file_location
+                )
+            });
     // Create hyper client for authenticating with GCloud
     let mut auth_client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
         hyper_rustls::TlsClient::new(),
@@ -115,7 +118,7 @@ pub async fn init_and_run(
     db_pool: DbPool,
     carrot_config: Config,
     channel_recv: mpsc::Receiver<()>,
-) -> () {
+) {
     // Get the github and gcloud configs, since we'll need those
     let github_config: &GithubConfig = carrot_config
         .github()
@@ -128,10 +131,9 @@ pub async fn init_and_run(
     // Make a gcloud client for interacting with gcs
     let gcloud_client: GCloudClient = GCloudClient::new(gcloud_config.gcloud_sa_key_file());
     // Create an emailer (or not, if we don't have the config for one)
-    let emailer: Option<Emailer> = match carrot_config.email() {
-        Some(email_config) => Some(Emailer::new(email_config.clone())),
-        None => None,
-    };
+    let emailer: Option<Emailer> = carrot_config
+        .email()
+        .map(|email_config| Emailer::new(email_config.clone()));
     // Create a github commenter
     let github_client: GithubClient = GithubClient::new(
         github_config.client_id(),
@@ -183,9 +185,9 @@ impl GCloudSubscriber {
         pubsub_wait_time_in_secs: u64,
         channel_recv: mpsc::Receiver<()>,
         github_runner: GithubRunner,
-        gcloud_sa_key_file_location: &String,
+        gcloud_sa_key_file_location: &str,
     ) -> GCloudSubscriber {
-        let pubsub_client = initialize_pubsub(gcloud_sa_key_file_location);
+        let pubsub_client = initialize_pubsub(&String::from(gcloud_sa_key_file_location));
 
         GCloudSubscriber {
             db_pool,
@@ -215,14 +217,12 @@ impl GCloudSubscriber {
             let wait_timeout = Duration::new(self.pubsub_wait_time_in_secs, 0)
                 .checked_sub(Instant::now() - query_time);
             if let Some(timeout) = wait_timeout {
-                if let Some(_) =
-                    check_for_terminate_message_with_timeout(&self.channel_recv, timeout)
-                {
+                if check_for_terminate_message_with_timeout(&self.channel_recv, timeout).is_some() {
                     return;
                 }
             } else {
                 // If we've exceeded the wait time, check with no wait
-                if let Some(_) = check_for_terminate_message(&self.channel_recv) {
+                if check_for_terminate_message(&self.channel_recv).is_some() {
                     return;
                 }
             }
@@ -274,7 +274,7 @@ impl GCloudSubscriber {
             match &contents.data {
                 Some(message_data) => {
                     // Parse message
-                    match GCloudSubscriber::parse_github_request_from_message(&message_data) {
+                    match GCloudSubscriber::parse_github_request_from_message(message_data) {
                         Ok(message_request) => {
                             // Attempt to start run from request
                             self.github_runner
@@ -300,7 +300,7 @@ impl GCloudSubscriber {
 
     /// Collects the ack ids from `messages` and sends a request to pubsub to acknowledge that the
     /// messages have been received
-    async fn acknowledge_messages(&self, messages: &Vec<ReceivedMessage>) {
+    async fn acknowledge_messages(&self, messages: &[ReceivedMessage]) {
         let mut ack_ids = Vec::new();
         // Collect ack_ids for messages
         for message in messages {
@@ -386,9 +386,9 @@ mod tests {
     use crate::notifications::emailer::Emailer;
     use crate::notifications::github_commenter::GithubCommenter;
     use crate::requests::cromwell_requests::CromwellClient;
+    use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::github_requests::GithubClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::storage::gcloud_storage::GCloudClient;
     use crate::unit_test_util::{get_test_db_connection, get_test_db_pool, load_default_config};
     use actix_web::client::Client;
     use diesel::PgConnection;
@@ -413,8 +413,8 @@ mod tests {
         email_base_name: &str,
     ) -> TestData {
         let pipeline = insert_test_pipeline(conn);
-        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id.clone());
-        let test = insert_test_test_with_template_id(conn, template.template_id.clone());
+        let template = insert_test_template_with_pipeline_id(conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(conn, template.template_id);
 
         let new_subscription = NewSubscription {
             entity_type: EntityTypeEnum::Pipeline,

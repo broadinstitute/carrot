@@ -3,7 +3,7 @@
 //! A test is for running a specific pipeline, with a specific test WDL and eval WDL, with
 //! specific inputs set beforehand for those WDLs. Represented in the database by the TEST table.
 
-use crate::custom_sql_types::{RunStatusEnum, RUN_FAILURE_STATUSES};
+use crate::custom_sql_types::RUN_FAILURE_STATUSES;
 use crate::models::template::TemplateData;
 use crate::schema::run;
 use crate::schema::template;
@@ -194,7 +194,7 @@ impl TestData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "template_id" => {
@@ -344,12 +344,7 @@ impl TestData {
         {
             // Query the run table
             let non_failed_runs_count = run::dsl::run
-                .filter(
-                    run::dsl::status.ne(all(RUN_FAILURE_STATUSES
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<RunStatusEnum>>())),
-                )
+                .filter(run::dsl::status.ne(all(RUN_FAILURE_STATUSES.to_vec())))
                 .filter(run::dsl::test_id.eq(id))
                 .select(run::dsl::run_id)
                 .first::<Uuid>(conn);
@@ -389,6 +384,7 @@ impl TestData {
 mod tests {
 
     use super::*;
+    use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::template::NewTemplate;

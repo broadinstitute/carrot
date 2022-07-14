@@ -110,7 +110,7 @@ impl RunIsFromGithubData {
 
         // If there is a sort param, parse it and add to the order by clause accordingly
         if let Some(sort) = params.sort {
-            let sort = util::sort_string::parse_sort_string(&sort);
+            let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
                     "run_id" => {
@@ -282,9 +282,9 @@ mod tests {
         let new_runs = insert_test_runs(conn);
 
         let ids = vec![
-            new_runs.get(0).unwrap().run_id.clone(),
-            new_runs.get(1).unwrap().run_id.clone(),
-            new_runs.get(2).unwrap().run_id.clone(),
+            new_runs.get(0).unwrap().run_id,
+            new_runs.get(1).unwrap().run_id,
+            new_runs.get(2).unwrap().run_id,
         ];
 
         let new_run_is_from_githubs = insert_test_run_is_from_githubs_with_run_ids(conn, ids);
