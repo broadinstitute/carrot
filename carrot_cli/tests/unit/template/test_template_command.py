@@ -827,6 +827,8 @@ def test_delete(delete_data, caplog):
                 "template",
                 "find_runs",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "--run_group_id",
+                "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                 "--name",
                 "Queen of Bright Moon run",
                 "--status",
@@ -862,6 +864,7 @@ def test_delete(delete_data, caplog):
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                 "Queen of Bright Moon run",
                 "succeeded",
                 {"in_greeted": "Cool Person"},
@@ -892,6 +895,7 @@ def test_delete(delete_data, caplog):
                         "eval_option_defaults": {"option": "value"},
                         "status": "succeeded",
                         "results": {},
+                        "run_group_id": "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                         "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
                         "eval_cromwell_job_id": "03958293-6b71-429c-a4de-8e90222488cd",
                         "name": "Queen of Bright Moon run",
@@ -908,6 +912,8 @@ def test_delete(delete_data, caplog):
                 "template",
                 "find_runs",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "--run_group_id",
+                "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                 "--name",
                 "Queen of Bright Moon run",
                 "--status",
@@ -945,6 +951,7 @@ def test_delete(delete_data, caplog):
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                 "Queen of Bright Moon run",
                 "succeeded",
                 {"in_greeted": "Cool Person"},
@@ -970,6 +977,8 @@ def test_delete(delete_data, caplog):
                 "template",
                 "find_runs",
                 "Sword of Protection template",
+                "--run_group_id",
+                "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                 "--name",
                 "Queen of Bright Moon run",
                 "--status",
@@ -1005,6 +1014,7 @@ def test_delete(delete_data, caplog):
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                 "Queen of Bright Moon run",
                 "succeeded",
                 {"in_greeted": "Cool Person"},
@@ -1054,6 +1064,7 @@ def test_delete(delete_data, caplog):
                         "eval_option_defaults": {"option": "value"},
                         "status": "succeeded",
                         "results": {},
+                        "run_group_id": "ad487859-06fe-4b1a-9e96-47d4f36bf819",
                         "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
                         "eval_cromwell_job_id": "03958293-6b71-429c-a4de-8e90222488cd",
                         "name": "Queen of Bright Moon run",
@@ -1069,6 +1080,7 @@ def test_delete(delete_data, caplog):
             "args": ["template", "find_runs", "986325ba-06fe-4b1a-9e96-47d4f36bf819"],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
+                "",
                 "",
                 "",
                 "",
@@ -1141,7 +1153,8 @@ def find_runs_data(request):
             request.param["params"][14],
             request.param["params"][15],
             request.param["params"][16],
-            csv=request.param["params"][17],
+            request.param["params"][17],
+            csv=request.param["params"][18],
         ).thenReturn(request.param["return"])
     return request.param
 

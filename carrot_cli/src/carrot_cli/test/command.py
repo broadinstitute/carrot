@@ -339,6 +339,7 @@ def run(test, name, test_input, test_options, eval_input, eval_options, created_
 
 @main.command(name="find_runs")
 @click.argument("test")
+@click.option("--run_group_id", default="", help="The id of the run group to which the run belongs")
 @click.option("--name", default="", help="The name of the run")
 @click.option(
     "--status",
@@ -425,6 +426,7 @@ def run(test, name, test_input, test_options, eval_input, eval_options, created_
 )
 def find_runs(
     test,
+    run_group_id,
     name,
     status,
     test_input,
@@ -455,6 +457,7 @@ def find_runs(
         runs.find(
             "tests",
             id,
+            run_group_id,
             name,
             status,
             test_input,

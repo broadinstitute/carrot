@@ -259,6 +259,7 @@ def delete(template, yes):
 
 @main.command(name="find_runs")
 @click.argument("template")
+@click.option("--run_group_id", default="", help="The id of the run group to which the run belongs")
 @click.option("--name", default="", help="The name of the run")
 @click.option(
     "--status",
@@ -345,6 +346,7 @@ def delete(template, yes):
 )
 def find_runs(
     template,
+    run_group_id,
     name,
     status,
     test_input,
@@ -380,6 +382,7 @@ def find_runs(
         runs.find(
             "templates",
             id,
+            run_group_id,
             name,
             status,
             test_input,

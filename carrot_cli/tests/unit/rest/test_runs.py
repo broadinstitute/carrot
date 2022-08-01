@@ -96,6 +96,7 @@ def test_find_by_id(find_by_id_data):
             "parent_entity": "tests",
             "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
             "params": [
+                ("run_group_id", ""),
                 ("name", "Queen of Bright Moon run"),
                 ("status", ""),
                 ("test_input", ""),
@@ -126,6 +127,7 @@ def test_find_by_id(find_by_id_data):
                         "eval_options": {"option": "value"},
                         "status": "testsubmitted",
                         "results": {},
+                        "run_group_id": None,
                         "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
                         "eval_cromwell_job_id": None,
                         "name": "Queen of Bright Moon run",
@@ -141,6 +143,7 @@ def test_find_by_id(find_by_id_data):
             "parent_entity": "tests",
             "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
             "params": [
+                ("run_group_id", ""),
                 ("name", "Queen of Bright Moon run"),
                 ("status", ""),
                 ("test_input", ""),
@@ -173,6 +176,7 @@ def test_find_by_id(find_by_id_data):
             "parent_entity": "tests",
             "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
             "params": [
+                ("run_group_id", ""),
                 ("name", "Queen of Bright Moon run"),
                 ("status", ""),
                 ("test_input", ""),
@@ -201,10 +205,10 @@ def find_data(request):
     mockito.when(request_handler).find_runs(...).thenReturn(None)
     # Mock up request response
     # If csv param is true, we have to create a temp file and include expected format in the function call
-    if request.param["params"][16][1]:
+    if request.param["params"][17][1]:
         # Pass a copy of params to the mock so we can modify the original
         params_for_mock = copy.deepcopy(request.param["params"])
-        params_for_mock[16] = ("csv", "true")
+        params_for_mock[17] = ("csv", "true")
         mockito.when(request_handler).find_runs(
             request.param["parent_entity"],
             request.param["parent_entity_id"],
@@ -213,17 +217,17 @@ def find_data(request):
         ).thenReturn(request.param["file_contents"])
         # Create a temp file that we'll write to
         request.param["file"] = tempfile.NamedTemporaryFile()
-        request.param["params"][16] = ("csv", request.param["file"].name)
+        request.param["params"][17] = ("csv", request.param["file"].name)
     else:
         # Pass a copy of params to the mock so we can modify the original
         params_for_mock = copy.deepcopy(request.param["params"])
-        params_for_mock[16] = ("csv", "false")
+        params_for_mock[17] = ("csv", "false")
         mockito.when(request_handler).find_runs(
             request.param["parent_entity"],
             request.param["parent_entity_id"],
             params_for_mock,
         ).thenReturn(request.param["return"])
-        request.param["params"][16] = ("csv", None)
+        request.param["params"][17] = ("csv", None)
     return request.param
 
 
@@ -248,6 +252,7 @@ def test_find(find_data):
         find_data["params"][14][1],
         find_data["params"][15][1],
         find_data["params"][16][1],
+        find_data["params"][17][1],
     )
     assert result == find_data["return"]
     # If the result is written to a zip, check that the zip has what we expect
