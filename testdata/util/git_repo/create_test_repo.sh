@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+set -e
 git init > /dev/null 2>&1
 touch file.txt
 echo "text" > file.txt

@@ -641,10 +641,11 @@ mod tests {
             Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
             &TagQuery {
                 branch: Some(String::from("master")),
-                number: 1
+                number: 2
             }
         ).unwrap();
-        assert_eq!(commits, vec!["first"])
+        assert!(commits.contains(&String::from("first")));
+        assert!(commits.contains(&String::from("beginning")));
     }
 
     #[test]
