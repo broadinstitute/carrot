@@ -18,7 +18,7 @@ This repository contains the Cromwell Automated Runner for Regression and Automa
 ## <a name="requirements">Requirements</a>
 
 ### <a name="building_and_running">Building and Running CARROT</a>
-* A Rust version >=1.51.0 is required to build CARROT
+* A Rust version >=1.57.0 is required to build CARROT
     * rustup, the installer for Rust, can be found on the Rust website, [here](https://www.rust-lang.org/tools/install).
     * rustup will install the Rust compiler (rustc) and the Rust package manager (Cargo).
 * CARROT currently requires a PostgreSQL database with version >=12.2 for storing test information.
