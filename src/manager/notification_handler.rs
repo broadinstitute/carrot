@@ -8,6 +8,7 @@ use crate::models::run_report::RunReportData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::{emailer, github_commenter};
+use crate::util::json_parsing;
 use diesel::PgConnection;
 use log::error;
 use serde_json::Value;
@@ -686,7 +687,7 @@ impl NotificationHandler {
         // Check if it's in test inputs
         if let Some(key) = test_input_key {
             if let Some(key_val) =
-                NotificationHandler::get_string_val_for_input_key(&run.test_input, key)
+                json_parsing::get_string_val_for_input_key(&run.test_input, key)
             {
                 if &key_val[(key_val.len() - commit.len())..] == commit {
                     return true;
@@ -696,7 +697,7 @@ impl NotificationHandler {
         // Now check eval inputs
         if let Some(key) = eval_input_key {
             if let Some(key_val) =
-                NotificationHandler::get_string_val_for_input_key(&run.eval_input, key)
+                json_parsing::get_string_val_for_input_key(&run.eval_input, key)
             {
                 if &key_val[(key_val.len() - commit.len())..] == commit {
                     return true;
@@ -704,19 +705,6 @@ impl NotificationHandler {
             }
         }
         return false;
-    }
-
-    /// Checks the input json value `inputs` for a string value for `key` and returns it if found.
-    /// Otherwise returns None
-    fn get_string_val_for_input_key(inputs: &Value, key: &str) -> Option<String> {
-        if let Some(inputs_map) = inputs.as_object() {
-            if let Some(val) = inputs_map.get(key) {
-                if let Some(str_val) = val.as_str() {
-                    return Some(String::from(str_val));
-                }
-            }
-        }
-        None
     }
 
     /// Checks to see if the run for `run_report` was triggered from Github (i.e has a
