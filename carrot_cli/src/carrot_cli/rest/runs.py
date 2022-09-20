@@ -23,6 +23,7 @@ def find_by_id(run_id, csv=None):
 def find(
     parent_entity="",
     parent_entity_id="",
+    run_group_id="",
     name="",
     status="",
     test_input="",
@@ -47,6 +48,7 @@ def find(
     """
     # Create parameter list
     params = [
+        ("run_group_id", run_group_id),
         ("name", name),
         ("status", status),
         ("test_input", test_input),

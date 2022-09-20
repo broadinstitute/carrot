@@ -340,6 +340,7 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
+            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -394,6 +395,7 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
+            run_group_id: None,
             name: String::from("Kevin's test run2"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),

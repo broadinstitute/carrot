@@ -473,6 +473,7 @@ mod tests {
     ) -> RunSoftwareVersionData {
         let new_run = NewRun {
             test_id: id2,
+            run_group_id: None,
             name: String::from(run_name),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),

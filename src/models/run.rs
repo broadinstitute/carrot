@@ -28,6 +28,7 @@ use uuid::Uuid;
 pub struct RunData {
     pub run_id: Uuid,
     pub test_id: Uuid,
+    pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_input: Value,
@@ -50,6 +51,7 @@ pub struct RunData {
 pub struct RunWithResultsAndErrorsData {
     pub run_id: Uuid,
     pub test_id: Uuid,
+    pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_input: Value,
@@ -75,6 +77,7 @@ pub struct RunQuery {
     pub pipeline_id: Option<Uuid>,
     pub template_id: Option<Uuid>,
     pub test_id: Option<Uuid>,
+    pub run_group_id: Option<Uuid>,
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
     pub test_input: Option<Value>,
@@ -102,6 +105,7 @@ pub struct RunQuery {
 #[table_name = "run"]
 pub struct NewRun {
     pub test_id: Uuid,
+    pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_input: Value,
@@ -120,6 +124,7 @@ pub struct NewRun {
 #[derive(Deserialize, Serialize, AsChangeset, Debug)]
 #[table_name = "run"]
 pub struct RunChangeset {
+    pub run_group_id: Option<Uuid>,
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
     pub test_cromwell_job_id: Option<String>,
@@ -166,7 +171,7 @@ impl RunData {
 
     /// Queries the DB for runs matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve runs matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve runs matching the criteria in `params`
     /// Returns result containing either a vector of the retrieved runs as RunData
     /// instances or an error if the query fails for some reason
     #[allow(dead_code)]
@@ -199,6 +204,9 @@ impl RunData {
         // Add filters for each of the other params if they have values
         if let Some(param) = params.test_id {
             query = query.filter(test_id.eq(param));
+        }
+        if let Some(param) = params.run_group_id {
+            query = query.filter(run_group_id.eq(param));
         }
         if let Some(param) = params.name {
             query = query.filter(name.eq(param));
@@ -257,6 +265,13 @@ impl RunData {
                             query = query.then_order_by(test_id.asc());
                         } else {
                             query = query.then_order_by(test_id.desc());
+                        }
+                    }
+                    "run_group_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(run_group_id.asc());
+                        } else {
+                            query = query.then_order_by(run_group_id.desc());
                         }
                     }
                     "name" => {
@@ -460,6 +475,7 @@ impl RunWithResultsAndErrorsData {
             .select((
                 run_with_results_and_errors::dsl::run_id,
                 run_with_results_and_errors::dsl::test_id,
+                run_with_results_and_errors::dsl::run_group_id,
                 run_with_results_and_errors::dsl::name,
                 run_with_results_and_errors::dsl::status,
                 run_with_results_and_errors::dsl::test_input,
@@ -513,6 +529,9 @@ impl RunWithResultsAndErrorsData {
         // Add filters for each of the other params if they have values
         if let Some(param) = params.test_id {
             query = query.filter(run_with_results_and_errors::dsl::test_id.eq(param));
+        }
+        if let Some(param) = params.run_group_id {
+            query = query.filter(run_with_results_and_errors::dsl::run_group_id.eq(param));
         }
         if let Some(param) = params.name {
             query = query.filter(run_with_results_and_errors::dsl::name.eq(param));
@@ -575,6 +594,17 @@ impl RunWithResultsAndErrorsData {
                         } else {
                             query = query
                                 .then_order_by(run_with_results_and_errors::dsl::test_id.desc());
+                        }
+                    }
+                    "run_group_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::run_group_id.asc(),
+                            );
+                        } else {
+                            query = query.then_order_by(
+                                run_with_results_and_errors::dsl::run_group_id.desc(),
+                            );
                         }
                     }
                     "name" => {
@@ -703,6 +733,7 @@ impl RunWithResultsAndErrorsData {
             .select((
                 run_with_results_and_errors::dsl::run_id,
                 run_with_results_and_errors::dsl::test_id,
+                run_with_results_and_errors::dsl::run_group_id,
                 run_with_results_and_errors::dsl::name,
                 run_with_results_and_errors::dsl::status,
                 run_with_results_and_errors::dsl::test_input,
@@ -728,6 +759,7 @@ mod tests {
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run_error::{NewRunError, RunErrorQuery};
+    use crate::models::run_group::RunGroupData;
     use crate::models::run_is_from_github::{
         NewRunIsFromGithub, RunIsFromGithubData, RunIsFromGithubQuery,
     };
@@ -757,6 +789,7 @@ mod tests {
         RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
+            run_group_id: test_run.run_group_id,
             name: test_run.name,
             status: test_run.status,
             test_input: test_run.test_input,
@@ -900,8 +933,11 @@ mod tests {
 
         let test = TestData::create(conn, new_test).expect("Failed inserting test test");
 
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
+
         let new_run = NewRun {
             test_id: test.test_id,
+            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -954,8 +990,11 @@ mod tests {
 
         let test = TestData::create(conn, new_test).expect("Failed inserting test test");
 
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
+
         let new_run = NewRun {
             test_id: test.test_id,
+            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::EvalFailed,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
@@ -1060,8 +1099,11 @@ mod tests {
     fn insert_test_runs_with_test_id(conn: &PgConnection, id: Uuid) -> Vec<RunData> {
         let mut runs = Vec::new();
 
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
+
         let new_run = NewRun {
             test_id: id,
+            run_group_id: Some(run_group.run_group_id),
             name: String::from("name1"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
@@ -1076,8 +1118,11 @@ mod tests {
 
         runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
 
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
+
         let new_run = NewRun {
             test_id: id,
+            run_group_id: Some(run_group.run_group_id),
             name: String::from("name2"),
             status: RunStatusEnum::TestSubmitted,
             test_input: serde_json::from_str("{}").unwrap(),
@@ -1094,6 +1139,7 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
+            run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::Succeeded,
             test_input: serde_json::from_str("{}").unwrap(),
@@ -1238,6 +1284,7 @@ mod tests {
             pipeline_id: Some(test_template.pipeline_id),
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1275,6 +1322,7 @@ mod tests {
             pipeline_id: None,
             template_id: Some(test_template.template_id),
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1313,6 +1361,44 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: Some(test_run.test_id),
+            run_group_id: None,
+            name: None,
+            status: None,
+            test_input: None,
+            test_options: None,
+            eval_input: None,
+            eval_options: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            finished_before: None,
+            finished_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
+
+        assert_eq!(found_runs.len(), 1);
+        assert_eq!(found_runs[0], test_run);
+    }
+
+    #[test]
+    fn find_with_run_group_id() {
+        let conn = get_test_db_connection();
+
+        let test = insert_test_test(&conn);
+        insert_test_runs_with_test_id(&conn, test.test_id);
+        let test_run = insert_test_run(&conn);
+
+        let test_query = RunQuery {
+            pipeline_id: None,
+            template_id: None,
+            test_id: None,
+            run_group_id: test_run.run_group_id,
             name: None,
             status: None,
             test_input: None,
@@ -1348,6 +1434,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: Some(test_runs[1].name.clone()),
             status: None,
             test_input: None,
@@ -1383,6 +1470,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: Some(RunStatusEnum::TestSubmitted),
             test_input: None,
@@ -1419,6 +1507,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: Some(test_run.test_input.clone()),
@@ -1455,6 +1544,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1490,6 +1580,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1525,6 +1616,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1561,6 +1653,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1597,6 +1690,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1633,6 +1727,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: Some(test_runs[0].test_id),
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1661,6 +1756,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: Some(test_runs[0].test_id),
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1696,6 +1792,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1722,6 +1819,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1756,6 +1854,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1782,6 +1881,7 @@ mod tests {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: None,
             status: None,
             test_input: None,
@@ -1824,7 +1924,10 @@ mod tests {
 
         let test_run = insert_test_run(&conn);
 
+        let run_group = RunGroupData::create(&conn).unwrap();
+
         let changes = RunChangeset {
+            run_group_id: Some(run_group.run_group_id),
             name: Some(String::from("TestTestTestTest")),
             status: Some(RunStatusEnum::CarrotFailed),
             test_cromwell_job_id: None,
@@ -1851,6 +1954,7 @@ mod tests {
         let test_runs = insert_test_runs_with_test_id(&conn, test.test_id);
 
         let changes = RunChangeset {
+            run_group_id: None,
             name: Some(test_runs[0].name.clone()),
             status: None,
             test_cromwell_job_id: None,
@@ -1866,6 +1970,30 @@ mod tests {
                 diesel::result::DatabaseErrorKind::UniqueViolation,
                 _,
             ),)
+        ));
+    }
+
+    #[test]
+    fn update_failure_nonexistent_run_group() {
+        let conn = get_test_db_connection();
+
+        let test = insert_test_test(&conn);
+        let test_runs = insert_test_runs_with_test_id(&conn, test.test_id);
+
+        let changes = RunChangeset {
+            run_group_id: Some(Uuid::new_v4()),
+            name: None,
+            status: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            finished_at: None,
+        };
+
+        let updated_run = RunData::update(&conn, test_runs[1].run_id, changes);
+
+        assert!(matches!(
+            updated_run,
+            Err(diesel::result::Error::DatabaseError(_, _))
         ));
     }
 

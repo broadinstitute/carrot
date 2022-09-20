@@ -1,13 +1,17 @@
 //! Contains functions for sending notifications to users
 
-use crate::models::run::{RunData, RunWithResultsAndErrorsData};
+use crate::custom_sql_types::RUN_TERMINAL_STATUSES;
+use crate::models::run::{RunData, RunQuery, RunWithResultsAndErrorsData};
+use crate::models::run_group_is_from_github::RunGroupIsFromGithubData;
 use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::run_report::RunReportData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::{emailer, github_commenter};
+use crate::util::json_parsing;
 use diesel::PgConnection;
 use log::error;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
 use uuid::Uuid;
@@ -28,6 +32,7 @@ pub enum Error {
     Github(github_commenter::Error),
     NoEmailer,
     NoGithubCommenter,
+    UnexpectedState(String),
 }
 
 impl fmt::Display for Error {
@@ -39,6 +44,7 @@ impl fmt::Display for Error {
             Error::Github(e) => write!(f, "Notification Error Github {}", e),
             Error::NoEmailer => write!(f, "Notification Error NoEmailer"),
             Error::NoGithubCommenter => write!(f, "Notification Error NoGithubCommenter"),
+            Error::UnexpectedState(s) => write!(f, "Notification Error UnexpectedState {}", s),
         }
     }
 }
@@ -94,6 +100,8 @@ impl NotificationHandler {
         // Post github comments
         if self.github_commenter.is_some() {
             self.post_run_complete_comment_if_from_github(conn, run_id)
+                .await?;
+            self.post_pr_run_complete_comment_if_run_group_from_github(conn, run_id)
                 .await?;
         }
         Ok(())
@@ -167,16 +175,16 @@ impl NotificationHandler {
         author: &str,
         issue_number: i32,
         test_name: &str,
-        test_id: Uuid,
+        test_id: Option<Uuid>,
         error_message: &str,
     ) -> Result<(), Error> {
         // Send emails
-        if self.emailer.is_some() {
+        if self.emailer.is_some() && test_id.is_some() {
             self.send_run_failed_to_start_from_github_email(
                 conn,
                 author,
                 test_name,
-                test_id,
+                test_id.unwrap(),
                 error_message,
             )?;
         }
@@ -185,6 +193,87 @@ impl NotificationHandler {
             Some(github_commenter) => {
                 github_commenter
                     .post_run_failed_to_start_comment(
+                        owner,
+                        repo,
+                        issue_number,
+                        error_message,
+                        test_name,
+                    )
+                    .await?;
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// Sends notifications (emails and github comments) for the start of a pr comparison with
+    /// `base_run` and `head_run`, using `conn` to retrieve subscribers, then building notification
+    /// messages using `owner`, `repo`, `author`, `issue_number`, `test_name`, and the runs
+    pub async fn send_pr_run_started_from_github_notifications(
+        &self,
+        conn: &PgConnection,
+        owner: &str,
+        repo: &str,
+        author: &str,
+        issue_number: i32,
+        base_run: &RunData,
+        head_run: &RunData,
+        test_name: &str,
+    ) -> Result<(), Error> {
+        // Send emails
+        if self.emailer.is_some() {
+            self.send_pr_run_started_from_github_email(
+                conn, author, base_run, head_run, test_name,
+            )?;
+        }
+        // Post github comments
+        match &self.github_commenter {
+            Some(github_commenter) => {
+                github_commenter
+                    .post_pr_run_started_comment(
+                        owner,
+                        repo,
+                        issue_number,
+                        base_run,
+                        head_run,
+                        test_name,
+                    )
+                    .await?;
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// Sends notifications (emails and github comments) for a failure to start run of test with
+    /// `test_id` and `test_name` from a github request posted by `author` to `owner`'s `repo`, on
+    /// issue `issue_number`, caused by `error_message` (which will be sent to user)
+    pub async fn send_pr_run_failed_to_start_from_github_notifications(
+        &self,
+        conn: &PgConnection,
+        owner: &str,
+        repo: &str,
+        author: &str,
+        issue_number: i32,
+        test_name: &str,
+        test_id: Option<Uuid>,
+        error_message: &str,
+    ) -> Result<(), Error> {
+        // Send emails
+        if self.emailer.is_some() && test_id.is_some() {
+            self.send_pr_run_failed_to_start_from_github_email(
+                conn,
+                author,
+                test_name,
+                test_id.unwrap(),
+                error_message,
+            )?;
+        }
+        // Post github comments
+        match &self.github_commenter {
+            Some(github_commenter) => {
+                github_commenter
+                    .post_pr_run_failed_to_start_comment(
                         owner,
                         repo,
                         issue_number,
@@ -211,6 +300,24 @@ impl NotificationHandler {
     ) -> Result<(), Error> {
         let subject = "Encountered an error when attempting to start a test run from GitHub";
         let message = format!("GitHub user {} attempted to start a run for test {}, but encountered the following error: {}", author, test_name, error_message);
+        // Send emails
+        self.send_notification_emails_for_test(conn, test_id, subject, &message)
+    }
+
+    /// Sends email notifications to users subscribed to test with `test_name` and `test_id`
+    /// (email addresses retrieved using `conn`) notifying them that an attempt from github user
+    /// `author` at starting a pr comparison run of the test failed because of `error_message`
+    fn send_pr_run_failed_to_start_from_github_email(
+        &self,
+        conn: &PgConnection,
+        author: &str,
+        test_name: &str,
+        test_id: Uuid,
+        error_message: &str,
+    ) -> Result<(), Error> {
+        let subject =
+            "Encountered an error when attempting to start a pr comparison test run from GitHub";
+        let message = format!("GitHub user {} attempted to start a pr comparison run for test {}, but encountered the following error: {}", author, test_name, error_message);
         // Send emails
         self.send_notification_emails_for_test(conn, test_id, subject, &message)
     }
@@ -246,6 +353,54 @@ impl NotificationHandler {
         );
         // Send emails
         self.send_notification_emails_for_test(conn, run.test_id, subject, &message)
+    }
+
+    /// Sends email notifications to users subscribed to test corresponding to `run`, with data from
+    /// `run`, informing them that `author` started a run of test `test_name`
+    fn send_pr_run_started_from_github_email(
+        &self,
+        conn: &PgConnection,
+        author: &str,
+        base_run: &RunData,
+        head_run: &RunData,
+        test_name: &str,
+    ) -> Result<(), Error> {
+        // Build subject and message for email
+        let subject = "Successfully started run from GitHub";
+        let base_run_info = match serde_json::to_string_pretty(&base_run) {
+            Ok(info) => info,
+            Err(e) => {
+                error!(
+                    "Failed to build pretty json from run with id: {} due to error: {}",
+                    base_run.run_id, e
+                );
+                format!(
+                    "Failed to get run data to include in email due to the following error:\n{}",
+                    e
+                )
+            }
+        };
+
+        let head_run_info = match serde_json::to_string_pretty(&head_run) {
+            Ok(info) => info,
+            Err(e) => {
+                error!(
+                    "Failed to build pretty json from run with id: {} due to error: {}",
+                    head_run.run_id, e
+                );
+                format!(
+                    "Failed to get run data to include in email due to the following error:\n{}",
+                    e
+                )
+            }
+        };
+
+        let message = format!(
+            "GitHub user {} started a PR run for test {}:\n\nBase:{}\n\nHead:{}",
+            author, test_name, base_run_info, head_run_info
+        );
+        // Send emails
+        self.send_notification_emails_for_test(conn, head_run.test_id, subject, &message)
     }
 
     /// Sends email to each user subscribed to the test, template, or pipeline for the run specified
@@ -427,6 +582,131 @@ impl NotificationHandler {
         }
     }
 
+    /// Checks to see if the run indicated by `run_id` was triggered as part of a PR comparison run
+    /// from github (i.e has a run_group_id with a corresponding row in the RUN_GROUP_IS_FROM_GITHUB
+    /// table) and, if so and the other run in that group has also reached a terminal state,
+    /// attempts to post a comment to GitHub to indicate the run has finished, with the run's data.
+    /// Returns an error if there is some issue querying the db or posting the comment
+    async fn post_pr_run_complete_comment_if_run_group_from_github(
+        &self,
+        conn: &PgConnection,
+        run_id: Uuid,
+    ) -> Result<(), Error> {
+        // We can only post github comments if we have a github commenter
+        match &self.github_commenter {
+            Some(github_commenter) => {
+                // Check if this run was triggered as part of a pr comparison run
+                if let Ok(run_group_is_from_github) =
+                    RunGroupIsFromGithubData::find_by_run_id(conn, run_id)
+                {
+                    // Get the runs for this group
+                    let runs: Vec<RunWithResultsAndErrorsData> = RunWithResultsAndErrorsData::find(
+                        conn,
+                        RunQuery {
+                            pipeline_id: None,
+                            template_id: None,
+                            test_id: None,
+                            run_group_id: Some(run_group_is_from_github.run_group_id),
+                            name: None,
+                            status: None,
+                            test_input: None,
+                            test_options: None,
+                            eval_input: None,
+                            eval_options: None,
+                            test_cromwell_job_id: None,
+                            eval_cromwell_job_id: None,
+                            created_before: None,
+                            created_after: None,
+                            created_by: None,
+                            finished_before: None,
+                            finished_after: None,
+                            sort: None,
+                            limit: None,
+                            offset: None,
+                        },
+                    )?;
+                    // We expect there to be exactly two runs, so we'll consider it an error if that
+                    // is not the case
+                    if runs.len() != 2 {
+                        return Err(Error::UnexpectedState(format!("Failed to send notifications for PR use case for run_group_id {} expected 2 runs but found {}", run_group_is_from_github.run_group_id, runs.len())));
+                    }
+                    // If the runs aren't both finished, just return because we don't want to send
+                    // notifications until they're both done
+                    for run in &runs {
+                        if !RUN_TERMINAL_STATUSES.contains(&run.status) {
+                            return Ok(());
+                        }
+                    }
+                    // Get test since we'll need the test name
+                    let test_data = TestData::find_by_id(conn, runs[0].test_id)?;
+                    // Figure out which run is base and which is head
+                    let (head_run, base_run) = {
+                        // If the first run has the head commit, we'll say it's the head_run and the
+                        // second run is the base_run
+                        if NotificationHandler::run_has_commit(
+                            &runs[0],
+                            &run_group_is_from_github.head_commit,
+                            run_group_is_from_github.test_input_key.as_deref(),
+                            run_group_is_from_github.eval_input_key.as_deref(),
+                        ) {
+                            (&runs[0], &runs[1])
+                        }
+                        // Otherwise, we'll assume it's the opposite
+                        else {
+                            (&runs[1], &runs[0])
+                        }
+                    };
+                    // Now send notifications
+                    github_commenter
+                        .post_pr_run_finished_comment(
+                            &run_group_is_from_github.owner,
+                            &run_group_is_from_github.repo,
+                            run_group_is_from_github.issue_number,
+                            base_run,
+                            head_run,
+                            &test_data.name,
+                        )
+                        .await?;
+                }
+                Ok(())
+            }
+            // If we don't have a github commenter, return a NoGithubCommenter error
+            None => Err(Error::NoGithubCommenter),
+        }
+    }
+
+    /// Checks the `run` to see if it has the commit in its test or eval input, for the
+    /// corresponding `test_input_key` or `eval_input_key`. If it does, returns true.  Otherwise,
+    /// returns false
+    fn run_has_commit(
+        run: &RunWithResultsAndErrorsData,
+        commit: &str,
+        test_input_key: Option<&str>,
+        eval_input_key: Option<&str>,
+    ) -> bool {
+        // Check if it's in test inputs
+        if let Some(key) = test_input_key {
+            if let Some(key_val) =
+                json_parsing::get_string_val_for_input_key(&run.test_input, key)
+            {
+                if &key_val[(key_val.len() - commit.len())..] == commit {
+                    return true;
+                }
+            }
+        }
+        // Now check eval inputs
+        if let Some(key) = eval_input_key {
+            if let Some(key_val) =
+                json_parsing::get_string_val_for_input_key(&run.eval_input, key)
+            {
+                if &key_val[(key_val.len() - commit.len())..] == commit {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Checks to see if the run for `run_report` was triggered from Github (i.e has a
     /// corresponding row in the RUN_IS_FROM_GITHUB table) and, if so, attempts to post a comment to
     /// GitHub to indicate `run_report` has finished, with the results. Returns an error if there is
@@ -481,6 +761,10 @@ mod tests {
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
     use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
+    use crate::models::run_group::RunGroupData;
+    use crate::models::run_group_is_from_github::{
+        NewRunGroupIsFromGithub, RunGroupIsFromGithubData,
+    };
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
     use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
@@ -489,6 +773,7 @@ mod tests {
     use crate::notifications::emailer::Emailer;
     use crate::notifications::github_commenter::GithubCommenter;
     use crate::requests::github_requests::GithubClient;
+    use crate::schema::run_group_is_from_github::run_group_id;
     use crate::unit_test_util::get_test_db_pool;
     use actix_web::client::Client;
     use chrono::Utc;
@@ -601,6 +886,7 @@ mod tests {
         email_base_name: &str,
     ) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
@@ -615,6 +901,67 @@ mod tests {
         };
 
         RunData::create(conn, new_run).expect("Failed inserting test run")
+    }
+
+    fn insert_pr_runs_with_test_id(
+        conn: &PgConnection,
+        id: Uuid,
+        email_base_name: &str,
+    ) -> (RunData, RunData, RunGroupData) {
+        let run_group = RunGroupData::create(conn).unwrap();
+
+        let base_run = NewRun {
+            run_group_id: Some(run_group.run_group_id),
+            name: String::from("Base Run"),
+            test_id: id,
+            status: RunStatusEnum::Succeeded,
+            test_input: json!({"test_test.in_docker": "carrot_build:software|1.0"}),
+            test_options: None,
+            eval_input: json!({"eval_test.docker": "carrot_build:software|1.0"}),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: None,
+            created_by: Some(format!("{}@example.com", email_base_name)),
+            finished_at: None,
+        };
+        let base_run = RunData::create(conn, base_run).expect("Failed inserting test run");
+
+        let head_run = NewRun {
+            run_group_id: Some(run_group.run_group_id),
+            name: String::from("Head Run"),
+            test_id: id,
+            status: RunStatusEnum::Succeeded,
+            test_input: json!({"test_test.in_docker": "carrot_build:software|0.9"}),
+            test_options: None,
+            eval_input: json!({"eval_test.docker": "carrot_build:software|0.9"}),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: None,
+            created_by: Some(format!("{}@example.com", email_base_name)),
+            finished_at: None,
+        };
+        let head_run = RunData::create(conn, head_run).expect("Failed inserting test run");
+
+        (base_run, head_run, run_group)
+    }
+
+    fn insert_run_group_is_from_github_with_run_group_id(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> RunGroupIsFromGithubData {
+        let new_run_group_is_from_github = NewRunGroupIsFromGithub {
+            run_group_id: id,
+            owner: String::from("exampleowner"),
+            repo: String::from("examplerepo"),
+            issue_number: 1,
+            author: String::from("ExampleAuthor"),
+            base_commit: "1.0".to_string(),
+            head_commit: "0.9".to_string(),
+            test_input_key: Some(String::from("test_test.in_docker")),
+            eval_input_key: Some(String::from("eval_test.docker")),
+        };
+
+        RunGroupIsFromGithubData::create(conn, new_run_group_is_from_github).unwrap()
     }
 
     fn insert_test_run_is_from_github_with_run_id(
@@ -1253,6 +1600,124 @@ mod tests {
 
         let result = test_handler
             .post_run_complete_comment_if_from_github(&conn, test_run.run_id)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(result, Error::NoGithubCommenter));
+    }
+
+    #[actix_rt::test]
+    async fn test_post_pr_run_complete_comment_if_run_group_from_github() {
+        // Get client
+        let client = Client::default();
+        // Create a github client
+        let github_client = GithubClient::new("user", "aaaaaaaaaaaaaaaaaaaaaa", client);
+        // Create a github commenter
+        let github_commenter = GithubCommenter::new(github_client);
+        // Create a notification handler
+        let test_handler = NotificationHandler {
+            emailer: None,
+            github_commenter: Some(github_commenter),
+        };
+
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let run_group = RunGroupData::create(&conn).unwrap();
+        let (base_run, head_run, run_group) =
+            insert_pr_runs_with_test_id(&conn, test.test_id, "does_not_matter");
+        let base_run = RunWithResultsAndErrorsData::find_by_id(&conn, base_run.run_id).unwrap();
+        let head_run = RunWithResultsAndErrorsData::find_by_id(&conn, head_run.run_id).unwrap();
+        insert_run_group_is_from_github_with_run_group_id(&conn, run_group.run_group_id);
+
+        let base_run_string = serde_json::to_string_pretty(&base_run).unwrap();
+        let head_run_string = serde_json::to_string_pretty(&head_run).unwrap();
+
+        let comment_string = format!(
+            "### 🥕CARROT🥕 PR comparison finished\n\
+            \n\
+            ### Test: Kevin's test test | Base Status: succeeded | Head Status: succeeded\n\
+            Base Run: Base Run\n\
+            Head Run: Head Run\n\
+            \n\
+            \n\
+            <details><summary>Full details</summary> Base: <pre lang=\"json\"> \n {} \n </pre> \n Head: <pre lang=\"json\"> \n {} \n </pre></details>",
+            base_run_string, head_run_string
+        );
+
+        let request_body = json!({ "body": comment_string });
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .match_body(mockito::Matcher::Json(request_body))
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let result = test_handler
+            .post_pr_run_complete_comment_if_run_group_from_github(&conn, base_run.run_id)
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn test_post_pr_run_complete_comment_if_run_group_from_github_no_run_group() {
+        // Get client
+        let client = Client::default();
+        // Create a github client
+        let github_client = GithubClient::new("user", "aaaaaaaaaaaaaaaaaaaaaa", client);
+        // Create a github commenter
+        let github_commenter = GithubCommenter::new(github_client);
+        // Create a notification handler
+        let test_handler = NotificationHandler {
+            emailer: None,
+            github_commenter: Some(github_commenter),
+        };
+
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .expect(0)
+            .create();
+
+        let result = test_handler
+            .post_pr_run_complete_comment_if_run_group_from_github(&conn, test_run.run_id)
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn test_post_pr_run_complete_comment_if_run_group_from_github_failure_no_commenter() {
+        // Create a notification handler with no github commenter
+        let test_handler = NotificationHandler {
+            emailer: None,
+            github_commenter: None,
+        };
+
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
+
+        let result = test_handler
+            .post_pr_run_complete_comment_if_run_group_from_github(&conn, test_run.run_id)
             .await
             .unwrap_err();
 

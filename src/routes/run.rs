@@ -22,6 +22,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
+use uuid::Uuid;
 
 /// Optional query parameters for the find_by_id mapping
 #[derive(Deserialize, Debug)]
@@ -39,6 +40,7 @@ struct FindByIdQueryParams {
 /// RunQuery can be built from the instance of this and the id from the path
 #[derive(Deserialize, Debug)]
 pub struct RunQueryIncomplete {
+    pub run_group_id: Option<Uuid>,
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
     pub test_input: Option<Value>,
@@ -66,6 +68,7 @@ impl From<RunQueryIncomplete> for RunQuery {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: query.run_group_id,
             name: query.name,
             status: query.status,
             test_input: query.test_input,
@@ -340,6 +343,7 @@ async fn run_for_test(
         .create_run(
             &conn,
             &*id,
+            None,
             run_inputs.name,
             run_inputs.test_input,
             run_inputs.test_options,
@@ -547,6 +551,7 @@ mod tests {
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData};
     use crate::models::run_error::{NewRunError, RunErrorData};
+    use crate::models::run_group::RunGroupData;
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
@@ -615,6 +620,7 @@ mod tests {
         RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
+            run_group_id: test_run.run_group_id,
             name: test_run.name,
             status: test_run.status,
             test_input: test_run.test_input,
@@ -772,6 +778,7 @@ mod tests {
 
     fn create_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
@@ -824,7 +831,10 @@ mod tests {
 
         let test = TestData::create(&conn, new_test).expect("Failed to insert test");
 
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
+
         let new_run = NewRun {
+            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's Run"),
             test_id: test.test_id,
             status: RunStatusEnum::TestSubmitted,
@@ -878,7 +888,10 @@ mod tests {
 
         let test = TestData::create(&conn, new_test).expect("Failed to insert test");
 
+        let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
+
         let new_run = NewRun {
+            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's Run"),
             test_id: test.test_id,
             status: RunStatusEnum::TestFailed,

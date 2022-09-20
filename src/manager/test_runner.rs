@@ -152,6 +152,7 @@ impl TestRunner {
         &self,
         conn: &PgConnection,
         test_id: &str,
+        run_group_id: Option<Uuid>,
         name: Option<String>,
         test_input: Option<Value>,
         test_options: Option<Value>,
@@ -218,6 +219,7 @@ impl TestRunner {
         let run = TestRunner::create_run_in_db(
             conn,
             test_id,
+            run_group_id,
             run_name,
             test_json,
             test_options_json,
@@ -399,6 +401,7 @@ impl TestRunner {
 
         // Update run with job id and TestSubmitted status
         let run_update = RunChangeset {
+            run_group_id: None,
             name: None,
             status: Some(RunStatusEnum::TestSubmitted),
             test_cromwell_job_id: Some(start_job_response.id),
@@ -523,6 +526,7 @@ impl TestRunner {
 
         // Update run with job id and TestSubmitted status
         let run_update = RunChangeset {
+            run_group_id: None,
             name: None,
             status: Some(RunStatusEnum::EvalSubmitted),
             test_cromwell_job_id: None,
@@ -679,6 +683,7 @@ impl TestRunner {
             pipeline_id: None,
             template_id: None,
             test_id: None,
+            run_group_id: None,
             name: Some(String::from(name)),
             status: None,
             test_input: None,
@@ -896,6 +901,7 @@ impl TestRunner {
     fn create_run_in_db(
         conn: &PgConnection,
         test_id: Uuid,
+        run_group_id: Option<Uuid>,
         name: String,
         test_input: Value,
         test_options: Option<Value>,
@@ -911,6 +917,7 @@ impl TestRunner {
 
             let new_run = NewRun {
                 test_id,
+                run_group_id,
                 name,
                 status: RunStatusEnum::Created,
                 test_input,
@@ -968,6 +975,7 @@ pub fn update_run_status(
         | RunStatusEnum::CarrotFailed
         | RunStatusEnum::TestFailed
         | RunStatusEnum::TestAborted => RunChangeset {
+            run_group_id: None,
             name: None,
             status: Some(status.clone()),
             test_cromwell_job_id: None,
@@ -975,6 +983,7 @@ pub fn update_run_status(
             finished_at: Some(Utc::now().naive_utc()),
         },
         _ => RunChangeset {
+            run_group_id: None,
             name: None,
             status: Some(status.clone()),
             test_cromwell_job_id: None,
@@ -1026,6 +1035,7 @@ mod tests {
     use crate::manager::test_runner::{run_finished_building, Error, RunBuildStatus, TestRunner};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::run::{NewRun, RunData};
+    use crate::models::run_group::RunGroupData;
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData, SoftwareBuildQuery};
@@ -1125,6 +1135,7 @@ mod tests {
         let test = insert_test_test_with_template_id(conn, template.template_id);
 
         let new_run = NewRun {
+            run_group_id: None,
             test_id: test.test_id,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
@@ -1143,6 +1154,7 @@ mod tests {
 
     fn insert_test_run_with_test_id_and_status_building(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::Building,
@@ -1164,6 +1176,7 @@ mod tests {
         id: Uuid,
     ) -> RunData {
         let new_run = NewRun {
+            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
@@ -1231,6 +1244,10 @@ mod tests {
             .expect("Failed inserting test software build")
     }
 
+    fn insert_test_run_group(conn: &PgConnection) -> RunGroupData {
+        RunGroupData::create(conn).expect("Failed inserting test run group")
+    }
+
     fn initialize_test_runner_without_registry_host() -> TestRunner {
         let cromwell_client = CromwellClient::new(Client::default(), &mockito::server_url());
         let test_resource_client = TestResourceClient::new(Client::default(), None);
@@ -1292,6 +1309,7 @@ mod tests {
             .create_run(
                 &conn,
                 &test_test.test_id.to_string(),
+                None,
                 Some(String::from("Test run")),
                 Some(test_params.clone()),
                 test_options,
@@ -1356,6 +1374,7 @@ mod tests {
             .create_run(
                 &conn,
                 &test_test.test_id.to_string(),
+                None,
                 Some(String::from("Test run")),
                 Some(test_params.clone()),
                 test_options,
@@ -1636,10 +1655,12 @@ mod tests {
 
         let template = insert_test_template_no_software_params(&conn);
         let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let run_group = insert_test_run_group(&conn);
 
         let run = TestRunner::create_run_in_db(
             &conn,
             test.test_id,
+            Some(run_group.run_group_id),
             String::from("Kevin's test run"),
             json!({"test":"1"}),
             Some(json!({"test": "option"})),
@@ -1663,6 +1684,7 @@ mod tests {
         let run_failure = TestRunner::create_run_in_db(
             &conn,
             Uuid::new_v4(),
+            None,
             String::from("Kevin's test run"),
             json!({"test":"1"}),
             None,

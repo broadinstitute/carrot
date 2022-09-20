@@ -147,6 +147,7 @@ def delete(pipeline, yes):
 
 @main.command(name="find_runs")
 @click.argument("pipeline")
+@click.option("--run_group_id", default="", help="The id of the run group to which the run belongs")
 @click.option("--name", default="", help="The name of the run")
 @click.option(
     "--status",
@@ -233,6 +234,7 @@ def delete(pipeline, yes):
 )
 def find_runs(
     pipeline,
+    run_group_id,
     name,
     status,
     test_input,
@@ -266,6 +268,7 @@ def find_runs(
         runs.find(
             "pipelines",
             id,
+            run_group_id,
             name,
             status,
             test_input,
