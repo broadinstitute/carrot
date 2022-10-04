@@ -169,6 +169,36 @@ def test_find(find_data):
                 ("eval_option_defaults", {"option": "value"}),
                 ("created_by", "hordeprime@example.com"),
             ],
+            "copy": "",
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:08.371563",
+                    "created_by": "hordeprime@example.com",
+                    "test_input_defaults": {"in_nemesis": "She-Ra"},
+                    "test_option_defaults": {"option": "other_value"},
+                    "eval_input_defaults": {"in_brother": "Hordak"},
+                    "eval_option_defaults": {"option": "value"},
+                    "description": "This test rules the known universe",
+                    "name": "Horde Emperor test",
+                    "template_id": "9d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "test_id": "bd132568-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "params": [
+                ("name", "Horde Emperor test"),
+                ("template_id", "9d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
+                ("description", "This test rules the known universe"),
+                ("test_input_defaults", ""),
+                ("test_option_defaults", ""),
+                ("eval_input_defaults", ""),
+                ("eval_option_defaults", ""),
+                ("created_by", "hordeprime@example.com"),
+            ],
+            "copy": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:08.371563",
@@ -197,6 +227,7 @@ def test_find(find_data):
                 ("eval_option_defaults", {"option": "value"}),
                 ("created_by", "hordeprime@example.com"),
             ],
+            "copy": "",
             "return": json.dumps(
                 {
                     "title": "Server error",
@@ -213,7 +244,10 @@ def create_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).create(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).create("tests", request.param["params"]).thenReturn(
+    query_params = None
+    if request.param["copy"] != "":
+        query_params = [("copy", request.param["copy"])]
+    mockito.when(request_handler).create("tests", request.param["params"], query_params=query_params).thenReturn(
         request.param["return"]
     )
     return request.param
@@ -229,6 +263,7 @@ def test_create(create_data):
         create_data["params"][5][1],
         create_data["params"][6][1],
         create_data["params"][7][1],
+        create_data["copy"],
     )
     assert result == create_data["return"]
 

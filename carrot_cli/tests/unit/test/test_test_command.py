@@ -334,6 +334,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
+                ""
             ],
             "return": json.dumps(
                 {
@@ -382,6 +383,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
+                ""
             ],
             "from_name": {
                 "name": "Sword of Protection template",
@@ -443,12 +445,9 @@ def test_find(find_data):
             "there must be a value set for email.",
         },
         {
-            "args": ["test", "create"],
+            "args": ["test", "create", "--created_by", "kevin@example.com"],
             "params": [],
-            "return": "Usage: carrot_cli test create [OPTIONS]\n"
-            "Try 'carrot_cli test create -h' for help.\n"
-            "\n"
-            "Error: Missing option '--name'.",
+            "logging": "If a value is not specified for '--copy', then '--name' and '--template' are required.",
         },
     ]
 )
@@ -473,6 +472,7 @@ def create_data(request):
             request.param["params"][5],
             request.param["params"][6],
             request.param["params"][7],
+            request.param["params"][8],
         ).thenReturn(request.param["return"])
     return request.param
 

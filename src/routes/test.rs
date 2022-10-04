@@ -9,7 +9,29 @@ use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::util::parse_id;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
 use log::error;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+/// Query parameters for the create mapping
+#[derive(Deserialize)]
+struct CreateQueryParams {
+    copy: Option<Uuid>
+}
+
+/// Body for requests to the create mapping. Is exactly `models::test::NewTest` except everything
+/// is an option because then can be supplied as a copy
+#[derive(Debug, Deserialize, Serialize)]
+struct CreateBody {
+    pub name: Option<String>,
+    pub template_id: Option<Uuid>,
+    pub description: Option<String>,
+    pub test_input_defaults: Option<Value>,
+    pub test_option_defaults: Option<Value>,
+    pub eval_input_defaults: Option<Value>,
+    pub eval_option_defaults: Option<Value>,
+    pub created_by: Option<String>,
+}
 
 /// Handles requests to /tests/{id} for retrieving test info by test_id
 ///
@@ -116,19 +138,89 @@ async fn find(
 /// Handles requests to /tests for creating tests
 ///
 /// This function is called by Actix-Web when a post request is made to the /tests mapping
-/// It deserializes the request body to a NewTest, connects to the db via a connection from
+/// It deserializes the request body to a CreateBody, connects to the db via a connection from
 /// `pool`, creates a test with the specified parameters, and returns the created test, or
 /// an error message if creating the test fails for some reason
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn create(
-    web::Json(new_test): web::Json<NewTest>,
+    web::Json(create_body): web::Json<CreateBody>,
+    web::Query(query): web::Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
+
+    // If this it not a copy and either the name or template id is missing, return an error response
+    if query.copy.is_none() && (create_body.name.is_none() || create_body.template_id.is_none()) {
+        return HttpResponse::BadRequest().json(ErrorBody{
+            title: String::from("Invalid request body"),
+            status: 400,
+            detail: String::from("Fields 'name' and 'template_id' are required if not copying from an existing test.")
+        });
+    }
+
     //Insert in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        // Build a NewTest based on create_body and query
+        let new_test = match query.copy {
+            Some(copy_id) => {
+                // Attempt to retrieve a test matching copy_id
+                let copy_test = match TestData::find_by_id(&conn, copy_id) {
+                    Ok(test) => test,
+                    Err(e) => {
+                        error!("{}", e);
+                        return Err(e);
+                    }
+                };
+                // Create a working new test with the values from the test we're copying
+                let mut new_test_working = NewTest {
+                    name: format!("{}_copy", copy_test.name), // Can't use th
+                    template_id: copy_test.template_id,
+                    description: copy_test.description,
+                    test_input_defaults: copy_test.test_input_defaults,
+                    test_option_defaults: copy_test.test_option_defaults,
+                    eval_input_defaults: copy_test.eval_input_defaults,
+                    eval_option_defaults: copy_test.eval_option_defaults,
+                    created_by: None
+                };
+
+                // Replace any values in copy_test with provided values in create_body
+                if let Some(name) = &create_body.name { new_test_working.name = name.clone() }
+                if let Some(template_id) = create_body.template_id { new_test_working.template_id = template_id }
+                if let Some(description) = &create_body.description { new_test_working.description = Some(description.clone()) }
+                if let Some(test_input_defaults) = &create_body.test_input_defaults { new_test_working.test_input_defaults = Some(test_input_defaults.clone()) }
+                if let Some(test_option_defaults) = &create_body.test_option_defaults { new_test_working.test_option_defaults = Some(test_option_defaults.clone()) }
+                if let Some(eval_input_defaults) = &create_body.eval_input_defaults { new_test_working.eval_input_defaults = Some(eval_input_defaults.clone()) }
+                if let Some(eval_option_defaults) = &create_body.eval_option_defaults { new_test_working.eval_option_defaults = Some(eval_option_defaults.clone()) }
+                if let Some(created_by) = &create_body.created_by { new_test_working.created_by = Some(created_by.clone()) }
+
+                new_test_working
+            },
+            None => {
+                // Panic if we don't have name or template_id because we already checked for those
+                let name = match &create_body.name {
+                    Some(name) => name.clone(),
+                    None => panic!("Failed to get name from create body ({:?}) even though we checked it exists.  This should not happen.", &create_body)
+                };
+                let template_id = match &create_body.template_id {
+                    Some(template_id) => *template_id,
+                    None => panic!("Failed to get template_id from create body ({:?}) even though we checked it exists.  This should not happen.", &create_body)
+                };
+
+                NewTest {
+                    name,
+                    template_id,
+                    description: create_body.description,
+                    test_input_defaults: create_body.test_input_defaults,
+                    test_option_defaults: create_body.test_option_defaults,
+                    eval_input_defaults: create_body.eval_input_defaults,
+                    eval_option_defaults: create_body.eval_option_defaults,
+                    created_by: create_body.created_by
+                }
+            }
+        };
 
         match TestData::create(&conn, new_test) {
             Ok(test) => Ok(test),
@@ -610,9 +702,9 @@ mod tests {
 
         let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
 
-        let new_test = NewTest {
-            name: String::from("Kevin's test"),
-            template_id: template.template_id,
+        let new_test = CreateBody {
+            name: Some(String::from("Kevin's test")),
+            template_id: Some(template.template_id),
             description: Some(String::from("Kevin's test description")),
             test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
             test_option_defaults: Some(
@@ -636,8 +728,8 @@ mod tests {
         let result = test::read_body(resp).await;
         let test_test: TestData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(test_test.name, new_test.name);
-        assert_eq!(test_test.template_id, new_test.template_id);
+        assert_eq!(test_test.name, new_test.name.unwrap());
+        assert_eq!(test_test.template_id, new_test.template_id.unwrap());
         assert_eq!(
             test_test
                 .description
@@ -677,6 +769,90 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn create_success_copy() {
+        let pool = get_test_db_pool();
+
+        let test_to_copy = create_test_test(&pool.get().unwrap());
+
+        let copy_id = test_to_copy.test_id;
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_test = CreateBody {
+            name: Some(String::from("Jonn's test")),
+            template_id: None,
+            description: Some(String::from("Jonn's test description")),
+            test_input_defaults: None,
+            test_option_defaults: None,
+            eval_input_defaults: None,
+            eval_option_defaults: None,
+            created_by: Some(String::from("Jonn@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/tests?copy={}", copy_id))
+            .set_json(&new_test)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        //assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+
+        println!("{}", std::str::from_utf8(&result.to_vec()).unwrap());
+
+        let test_test: TestData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_test.name, new_test.name.unwrap());
+        assert_eq!(test_test.template_id, test_to_copy.template_id);
+        assert_eq!(
+            test_test
+                .description
+                .expect("Created test missing description"),
+            new_test.description.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .test_input_defaults
+                .expect("Created test missing test_input_defaults"),
+            test_to_copy.test_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .test_option_defaults
+                .expect("Created test missing test_option_defaults"),
+            test_to_copy.test_option_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .eval_input_defaults
+                .expect("Created test missing eval_input_defaults"),
+            test_to_copy.eval_input_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .eval_option_defaults
+                .expect("Created test missing eval_option_defaults"),
+            test_to_copy.eval_option_defaults.unwrap()
+        );
+        assert_eq!(
+            test_test
+                .created_by
+                .expect("Created test missing created_by"),
+            new_test.created_by.unwrap()
+        );
+
+        // Make sure the copy test still exists
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}", copy_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        let result = test::read_body(resp).await;
+        let copied_test: TestData = serde_json::from_slice(&result).unwrap();
+    }
+
+    #[actix_rt::test]
     async fn create_failure() {
         let pool = get_test_db_pool();
 
@@ -709,6 +885,42 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
+    }
+
+    #[actix_rt::test]
+    async fn create_failure_missing_name_no_copy() {
+        let pool = get_test_db_pool();
+
+        let test = create_test_test(&pool.get().unwrap());
+
+        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+
+        let new_test = CreateBody {
+            name: None,
+            template_id: Some(test.template_id),
+            description: Some(String::from("Kevin's test description")),
+            test_input_defaults: Some(serde_json::from_str("{\"test\":\"test2\"}").unwrap()),
+            test_option_defaults: None,
+            eval_input_defaults: Some(serde_json::from_str("{\"eval\":\"test2\"}").unwrap()),
+            eval_option_defaults: None,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/tests")
+            .set_json(&new_test)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Invalid request body");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "Fields 'name' and 'template_id' are required if not copying from an existing test.");
     }
 
     #[actix_rt::test]

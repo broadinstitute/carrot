@@ -168,6 +168,7 @@ def test_find(find_data):
                 ("description", "This pipeline rules the known universe"),
                 ("created_by", "hordeprime@example.com"),
             ],
+            "query_params": None,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:08.371563",
@@ -181,8 +182,35 @@ def test_find(find_data):
             ),
         },
         {
+            "entity": "tests",
+            "params": [
+                ("name", "Hordak test"),
+                ("description", "This test is a copy of the prime test"),
+                ("template_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
+                ("created_by", "hordak@example.com"),
+            ],
+            "query_params": [
+                ("copy", "cd987859-06fe-4b1a-9e96-47d4f36bf819")
+            ],
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:06.371563",
+                    "created_by": "hordak@example.com",
+                    "description": "This test is a copy of the prime test",
+                    "test_input_defaults": {"in_greeted": "Cool Person"},
+                    "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                    "name": "Hordak test",
+                    "template_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "test_id": "bd132568-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
             "entity": "templates",
             "params": [],
+            "query_params": None,
             "return": "Received response with status 500 and empty body",
         },
     ]
@@ -196,14 +224,14 @@ def create_data(request):
     address = "http://%s/api/v1/%s" % ("example.com", request.param["entity"])
     # Get params converted to dict
     params = dict(request.param["params"])
-    mockito.when(request_handler).send_request("POST", address, json=params).thenReturn(
+    mockito.when(request_handler).send_request("POST", address, json=params, params=request.param["query_params"]).thenReturn(
         request.param["return"]
     )
     return request.param
 
 
 def test_create(create_data):
-    result = request_handler.create(create_data["entity"], create_data["params"])
+    result = request_handler.create(create_data["entity"], create_data["params"], query_params=create_data["query_params"])
     assert result == create_data["return"]
 
 

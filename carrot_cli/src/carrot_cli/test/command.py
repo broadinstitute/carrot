@@ -142,12 +142,12 @@ def find(
 
 
 @main.command(name="create")
-@click.option("--name", help="The name of the test", required=True)
+@click.option("--name", help="The name of the test. Required unless copying.", default="")
 @click.option(
     "--template",
     "--template_id",
-    required=True,
-    help="The ID or name of the template that will be the test's parent",
+    default="",
+    help="The ID or name of the template that will be the test's parent. Required unless copying.",
 )
 @click.option("--description", default="", help="The description of the test")
 @click.option(
@@ -175,6 +175,13 @@ def find(
     default="",
     help="Email of the creator of the test.  Defaults to email config variable",
 )
+@click.option(
+    "--copy",
+    default="",
+    help="Name or ID of a test you'd like to copy.  If this is specified, a new test will be created with all the "
+         "attributes of the copied test, except any attributes that you have specified.  If a name is not specified, "
+         "the new test will be named in the format '{old_test_name}_copy'."
+)
 def create(
     name,
     template,
@@ -183,13 +190,24 @@ def create(
     test_option_defaults,
     eval_input_defaults,
     eval_option_defaults,
-    created_by
+    created_by,
+    copy
 ):
     """Create test with the specified parameters"""
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
+    # If copy is specified, get if it's a name
+    if copy != "":
+        copy = dependency_util.get_id_from_id_or_name_and_handle_error(copy, tests, "test_id", "copy")
+    # If copy is not specified, make sure name and template have been specified
+    if copy == "" and (name == "" or template == ""):
+        LOGGER.error(
+            "If a value is not specified for '--copy', then '--name' and '--template' are required."
+        )
+        sys.exit(1)
     # Process template to get id if it's a name
-    template_id = dependency_util.get_id_from_id_or_name_and_handle_error(template, templates, "template_id", "template")
+    if template != "":
+        template = dependency_util.get_id_from_id_or_name_and_handle_error(template, templates, "template_id", "template")
     # Load data from files for test_input_defaults, test_option_defaults, eval_input_defaults and eval_option_defaults,
     # if set
     test_input_defaults = file_util.read_file_to_json(test_input_defaults)
@@ -199,13 +217,14 @@ def create(
     print(
         tests.create(
             name,
-            template_id,
+            template,
             description,
             test_input_defaults,
             test_option_defaults,
             eval_input_defaults,
             eval_option_defaults,
             created_by,
+            copy
         )
     )
 
