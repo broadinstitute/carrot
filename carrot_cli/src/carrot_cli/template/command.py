@@ -129,36 +129,45 @@ def find(
     "--pipeline",
     "--pipeline_id",
     help="The ID or name of the pipeline that will be this template's parent",
-    required=True,
+    default=""
 )
-@click.option("--name", help="The name of the template", required=True)
+@click.option("--name", help="The name of the template", default="")
 @click.option("--description", default="", help="The description of the template")
 @click.option(
     "--test_wdl",
-    required=True,
     help="The location where the test WDL for this template is hosted, or its local file path. The"
     "test WDL is the WDL which defines the thing the be tested",
+    default=""
 )
 @click.option(
     "--test_wdl_dependencies",
     help="The location where the test WDL dependencies zip for this template is hosted, or its"
     "local file path. The zip should be formatted the same as it would be for cromwell",
+    default=""
 )
 @click.option(
     "--eval_wdl",
-    required=True,
     help="The location where the eval WDL for ths template is hosted.  The eval WDL is the WDL "
     "which takes the outputs from the test WDL and evaluates them",
+    default=""
 )
 @click.option(
     "--eval_wdl_dependencies",
     help="The location where the eval WDL dependencies zip for this template is hosted, or its"
     "local file path. The zip should be formatted the same as it would be for cromwell",
+    default=""
 )
 @click.option(
     "--created_by",
     default="",
     help="Email of the creator of the template.  Defaults to email config variable",
+)
+@click.option(
+    "--copy",
+    default="",
+    help="Name or ID of a template you'd like to copy.  If this is specified, a new template will be created with all "
+         "the attributes of the copied template, except any attributes that you have specified.  If a name is not"
+         " specified, the new template will be named in the format '{old_template_name}_copy'."
 )
 def create(
     name,
@@ -168,13 +177,27 @@ def create(
     test_wdl_dependencies,
     eval_wdl,
     eval_wdl_dependencies,
-    created_by
+    created_by,
+    copy
 ):
     """Create template with the specified parameters"""
+    # If copy is specified, get if it's a name
+    if copy != "":
+        copy = dependency_util.get_id_from_id_or_name_and_handle_error(copy, templates, "template_id", "copy")
+    # If copy is not specified, make sure name, pipeline, test_wdl, and eval_Wdl have been specified
+    if copy == "" and (name == "" or pipeline == "" or test_wdl == "" or eval_wdl == ""):
+        LOGGER.error(
+            "If a value is not specified for '--copy', then '--name', '--pipeline', '--test_wdl', and '--eval_wdl are"
+            " required."
+        )
+        sys.exit(1)
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
     # Process pipeline to get id if it's a name
-    pipeline_id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    if pipeline != "":
+        pipeline_id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    else:
+        pipeline_id = ""
 
     print(
         templates.create(
@@ -185,7 +208,8 @@ def create(
             test_wdl_dependencies,
             eval_wdl,
             eval_wdl_dependencies,
-            created_by
+            created_by,
+            copy
         )
     )
 

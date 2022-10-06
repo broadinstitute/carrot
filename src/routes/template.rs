@@ -22,6 +22,7 @@ use actix_web::{error::BlockingError, guard, web, HttpRequest, HttpResponse};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::PgConnection;
 use log::{debug, error};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fmt;
@@ -51,6 +52,26 @@ impl fmt::Display for WdlType {
     }
 }
 
+/// Query parameters for the create mapping
+#[derive(Deserialize)]
+struct CreateQueryParams {
+    copy: Option<Uuid>
+}
+
+/// Body for requests to the create mapping. Is exactly `models::test::NewTemplate` except
+/// everything is an option because then can be supplied as a copy
+#[derive(Debug, Deserialize, Serialize)]
+struct CreateBody {
+    name: Option<String>,
+    pipeline_id: Option<Uuid>,
+    description: Option<String>,
+    test_wdl: Option<String>,
+    test_wdl_dependencies: Option<String>,
+    eval_wdl: Option<String>,
+    eval_wdl_dependencies: Option<String>,
+    created_by: Option<String>,
+}
+
 /// Handles requests to /templates/{id} for retrieving template info by template_id
 ///
 /// This function is called by Actix-Web when a get request is made to the /templates/{id} mapping
@@ -69,44 +90,29 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
         Ok(parsed_id) => parsed_id,
         Err(error_response) => return error_response,
     };
-
-    //Query DB for template in new thread
-    match web::block(move || {
-        let conn = pool.get().expect("Failed to get DB connection from pool");
-
-        match TemplateData::find_by_id(&conn, id) {
-            Ok(template) => Ok(template),
-            Err(e) => {
-                error!("{}", e);
-                Err(e)
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+    // Retrieve the template
+    let mut template: TemplateData = match web::block(move || {
+        TemplateData::find_by_id(&conn, id)
+    }).await {
+        Ok(template) => template,
+        Err(e) => return match e {
+            // If no template is found, return a 404
+            BlockingError::Error(diesel::NotFound) => {
+                HttpResponse::NotFound().json(ErrorBody {
+                    title: "No template found".to_string(),
+                    status: 404,
+                    detail: "No template found with the specified ID".to_string(),
+                })
             }
+            // For other errors, return a 500
+            _ => default_500(&e),
         }
-    })
-    .await
-    {
-        // If there is no error, return a response with the retrieved data
-        Ok(mut template) => {
-            // Update the wdl mappings so the user will have uris they can use to access them
-            fill_uris_for_wdl_location(&req, &mut template);
-            // Return the template
-            HttpResponse::Ok().json(template)
-        }
-        Err(e) => {
-            error!("{:?}", e);
-            match e {
-                // If no template is found, return a 404
-                BlockingError::Error(diesel::NotFound) => {
-                    HttpResponse::NotFound().json(ErrorBody {
-                        title: "No template found".to_string(),
-                        status: 404,
-                        detail: "No template found with the specified ID".to_string(),
-                    })
-                }
-                // For other errors, return a 500
-                _ => default_500(&e),
-            }
-        }
-    }
+    };
+    // Update the wdl mappings so the user will have uris they can use to access them
+    fill_uris_for_wdl_location(&req, &mut template);
+    // Return the template
+    HttpResponse::Ok().json(template)
 }
 
 /// Handles requests to /templates for retrieving template info by query parameters
@@ -178,6 +184,7 @@ async fn find(
 async fn create_from_multipart(
     req: HttpRequest,
     payload: Multipart,
+    web::Query(query): web::Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
     test_resource_client: web::Data<TestResourceClient>,
     wdl_storage_client: web::Data<WdlStorageClient>,
@@ -188,6 +195,7 @@ async fn create_from_multipart(
     // Process the payload
     let new_template: NewTemplate = match get_new_template_from_multipart(
         payload,
+        query.copy,
         &test_resource_client,
         &womtool_runner,
         &wdl_storage_client,
@@ -217,27 +225,116 @@ async fn create_from_multipart(
 /// poisoned
 async fn create_from_json(
     req: HttpRequest,
-    web::Json(new_template): web::Json<NewTemplate>,
+    web::Json(create_body): web::Json<CreateBody>,
+    web::Query(query): web::Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
     test_resource_client: web::Data<TestResourceClient>,
     wdl_storage_client: web::Data<WdlStorageClient>,
     womtool_runner: web::Data<WomtoolRunner>,
     carrot_config: web::Data<Config>,
 ) -> HttpResponse {
+    // If this is not a copy and the name, pipeline_id, test_wdl, or eval_wdl is missing, return an
+    // error response
+    if query.copy.is_none() && (create_body.name.is_none() || create_body.pipeline_id.is_none() || create_body.test_wdl.is_none() || create_body.eval_wdl.is_none()) {
+        return HttpResponse::BadRequest().json(ErrorBody{
+            title: String::from("Invalid request body"),
+            status: 400,
+            detail: String::from("Fields 'name', 'pipeline_id', 'test_wdl', and 'eval_wdl' are required if not copying from an existing template.")
+        });
+    }
+
     // If either WDL is a gs uri, make sure those are allowed
-    if new_template
-        .test_wdl
-        .starts_with(gs_uri_parsing::GS_URI_PREFIX)
-        || new_template
-            .eval_wdl
-            .starts_with(gs_uri_parsing::GS_URI_PREFIX)
-    {
-        if let Err(error_response) = is_gs_uris_for_wdls_enabled(carrot_config.gcloud()) {
-            return error_response;
+    if let Some(test_wdl) = &create_body.test_wdl {
+        if test_wdl.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
+            if let Err(error_response) = is_gs_uris_for_wdls_enabled(carrot_config.gcloud()) {
+                return error_response;
+            }
+        }
+    }
+    if let Some(eval_wdl) = &create_body.eval_wdl {
+        if eval_wdl.starts_with(gs_uri_parsing::GS_URI_PREFIX) {
+            if let Err(error_response) = is_gs_uris_for_wdls_enabled(carrot_config.gcloud()) {
+                return error_response;
+            }
         }
     }
 
     let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    let new_template: NewTemplate = match query.copy {
+        // If there is a copy_id, attempt to retrieve the tempalte to copy and build a NewTest
+        Some(copy_id) => {
+            let copy_template: TemplateData = match TemplateData::find_by_id(&conn, copy_id) {
+                Ok(template) => template,
+                Err(e) => return match e {
+                    // If no template is found, return a 404
+                    diesel::NotFound => {
+                        HttpResponse::NotFound().json(ErrorBody {
+                            title: "No template found".to_string(),
+                            status: 404,
+                            detail: "No template found with the specified ID".to_string(),
+                        })
+                    }
+                    // For other errors, return a 500
+                    _ => default_500(&e),
+                }
+            };
+            // Create a working new template with the values from the test we're copying
+            let mut new_template_working = NewTemplate {
+                name: format!("{}_copy", copy_template.name), // Can't use th
+                pipeline_id: copy_template.pipeline_id,
+                description: copy_template.description,
+                test_wdl: copy_template.test_wdl,
+                test_wdl_dependencies: copy_template.test_wdl_dependencies,
+                eval_wdl: copy_template.eval_wdl,
+                eval_wdl_dependencies: copy_template.eval_wdl_dependencies,
+                created_by: None
+            };
+
+            // Replace any values in copy_template with provided values in create_body
+            if let Some(name) = &create_body.name { new_template_working.name = name.clone() }
+            if let Some(pipeline_id) = create_body.pipeline_id { new_template_working.pipeline_id = pipeline_id }
+            if let Some(description) = &create_body.description { new_template_working.description = Some(description.clone()) }
+            if let Some(test_wdl) = &create_body.test_wdl { new_template_working.test_wdl = test_wdl.clone() }
+            if let Some(test_wdl_dependencies) = &create_body.test_wdl_dependencies { new_template_working.test_wdl_dependencies = Some(test_wdl_dependencies.clone()) }
+            if let Some(eval_wdl) = &create_body.eval_wdl { new_template_working.eval_wdl = eval_wdl.clone() }
+            if let Some(eval_wdl_dependencies) = &create_body.eval_wdl_dependencies { new_template_working.eval_wdl_dependencies = Some(eval_wdl_dependencies.clone()) }
+            if let Some(created_by) = &create_body.created_by { new_template_working.created_by = Some(created_by.clone()) }
+
+            new_template_working
+        },
+        // Attempt to convert the create_body into a NewTest
+        None => {
+            // Panic if we don't have name, pipeline_id, test_wdl, or eval_wdl because we already checked for those
+            let name = match &create_body.name {
+                Some(name) => name.clone(),
+                None => panic!("Failed to get name from create body ({:?}) even though we checked it exists.  This should not happen.", &create_body)
+            };
+            let pipeline_id = match &create_body.pipeline_id {
+                Some(pipeline_id) => *pipeline_id,
+                None => panic!("Failed to get pipeline_id from create body ({:?}) even though we checked it exists.  This should not happen.", &create_body)
+            };
+            let test_wdl = match &create_body.test_wdl {
+                Some(test_wdl) => test_wdl.clone(),
+                None => panic!("Failed to get test_wdl from create body ({:?}) even though we checked it exists.  This should not happen.", &create_body)
+            };
+            let eval_wdl = match &create_body.eval_wdl {
+                Some(eval_wdl) => eval_wdl.clone(),
+                None => panic!("Failed to get pipeline_id from create body ({:?}) even though we checked it exists.  This should not happen.", &create_body)
+            };
+
+            NewTemplate {
+                name,
+                pipeline_id,
+                description: create_body.description,
+                test_wdl,
+                test_wdl_dependencies: create_body.test_wdl_dependencies,
+                eval_wdl,
+                eval_wdl_dependencies: create_body.eval_wdl_dependencies,
+                created_by: create_body.created_by
+            }
+        }
+    };
 
     // Store and validate the WDLs
     let (test_wdl_location, test_wdl_dependencies_location): (String, Option<String>) =
@@ -892,6 +989,7 @@ async fn download_wdl_dependencies(
 /// form of an HttpResponse if there are missing or unexpected fields, or some other error occurs
 async fn get_new_template_from_multipart(
     payload: Multipart,
+    copy_id: Option<Uuid>,
     test_resource_client: &TestResourceClient,
     womtool_runner: &WomtoolRunner,
     wdl_storage_client: &WdlStorageClient,
@@ -922,7 +1020,7 @@ async fn get_new_template_from_multipart(
         payload,
         &EXPECTED_TEXT_FIELDS.to_vec(),
         &EXPECTED_FILE_FIELDS.to_vec(),
-        &REQUIRED_TEXT_FIELDS.to_vec(),
+        &(if copy_id.is_none() { REQUIRED_TEXT_FIELDS.to_vec() } else { [].to_vec() }),
         &[].to_vec(),
     )
     .await?;
@@ -948,6 +1046,59 @@ async fn get_new_template_from_multipart(
         "eval_wdl_dependencies",
         gcloud_config,
     )?;
+
+    // If we have a copy id, get the template we want to copy
+    if let Some(copy_id) = copy_id {
+        let copy_template: TemplateData = match TemplateData::find_by_id(&conn, copy_id) {
+            Ok(template) => template,
+            Err(e) => return Err(match e {
+                // If no template is found, return a 404
+                diesel::NotFound => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No template found".to_string(),
+                        status: 404,
+                        detail: "No template found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            })
+        };
+        // Fill in values in text_data_map from copy_template that are not filled in yet
+        if !text_data_map.contains_key("pipeline_id") {
+            text_data_map.insert(String::from("pipeline_id"), copy_template.pipeline_id.to_string());
+        }
+        if !text_data_map.contains_key("name") {
+            text_data_map.insert(String::from("name"), format!("{}_copy", copy_template.name.clone()));
+        }
+        if !text_data_map.contains_key("description") {
+            if let Some(description) = copy_template.description {
+                text_data_map.insert(String::from("description"), description);
+            }
+        }
+        if !text_data_map.contains_key("created_by") {
+            if let Some(created_by) = copy_template.created_by {
+                text_data_map.insert(String::from("created_by"), created_by);
+            }
+        }
+        if !text_data_map.contains_key("test_wdl") && !file_data_map.contains_key("test_wdl_file") {
+            text_data_map.insert(String::from("test_wdl"), copy_template.test_wdl.clone());
+        }
+        if !text_data_map.contains_key("test_wdl_dependencies") && !file_data_map.contains_key("test_wdl_dependencies_file") {
+            if let Some(test_wdl_dependencies) = copy_template.test_wdl_dependencies {
+                text_data_map.insert(String::from("test_wdl_dependencies"), test_wdl_dependencies);
+            }
+        }
+        if !text_data_map.contains_key("eval_wdl") && !file_data_map.contains_key("eval_wdl_file") {
+            text_data_map.insert(String::from("eval_wdl"), copy_template.eval_wdl.clone());
+        }
+        if !text_data_map.contains_key("eval_wdl_dependencies") && !file_data_map.contains_key("eval_wdl_dependencies_file") {
+            if let Some(eval_wdl_dependencies) = copy_template.eval_wdl_dependencies {
+                text_data_map.insert(String::from("eval_wdl_dependencies"), eval_wdl_dependencies);
+            }
+        }
+    }
+
     // Convert pipeline_id to a UUID
     let pipeline_id: Uuid = {
         let pipeline_id_str = text_data_map
@@ -1855,7 +2006,7 @@ mod tests {
     use diesel::PgConnection;
     use mockito::Mock;
     use serde_json::Value;
-    use std::fs::read_to_string;
+    use std::fs::{read, read_to_string};
     use tempfile::NamedTempFile;
     use uuid::Uuid;
 
@@ -1872,18 +2023,16 @@ mod tests {
     fn create_test_template(conn: &PgConnection) -> TemplateData {
         let pipeline = insert_test_pipeline(conn);
 
-        let new_template = NewTemplate {
-            name: String::from("Kevin's Template"),
+        TemplateData::create(conn, NewTemplate{
+            name: "Kevin's Template".to_string(),
             pipeline_id: pipeline.pipeline_id,
-            description: Some(String::from("Kevin made this template for testing")),
-            test_wdl: String::from("testtesttest"),
-            test_wdl_dependencies: None,
-            eval_wdl: String::from("evalevaleval"),
-            eval_wdl_dependencies: None,
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        TemplateData::create(conn, new_template).expect("Failed inserting test template")
+            description: Some(String::from("Kevin's template description")),
+            test_wdl: "testdata/routes/template/valid_wdl_with_deps.wdl".to_string(),
+            test_wdl_dependencies: Some(String::from("testdata/routes/template/valid_wdl_deps.zip")),
+            eval_wdl: "testdata/routes/template/different_valid_wdl_with_deps.wdl".to_string(),
+            eval_wdl_dependencies: Some(String::from("testdata/routes/template/different_valid_wdl_deps.zip")),
+            created_by: Some(String::from("Kevin@example.com"))
+        }).expect("Failed to insert template to copy")
     }
 
     fn create_test_template_wdl_locations(
@@ -2427,6 +2576,109 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn create_success_copy() {
+        // Set up config, test resource client, womtool runner, and wdl_storage_client which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
+        let pool = get_test_db_pool();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .data(wdl_storage_client)
+                .configure(init_routes),
+        )
+            .await;
+
+        let template_to_copy = create_test_template(&pool.get().unwrap());
+
+        let ((valid_wdl_address, valid_wdl_mock), (valid_wdl_deps_address, valid_wdl_deps_mock)) =
+            setup_valid_wdl_and_deps_addresses();
+        let (
+            (different_valid_wdl_address, different_valid_wdl_mock),
+            (different_valid_wdl_deps_address, different_valid_wdl_deps_mock),
+        ) = setup_different_valid_wdl_and_deps_addresses();
+
+        let create_body = CreateBody {
+            name: Some(String::from("Kevin's copy template")),
+            pipeline_id: None,
+            description: Some(String::from("Kevin's copy template description")),
+            test_wdl: Some(valid_wdl_address),
+            test_wdl_dependencies: None,
+            eval_wdl: None,
+            eval_wdl_dependencies: None,
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/templates?copy={}", template_to_copy.template_id))
+            .set_json(&create_body)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        valid_wdl_mock.assert();
+        valid_wdl_deps_mock.expect(0).assert();
+        different_valid_wdl_mock.expect(0).assert();
+        different_valid_wdl_deps_mock.expect(0).assert();
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+
+        let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
+
+        // Verify that what's returned is the template we expect
+        assert_eq!(test_template.name, create_body.name.unwrap());
+        assert_eq!(test_template.pipeline_id, template_to_copy.pipeline_id);
+        assert_eq!(
+            test_template
+                .description
+                .expect("Created template missing description"),
+            create_body.description.unwrap()
+        );
+        assert_eq!(
+            test_template.test_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/test_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.test_wdl_dependencies.unwrap(),
+            format!(
+                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl_dependencies.unwrap(),
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template
+                .created_by
+                .expect("Created template missing created_by"),
+            create_body.created_by.unwrap()
+        );
+    }
+
+    #[actix_rt::test]
     async fn create_with_multipart_success_uploaded_wdls() {
         // Set up config, test resource client, womtool runner, and wdl_storage_client which are needed for this mapping
         let test_config = load_default_config();
@@ -2539,6 +2791,115 @@ mod tests {
                     String out = read_string(stdout())\r\n    \
                 }\r\n\
             }"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_with_multipart_success_uploaded_wdls_copy() {
+        // Set up config, test resource client, womtool runner, and wdl_storage_client which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
+        let pool = get_test_db_pool();
+
+        let template_to_copy = create_test_template(&pool.get().unwrap());
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .data(wdl_storage_client)
+                .configure(init_routes),
+        )
+            .await;
+
+        // Load the multipart body we'll send in the request
+        let multipart_body = read_to_string("testdata/routes/template/valid_create_multipart_copy.txt")
+            .unwrap()
+            // Multipart needs carriage returns
+            .replace("\n", "\r\n");
+        let multipart_body_bytes = Bytes::from(multipart_body);
+
+        let content_length = multipart_body_bytes.len();
+
+        let mut req = test::TestRequest::post()
+            .uri(&format!("/templates?copy={}", template_to_copy.template_id))
+            .header("Content-Type", "multipart/form-data; boundary=\"---------------------------974767299852498929531610575\"")
+            .header("Content-Length", content_length)
+            .set_payload(multipart_body_bytes)
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
+
+        // Verify that what's returned is the template we expect
+        assert_eq!(test_template.name, "Test template copy");
+        assert_eq!(test_template.pipeline_id, template_to_copy.pipeline_id);
+        assert_eq!(
+            test_template
+                .description
+                .expect("Created template missing description"),
+            "Kevin's template description"
+        );
+        assert_eq!(
+            test_template.test_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/test_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template.eval_wdl,
+            format!(
+                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                test_template.template_id
+            )
+        );
+        assert_eq!(
+            test_template
+                .created_by
+                .expect("Created template missing created_by"),
+            "Kevin2@example.com"
+        );
+
+        // Get the template from the DB so we have the paths of the wdls so we can read and check
+        // them
+        let stored_template =
+            TemplateData::find_by_id(&pool.get().unwrap(), test_template.template_id).unwrap();
+        // Read the wdls and check them
+        let test_wdl_contents = read_to_string(stored_template.test_wdl).unwrap();
+        assert_eq!(
+            test_wdl_contents,
+            "workflow myWorkflow {\r\n    \
+                call myTask\r\n\
+            }\r\n\
+            \r\n\
+            task myTask {\r\n    \
+                command {\r\n        \
+                    echo \"hello world\"\r\n    \
+                }\r\n    \
+                output {\r\n        \
+                    String out = read_string(stdout())\r\n    \
+                }\r\n\
+            }"
+        );
+        let eval_wdl_contents = read_to_string(stored_template.eval_wdl).unwrap();
+        assert_eq!(
+            eval_wdl_contents,
+            read_to_string("testdata/routes/template/different_valid_wdl_with_deps.wdl").unwrap()
+        );
+        let eval_wdl_deps = read(stored_template.eval_wdl_dependencies.unwrap()).unwrap();
+        assert_eq!(
+            eval_wdl_deps,
+            read("testdata/routes/template/different_valid_wdl_deps.zip").unwrap()
         );
     }
 
@@ -2702,6 +3063,59 @@ mod tests {
 
         assert_eq!(error_body.title, "Server error");
         assert_eq!(error_body.status, 500);
+    }
+
+    #[actix_rt::test]
+    async fn create_failure_missing_pipeline_id() {
+        // Set up config, test resource client, and womtool runner which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
+        let pool = get_test_db_pool();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .data(wdl_storage_client)
+                .configure(init_routes),
+        )
+            .await;
+
+        let template = create_test_template(&pool.get().unwrap());
+
+        let (valid_wdl_address, _mock) = setup_valid_wdl_address();
+
+        let new_template = CreateBody {
+            name: None,
+            pipeline_id: Some(template.pipeline_id),
+            description: Some(String::from("Kevin's test description")),
+            test_wdl: Some(valid_wdl_address.clone()),
+            test_wdl_dependencies: None,
+            eval_wdl: Some(valid_wdl_address),
+            eval_wdl_dependencies: None,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/templates")
+            .set_json(&new_template)
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Invalid request body");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(error_body.detail, "Fields 'name', 'pipeline_id', 'test_wdl', and 'eval_wdl' are required if not copying from an existing template.");
     }
 
     #[actix_rt::test]
@@ -2938,6 +3352,59 @@ mod tests {
         assert_eq!(
             error_body.detail,
             "Encountered the following error while trying to process your request: DatabaseError(UniqueViolation, \"duplicate key value violates unique constraint \\\"template_name_key\\\"\")"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn create_with_multipart_failure_no_pipeline_id() {
+        // Set up config, test resource client, womtool runner, and wdl_storage_client which are needed for this mapping
+        let test_config = load_default_config();
+        let test_resource_client = TestResourceClient::new(Client::default(), None);
+        let wdl_storage_client =
+            WdlStorageClient::new_local(init_wdl_temp_dir().as_local().unwrap().clone());
+        let womtool_runner = WomtoolRunner::new(test_config.validation().womtool_location());
+        let pool = get_test_db_pool();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool.clone())
+                .data(test_config)
+                .data(test_resource_client)
+                .data(womtool_runner)
+                .data(wdl_storage_client)
+                .configure(init_routes),
+        )
+            .await;
+        // Load the multipart body we'll send in the request
+        let multipart_body =
+            read_to_string("testdata/routes/template/invalid_create_multipart_no_pipeline_id.txt")
+                .unwrap()
+                // Multipart needs carriage returns
+                .replace("\n", "\r\n");
+        let multipart_body_bytes = Bytes::from(multipart_body);
+
+        let content_length = multipart_body_bytes.len();
+
+        let mut req = test::TestRequest::post()
+            .uri("/templates")
+            .header("Content-Type", "multipart/form-data; boundary=\"---------------------------974767299852498929531610575\"")
+            .header("Content-Length", content_length)
+            .set_payload(multipart_body_bytes)
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let result = test::read_body(resp).await;
+
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Missing required field");
+        assert_eq!(error_body.status, 400);
+        assert_eq!(
+            error_body.detail,
+            "Payload does not contain required field: pipeline_id"
         );
     }
 
