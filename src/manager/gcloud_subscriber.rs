@@ -4,7 +4,7 @@
 //! contains messages for starting test runs.  Should poll the subscription on a schedule and
 //! process any messages it finds by starting test runs as specified in the messages
 
-use crate::config::{Config, GCloudConfig, GithubConfig};
+use crate::config::{Config, GCloudConfig, GithubConfig, PrivateGithubAccessConfig};
 use crate::db::DbPool;
 use crate::manager::github::{GithubPrRequest, GithubRunRequest, GithubRunner};
 use crate::manager::notification_handler::NotificationHandler;
@@ -16,6 +16,7 @@ use crate::requests::cromwell_requests::CromwellClient;
 use crate::requests::gcloud_storage::GCloudClient;
 use crate::requests::github_requests::GithubClient;
 use crate::requests::test_resource_requests::TestResourceClient;
+use crate::util::git_repos::GitRepoManager;
 use actix_web::client::Client;
 use base64;
 use diesel::PgConnection;
@@ -155,12 +156,21 @@ pub async fn init_and_run(
         CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
     // Create a test runner
     let test_runner: TestRunner = match carrot_config.custom_image_build() {
-        Some(image_build_config) => TestRunner::new(
-            cromwell_client,
-            test_resource_client,
-            Some(image_build_config.image_registry_host()),
-        ),
-        None => TestRunner::new(cromwell_client, test_resource_client, None),
+        Some(image_build_config) => {
+            let git_repo_manager = GitRepoManager::new(
+                image_build_config
+                    .private_github_access()
+                    .map(PrivateGithubAccessConfig::to_owned),
+                image_build_config.repo_cache_location().to_owned(),
+            );
+            TestRunner::new(
+                cromwell_client,
+                test_resource_client,
+                Some(image_build_config.image_registry_host()),
+                Some(git_repo_manager),
+            )
+        }
+        None => TestRunner::new(cromwell_client, test_resource_client, None, None),
     };
     let gcloud_subscriber: GCloudSubscriber = GCloudSubscriber::new(
         db_pool,
@@ -410,7 +420,11 @@ mod tests {
     use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::github_requests::GithubClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::unit_test_util::{get_test_db_connection, get_test_db_pool, load_default_config};
+    use crate::unit_test_util::{
+        get_test_db_connection, get_test_db_pool, get_test_remote_github_repo,
+        get_test_test_runner_building_disabled, get_test_test_runner_building_enabled,
+        insert_test_software_with_repo, load_default_config,
+    };
     use actix_web::client::Client;
     use diesel::PgConnection;
     use google_pubsub1::{PubsubMessage, ReceivedMessage};
@@ -549,12 +563,8 @@ mod tests {
             CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
         // Create a test runner
         let test_runner: TestRunner = match carrot_config.custom_image_build() {
-            Some(image_build_config) => TestRunner::new(
-                cromwell_client,
-                test_resource_client,
-                Some(image_build_config.image_registry_host()),
-            ),
-            None => TestRunner::new(cromwell_client, test_resource_client, None),
+            Some(_) => get_test_test_runner_building_enabled(),
+            None => get_test_test_runner_building_disabled(),
         };
         GCloudSubscriber::new(
             db_pool,
@@ -624,14 +634,15 @@ mod tests {
             "test_process_request_success",
         );
 
-        let test_software = insert_test_software(&conn);
+        let (test_repo, commit1, _) = get_test_remote_github_repo();
+        let test_software = insert_test_software_with_repo(&conn, test_repo.to_str().unwrap());
 
         let request_data_json = json! ({
             "test_name": test_test.name,
             "test_input_key": "in_test_image",
             "eval_input_key": "in_eval_image",
             "software_name": test_software.name,
-            "commit": "764a00442ddb412eed331655cfd90e151f580518",
+            "commit": &commit1,
             "owner":"TestOwner",
             "repo":"TestRepo",
             "issue_number":4,
@@ -659,8 +670,10 @@ mod tests {
             delivery_attempt: Some(1),
         };
 
-        let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit1) });
 
         test_gcloud_subscriber
             .start_run_from_message(&conn, &received_message)
@@ -704,7 +717,7 @@ mod tests {
         assert_run_mapped_to_software_with_commit(
             &conn,
             test_run.run_id,
-            "764a00442ddb412eed331655cfd90e151f580518",
+            &commit1,
             test_software.software_id,
         );
 
@@ -721,7 +734,8 @@ mod tests {
             "test_process_request_success",
         );
 
-        let test_software = insert_test_software(&conn);
+        let (test_repo, commit1, _) = get_test_remote_github_repo();
+        let test_software = insert_test_software_with_repo(&conn, test_repo.to_str().unwrap());
 
         let request_data_json = json! ({
             "request_type": "run",
@@ -730,7 +744,7 @@ mod tests {
                 "test_input_key": "in_test_image",
                 "eval_input_key": "in_eval_image",
                 "software_name": test_software.name,
-                "commit": "764a00442ddb412eed331655cfd90e151f580518",
+                "commit": &commit1,
                 "owner":"TestOwner",
                 "repo":"TestRepo",
                 "issue_number":4,
@@ -759,8 +773,10 @@ mod tests {
             delivery_attempt: Some(1),
         };
 
-        let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit1) });
 
         test_gcloud_subscriber
             .start_run_from_message(&conn, &received_message)
@@ -804,7 +820,7 @@ mod tests {
         assert_run_mapped_to_software_with_commit(
             &conn,
             test_run.run_id,
-            "764a00442ddb412eed331655cfd90e151f580518",
+            &commit1,
             test_software.software_id,
         );
 
@@ -820,7 +836,8 @@ mod tests {
             &conn,
             "test_process_request_success",
         );
-        let test_software = insert_test_software(&conn);
+        let (test_repo, commit1, commit2) = get_test_remote_github_repo();
+        let test_software = insert_test_software_with_repo(&conn, test_repo.to_str().unwrap());
 
         let request_data_json = json! ({
             "request_type": "pr",
@@ -829,8 +846,8 @@ mod tests {
                 "test_input_key": "in_test_image",
                 "eval_input_key": "in_eval_image",
                 "software_name": test_software.name,
-                "base_commit": "764a00442ddb412eed331655cfd90e151f580518",
-                "head_commit": "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+                "base_commit": &commit1,
+                "head_commit": &commit2,
                 "owner":"TestOwner",
                 "repo":"TestRepo",
                 "issue_number":4,
@@ -859,10 +876,14 @@ mod tests {
             delivery_attempt: Some(1),
         };
 
-        let base_test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let base_eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let head_test_params = json!({"in_test_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
-        let head_eval_params = json!({"in_eval_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
+        let base_test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let base_eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let head_test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit2) });
+        let head_eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit2) });
 
         test_gcloud_subscriber
             .start_run_from_message(&conn, &received_message)
@@ -923,13 +944,13 @@ mod tests {
         assert_run_mapped_to_software_with_commit(
             &conn,
             base_run.run_id,
-            "764a00442ddb412eed331655cfd90e151f580518",
+            &commit1,
             test_software.software_id,
         );
         assert_run_mapped_to_software_with_commit(
             &conn,
             head_run.run_id,
-            "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+            &commit2,
             test_software.software_id,
         );
 
@@ -945,7 +966,8 @@ mod tests {
             &conn,
             "test_process_request_success",
         );
-        let test_software = insert_test_software(&conn);
+        let (test_repo, commit1, commit2) = get_test_remote_github_repo();
+        let test_software = insert_test_software_with_repo(&conn, test_repo.to_str().unwrap());
 
         let request_data_json = json! ({
             "request_type": "pr",
@@ -954,8 +976,8 @@ mod tests {
                 "test_input_key": "in_test_image",
                 "eval_input_key": "in_eval_image",
                 "software_name": test_software.name,
-                "base_commit": "764a00442ddb412eed331655cfd90e151f580518",
-                "head_commit": "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+                "base_commit": &commit1,
+                "head_commit": &commit2,
                 "owner":"TestOwner",
                 "repo":"TestRepo",
                 "issue_number":4,
@@ -972,10 +994,14 @@ mod tests {
         let request_data_string = serde_json::to_string(&request_data_json).unwrap();
         let base64_request_data = base64::encode(&request_data_string);
 
-        let base_test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let base_eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let head_test_params = json!({"in_test_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
-        let head_eval_params = json!({"in_eval_image":"image_build:TestSoftware|af9cbceb8388e2170881d17f5ca88833c5c37ed6"});
+        let base_test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let base_eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let head_test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit2) });
+        let head_eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit2) });
 
         test_gcloud_subscriber
             .process_github_request_from_message(&conn, &base64_request_data)
@@ -1037,13 +1063,13 @@ mod tests {
         assert_run_mapped_to_software_with_commit(
             &conn,
             base_run.run_id,
-            "764a00442ddb412eed331655cfd90e151f580518",
+            &commit1,
             test_software.software_id,
         );
         assert_run_mapped_to_software_with_commit(
             &conn,
             head_run.run_id,
-            "af9cbceb8388e2170881d17f5ca88833c5c37ed6",
+            &commit2,
             test_software.software_id,
         );
 

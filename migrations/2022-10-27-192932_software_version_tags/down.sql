@@ -1,0 +1,1 @@
+drop table if exists software_version_tag;

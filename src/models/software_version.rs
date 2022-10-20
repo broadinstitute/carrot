@@ -5,9 +5,11 @@
 
 use crate::custom_sql_types::MachineTypeEnum;
 use crate::models::software::SoftwareData;
+use crate::models::sql_functions;
 use crate::schema::software;
 use crate::schema::software_version;
 use crate::schema::software_version::dsl::*;
+use crate::schema::software_version_tag;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -54,6 +56,17 @@ pub struct NewSoftwareVersion {
     pub software_id: Uuid,
 }
 
+/// Represents fields to change when updating a software_version
+///
+/// Only commit can be modified after the software_version has been created, and this is really only
+/// intended to be used to change commits that are tags (from before the tag storage change) to the
+/// actual commits
+#[derive(Deserialize, Serialize, AsChangeset, Debug)]
+#[table_name = "software_version"]
+pub struct SoftwareVersionChangeset {
+    pub commit: Option<String>,
+}
+
 impl SoftwareVersionData {
     /// Queries the DB for a software_version with the specified id
     ///
@@ -90,9 +103,31 @@ impl SoftwareVersionData {
             .first::<(String, String, MachineTypeEnum, String)>(conn)
     }
 
+    /// Queries the DB for the commit belonging to the software_version record for the software with
+    /// name equal to `software_name` and either commit equal to `commit_or_tag` or a mapped
+    /// software_version_tag record with tag equal to `commit_or_tag`
+    pub fn find_commit_by_name_and_commit_or_tag(
+        conn: &PgConnection,
+        software_name: &str,
+        commit_or_tag: &str,
+    ) -> Result<String, diesel::result::Error> {
+        software_version
+            .left_outer_join(software_version_tag::table)
+            .inner_join(software::table)
+            .filter(sql_functions::lower(software::name).eq(software_name.to_lowercase()))
+            .filter(
+                commit
+                    .eq(commit_or_tag)
+                    .or(software_version_tag::tag.eq(commit_or_tag)),
+            )
+            .limit(1)
+            .select(commit)
+            .first::<String>(conn)
+    }
+
     /// Queries the DB for software_versions matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve software_versions matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve software_versions matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved software_versions as SoftwareVersionData
     /// instances or an error if the query fails for some reason
     pub fn find(
@@ -200,14 +235,36 @@ impl SoftwareVersionData {
             .values(&params)
             .get_result(conn)
     }
+
+    /// Updates a specified software_version in the DB
+    ///
+    /// Updates the software_version row in the DB using `conn` specified by `id` with the values in
+    /// `params`
+    /// Returns a result containing either the newly updated software_version or an error if the
+    /// update fails for some reason
+    ///
+    /// NOTE: This is only meant to be used to correct when a software_version's commit is actually
+    /// a tag from back before tags were stored separately
+    pub fn update(
+        conn: &PgConnection,
+        id: Uuid,
+        params: SoftwareVersionChangeset,
+    ) -> Result<Self, diesel::result::Error> {
+        diesel::update(software_version.filter(software_version_id.eq(id)))
+            .set(params)
+            .get_result(conn)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::models::software::NewSoftware;
     use crate::models::software::SoftwareData;
+    use crate::models::software::{NewSoftware, SoftwareQuery};
+    use crate::models::software_version_tag::{
+        NewSoftwareVersionTag, SoftwareVersionTagData, SoftwareVersionTagQuery,
+    };
     use crate::unit_test_util::*;
     use uuid::Uuid;
 
@@ -244,6 +301,26 @@ mod tests {
         let new_software_versions = insert_test_software_versions_with_software_id(conn, ids);
 
         (new_softwares, new_software_versions)
+    }
+
+    fn insert_software_version_tags_for_software_version(
+        conn: &PgConnection,
+        version_id: Uuid,
+    ) -> Vec<SoftwareVersionTagData> {
+        let mut software_version_tags = Vec::new();
+        let new_software_version_tag = NewSoftwareVersionTag {
+            software_version_id: version_id,
+            tag: String::from("tag1"),
+        };
+        software_version_tags
+            .push(SoftwareVersionTagData::create(conn, new_software_version_tag).unwrap());
+        let new_software_version_tag = NewSoftwareVersionTag {
+            software_version_id: version_id,
+            tag: String::from("tag2"),
+        };
+        software_version_tags
+            .push(SoftwareVersionTagData::create(conn, new_software_version_tag).unwrap());
+        software_version_tags
     }
 
     fn insert_test_softwares(conn: &PgConnection) -> Vec<SoftwareData> {
@@ -303,7 +380,7 @@ mod tests {
         );
 
         let new_software_version = NewSoftwareVersion {
-            commit: String::from("c9d1a4eb7d1c49428b03bee19a72401b02cec466 "),
+            commit: String::from("c9d1a4eb7d1c49428b03bee19a72401b02cec466"),
             software_id: ids[1],
         };
 
@@ -361,6 +438,59 @@ mod tests {
                 "9aac5e85f34921b2642beded8b3891b97c5a6dc7".to_string()
             )
         );
+    }
+
+    #[test]
+    fn find_commit_by_name_and_commit_or_tag_success_commit() {
+        let conn = get_test_db_connection();
+
+        let (softwares, software_versions) = insert_software_versions_with_software(&conn);
+
+        let result = SoftwareVersionData::find_commit_by_name_and_commit_or_tag(
+            &conn,
+            &softwares[0].name,
+            &software_versions[0].commit,
+        )
+        .unwrap();
+
+        assert_eq!(result, software_versions[0].commit);
+    }
+
+    #[test]
+    fn find_commit_by_name_and_commit_or_tag_success_tag() {
+        let conn = get_test_db_connection();
+
+        let (softwares, software_versions) = insert_software_versions_with_software(&conn);
+
+        let software_version_tags = insert_software_version_tags_for_software_version(
+            &conn,
+            software_versions[1].software_version_id,
+        );
+
+        let result = SoftwareVersionData::find_commit_by_name_and_commit_or_tag(
+            &conn,
+            &softwares[1].name,
+            &software_version_tags[0].tag,
+        )
+        .unwrap();
+
+        assert_eq!(result, software_versions[1].commit);
+    }
+
+    #[test]
+    fn find_commit_by_name_and_commit_or_tag_failure_not_found() {
+        let conn = get_test_db_connection();
+
+        let (softwares, software_versions) = insert_software_versions_with_software(&conn);
+
+        let result = SoftwareVersionData::find_commit_by_name_and_commit_or_tag(
+            &conn,
+            &softwares[0].name,
+            "nonexistent_tag",
+        )
+        .unwrap_err();
+
+        assert_eq!(result, diesel::result::Error::NotFound);
     }
 
     #[test]
@@ -560,6 +690,26 @@ mod tests {
         assert_eq!(
             test_software_version.commit,
             "9aac5e85f34921b2642beded8b3891b97c5a6dc7"
+        );
+    }
+
+    #[test]
+    fn update_success() {
+        let conn = get_test_db_connection();
+
+        let test_software_version = insert_test_software_version(&conn);
+
+        let changes = SoftwareVersionChangeset {
+            commit: Some(String::from("100ca53f-ad64-4b30-8944-89958d00e69b")),
+        };
+
+        let updated_software_version =
+            SoftwareVersionData::update(&conn, test_software_version.software_version_id, changes)
+                .expect("Failed to update software_version");
+
+        assert_eq!(
+            updated_software_version.commit,
+            String::from("100ca53f-ad64-4b30-8944-89958d00e69b")
         );
     }
 }

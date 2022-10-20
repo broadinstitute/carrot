@@ -5,7 +5,7 @@
 //! Cromwell, and then updating accordingly.  It will also pull result data and add that to the DB
 //! for any tests runs that complete
 
-use crate::config::{Config, StatusManagerConfig};
+use crate::config::{Config, PrivateGithubAccessConfig, StatusManagerConfig};
 use crate::custom_sql_types::{BuildStatusEnum, ReportStatusEnum, ReportableEnum, RunStatusEnum};
 use crate::db::DbPool;
 use crate::manager::notification_handler::NotificationHandler;
@@ -29,6 +29,7 @@ use crate::requests::gcloud_storage::GCloudClient;
 use crate::requests::github_requests::GithubClient;
 use crate::requests::test_resource_requests::TestResourceClient;
 use crate::run_error_logger;
+use crate::util::git_repos::GitRepoManager;
 use actix_web::client::Client;
 use chrono::{NaiveDateTime, Utc};
 use diesel::PgConnection;
@@ -202,12 +203,26 @@ pub async fn init_and_run(
         CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
     // Create a test runner and software builder
     let test_runner: TestRunner = match carrot_config.custom_image_build() {
-        Some(image_build_config) => TestRunner::new(
+        Some(image_build_config) => {
+            let git_repo_manager = GitRepoManager::new(
+                image_build_config
+                    .private_github_access()
+                    .map(PrivateGithubAccessConfig::to_owned),
+                image_build_config.repo_cache_location().to_owned(),
+            );
+            TestRunner::new(
+                cromwell_client.clone(),
+                test_resource_client.clone(),
+                Some(image_build_config.image_registry_host()),
+                Some(git_repo_manager),
+            )
+        }
+        None => TestRunner::new(
             cromwell_client.clone(),
             test_resource_client.clone(),
-            Some(image_build_config.image_registry_host()),
+            None,
+            None,
         ),
-        None => TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), None),
     };
     // Create a software builder
     let software_builder: Option<SoftwareBuilder> =
@@ -1338,7 +1353,10 @@ mod tests {
     use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::github_requests::GithubClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::unit_test_util::{get_test_db_pool, load_default_config};
+    use crate::unit_test_util::{
+        get_test_db_pool, get_test_test_runner_building_disabled,
+        get_test_test_runner_building_enabled, load_default_config,
+    };
     use actix_web::client::Client;
     use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
@@ -1813,12 +1831,8 @@ mod tests {
             CromwellClient::new(http_client.clone(), carrot_config.cromwell().address());
         // Create a test runner and software builder
         let test_runner: TestRunner = match carrot_config.custom_image_build() {
-            Some(image_build_config) => TestRunner::new(
-                cromwell_client.clone(),
-                test_resource_client.clone(),
-                Some(image_build_config.image_registry_host()),
-            ),
-            None => TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), None),
+            Some(_) => get_test_test_runner_building_enabled(),
+            None => get_test_test_runner_building_disabled(),
         };
         // Create a software builder
         let software_builder: Option<SoftwareBuilder> = match carrot_config.custom_image_build() {

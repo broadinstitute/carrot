@@ -577,16 +577,21 @@ pub struct CustomImageBuildConfig {
     image_registry_host: String,
     /// Config for accessing private github repos, if wanted
     private_github_access: Option<PrivateGithubAccessConfig>,
+    /// The directory where local copies of the github repos will be kept for checking commits/tags
+    #[serde(default = "repo_cache_location_default")]
+    repo_cache_location: String,
 }
 
 impl CustomImageBuildConfig {
     pub fn new(
         image_registry_host: String,
         private_github_access: Option<PrivateGithubAccessConfig>,
+        repo_cache_location: String,
     ) -> Self {
         CustomImageBuildConfig {
             image_registry_host,
             private_github_access,
+            repo_cache_location,
         }
     }
     pub fn image_registry_host(&self) -> &String {
@@ -595,6 +600,21 @@ impl CustomImageBuildConfig {
     pub fn private_github_access(&self) -> Option<&PrivateGithubAccessConfig> {
         self.private_github_access.as_ref()
     }
+    pub fn repo_cache_location(&self) -> &String {
+        &self.repo_cache_location
+    }
+}
+
+// Function for providing the default value
+fn repo_cache_location_default() -> String {
+    let mut current_dir = std::env::current_dir()
+        .expect("Failed to get current directory for git repo cache directory default");
+    current_dir.push("carrot");
+    current_dir.push("repos");
+    current_dir
+        .to_str()
+        .expect("Failed to convert git repo cache directory path to string")
+        .to_string()
 }
 
 /// Config for accessing private github repos

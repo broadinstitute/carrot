@@ -405,6 +405,11 @@ async fn run_for_test(
                     title: "Server error".to_string(),
                     status: 500,
                     detail: format!("Error while attempting to retrieve WDL: {}", e)
+                },
+                test_runner::Error::Git(e) => ErrorBody {
+                    title: "Git error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to retrieve git repo information: {}", e)
                 }
             };
             HttpResponseBuilder::new(
@@ -1298,6 +1303,7 @@ mod tests {
             CromwellClient::new(Client::default(), &mockito::server_url()),
             TestResourceClient::new(Client::default(), None),
             None,
+            None,
         );
 
         let test_template = create_test_template(&pool.get().unwrap());
@@ -1393,6 +1399,7 @@ mod tests {
         let test_runner = TestRunner::new(
             CromwellClient::new(Client::default(), &mockito::server_url()),
             TestResourceClient::new(Client::default(), None),
+            None,
             None,
         );
 

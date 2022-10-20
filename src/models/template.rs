@@ -135,7 +135,7 @@ impl TemplateData {
 
     /// Queries the DB for templates matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve templates matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve templates matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved templates as TemplateData
     /// instances or an error if the query fails for some reason
     pub fn find(

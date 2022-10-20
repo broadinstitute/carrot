@@ -133,7 +133,7 @@ impl SoftwareBuildData {
 
     /// Queries the DB for software_builds matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve software_builds matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve software_builds matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved software_builds as SoftwareBuildData
     /// instances or an error if the query fails for some reason
     pub fn find(
@@ -271,6 +271,19 @@ impl SoftwareBuildData {
         diesel::update(software_build.filter(software_build_id.eq(id)))
             .set(params)
             .get_result(conn)
+    }
+
+    /// Deletes software_build rows in the DB for the software_version specified by `id`
+    ///
+    /// Deletes the software_build rows in the DB using `conn` mapped to the software_version
+    /// specified by `id`
+    /// Returns a result containing either the number of rows deleted or an error if the delete
+    /// fails for some reason
+    pub fn delete_by_software_version(
+        conn: &PgConnection,
+        id: Uuid,
+    ) -> Result<usize, diesel::result::Error> {
+        diesel::delete(software_build.filter(software_version_id.eq(id))).execute(conn)
     }
 }
 
@@ -858,5 +871,28 @@ mod tests {
             Some(String::from("example.com/kevin"))
         );
         assert_eq!(updated_software_build.status, BuildStatusEnum::Succeeded);
+    }
+
+    #[test]
+    fn delete_success() {
+        let conn = get_test_db_connection();
+
+        let test_software_build = insert_test_software_build(&conn);
+
+        let delete_result = SoftwareBuildData::delete_by_software_version(
+            &conn,
+            test_software_build.software_version_id,
+        )
+        .unwrap();
+
+        assert_eq!(delete_result, 1);
+
+        let deleted_software_build =
+            SoftwareBuildData::find_by_id(&conn, test_software_build.software_build_id);
+
+        assert!(matches!(
+            deleted_software_build,
+            Err(diesel::result::Error::NotFound)
+        ));
     }
 }

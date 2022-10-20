@@ -495,7 +495,7 @@ impl RunWithResultsAndErrorsData {
 
     /// Queries the DB for runs matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve runs matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve runs matching the criteria in `params`
     /// Returns result containing either a vector of the retrieved runs as RunData
     /// instances or an error if the query fails for some reason
     pub fn find(conn: &PgConnection, params: RunQuery) -> Result<Vec<Self>, diesel::result::Error> {

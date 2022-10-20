@@ -71,7 +71,7 @@ impl RunIsFromGithubData {
 
     /// Queries the DB for run_is_from_githubs matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve run_is_from_githubs matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve run_is_from_githubs matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved run_is_from_githubs as
     /// RunIsFromGithubData instances or an error if the query fails for some reason
     ///
