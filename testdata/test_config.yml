@@ -8,7 +8,6 @@ cromwell:
   address: http://localhost:8000
 status_manager:
   status_check_wait_time_in_secs: 30
-  allowed_consecutive_status_check_failures: 1
 wdl_storage:
   local:
     wdl_location: ~/carrot/wdl

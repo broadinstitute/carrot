@@ -27,8 +27,10 @@ def unstub():
                 {
                     "created_at": "2020-09-16T18:48:06.371563",
                     "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                    "commit_date": "2020-09-10T18:48:06.371563",
                     "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "tags": []
                 },
                 indent=4,
                 sort_keys=True,
@@ -86,6 +88,10 @@ def test_find_by_id(find_by_id_data):
                 "2020-10-00T00:00:00.000000",
                 "--created_after",
                 "2020-09-00T00:00:00.000000",
+                "--committed_before",
+                "2020-11-00T00:00:00.000000",
+                "--committed_after",
+                "2020-08-00T00:00:00.000000",
                 "--sort",
                 "asc(commit)",
                 "--limit",
@@ -99,6 +105,8 @@ def test_find_by_id(find_by_id_data):
                 "ca82a6dff817ec66f44342007202690a93763949",
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
+                "2020-11-00T00:00:00.000000",
+                "2020-08-00T00:00:00.000000",
                 "asc(commit)",
                 1,
                 0,
@@ -108,8 +116,10 @@ def test_find_by_id(find_by_id_data):
                     {
                         "created_at": "2020-09-16T18:48:06.371563",
                         "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                        "commit_date": "2020-09-10T18:48:06.371563",
                         "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                        "tags": ["tag1"]
                     }
                 ],
                 indent=4,
@@ -131,6 +141,10 @@ def test_find_by_id(find_by_id_data):
                 "2020-10-00T00:00:00.000000",
                 "--created_after",
                 "2020-09-00T00:00:00.000000",
+                "--committed_before",
+                "2020-11-00T00:00:00.000000",
+                "--committed_after",
+                "2020-08-00T00:00:00.000000",
                 "--sort",
                 "asc(commit)",
                 "--limit",
@@ -144,6 +158,8 @@ def test_find_by_id(find_by_id_data):
                 "ca82a6dff817ec66f44342007202690a93763949",
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
+                "2020-11-00T00:00:00.000000",
+                "2020-08-00T00:00:00.000000",
                 "asc(commit)",
                 1,
                 0,
@@ -170,8 +186,10 @@ def test_find_by_id(find_by_id_data):
                     {
                         "created_at": "2020-09-16T18:48:06.371563",
                         "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                        "commit_date": "2020-09-10T18:48:06.371563",
                         "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                        "tags": ["hi"]
                     }
                 ],
                 indent=4,
@@ -188,6 +206,8 @@ def test_find_by_id(find_by_id_data):
             ],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -228,6 +248,8 @@ def find_data(request):
         request.param["params"][5],
         request.param["params"][6],
         request.param["params"][7],
+        request.param["params"][8],
+        request.param["params"][9],
     ).thenReturn(request.param["return"])
     return request.param
 
@@ -236,3 +258,59 @@ def test_find(find_data):
     runner = CliRunner()
     test_software_version = runner.invoke(carrot, find_data["args"])
     assert test_software_version.output == find_data["return"] + "\n"
+
+@pytest.fixture(
+    params=[
+        {
+            "args": [
+                "software",
+                "version",
+                "update",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            ],
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:06.371563",
+                    "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                    "commit_date": "2020-09-10T18:48:06.371563",
+                    "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "tags": ["tag1"]
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "args": [
+                "software",
+                "version",
+                "update",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            ],
+            "return": json.dumps(
+                {
+                    "title": "No software_version found",
+                    "status": 404,
+                    "detail": "No software_version found with the specified ID",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+    ]
+)
+def update_data(request):
+    # Set all requests to return None so only the one we expect will return a value
+    mockito.when(software_versions).update(...).thenReturn(None)
+    # Mock up request response
+    mockito.when(software_versions).update(request.param["args"][3]).thenReturn(
+        request.param["return"]
+    )
+    return request.param
+
+
+def test_update(update_data):
+    runner = CliRunner()
+    test_software_version = runner.invoke(carrot, update_data["args"])
+    assert test_software_version.output == update_data["return"] + "\n"

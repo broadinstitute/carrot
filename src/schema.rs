@@ -168,6 +168,30 @@ table! {
         software_version_id -> Uuid,
         software_id -> Uuid,
         commit -> Text,
+        commit_date -> Timestamptz,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    software_version_tag(software_version_id, tag) {
+        software_version_id -> Uuid,
+        tag -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    software_version_with_tags(software_version_id) {
+        software_version_id -> Uuid,
+        software_id -> Uuid,
+        commit -> Text,
+        commit_date -> Timestamptz,
+        tags -> Array<Text>,
         created_at -> Timestamptz,
     }
 }
@@ -320,6 +344,7 @@ table! {
 
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
+joinable!(software_version_tag -> software_version(software_version_id));
 
 allow_tables_to_appear_in_same_query!(
     pipeline,
@@ -332,6 +357,7 @@ allow_tables_to_appear_in_same_query!(
     run_with_results_and_errors,
     software,
     software_version,
+    software_version_tag,
     software_build,
     run_software_version,
     subscription,

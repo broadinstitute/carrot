@@ -10,7 +10,40 @@ use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::util::parse_id;
 use crate::util::git_repos;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
+use diesel::{Connection, PgConnection};
 use log::error;
+use std::fmt;
+
+/// Error type for errors returned during software creation (insertion into the DB and git repo
+/// download)
+#[derive(Debug)]
+enum CreateError {
+    DB(diesel::result::Error),
+    Git(git_repos::Error),
+}
+
+impl std::error::Error for CreateError {}
+
+impl fmt::Display for CreateError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CreateError::DB(e) => write!(f, "CreateError DB {}", e),
+            CreateError::Git(e) => write!(f, "CreateError Git {}", e),
+        }
+    }
+}
+
+impl From<diesel::result::Error> for CreateError {
+    fn from(e: diesel::result::Error) -> CreateError {
+        CreateError::DB(e)
+    }
+}
+
+impl From<git_repos::Error> for CreateError {
+    fn from(e: git_repos::Error) -> CreateError {
+        CreateError::Git(e)
+    }
+}
 
 /// Handles requests to /software/{id} for retrieving software info by software_id
 ///
@@ -122,57 +155,48 @@ async fn find(
 async fn create(
     web::Json(new_software): web::Json<NewSoftware>,
     pool: web::Data<db::DbPool>,
-    git_repo_checker: web::Data<git_repos::GitRepoChecker>,
+    git_repo_manager: web::Data<git_repos::GitRepoManager>,
 ) -> HttpResponse {
-    // Verify the repository_url points to a valid git repo
-    match git_repo_checker.git_repo_exists(&new_software.repository_url) {
-        Ok(val) => {
-            // If we didn't find it, tell the user we couldn't find it
-            if !val {
-                error!(
-                    "Failed to validate existence of git repo at {}",
-                    &new_software.repository_url
-                );
-                return HttpResponse::BadRequest().json(ErrorBody {
-                    title: "Git Repo does not exist".to_string(),
-                    status: 400,
-                    detail:
-                        "Failed to verify the existence of a git repository at the specified url"
-                            .to_string(),
-                });
-            }
-        }
-        Err(e) => {
-            // If there was some error when attempting to find it, inform the user
-            error!("Encountered an error while trying to verify the existence of a git repo at {} : {}", &new_software.repository_url, e);
-            return HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Server error".to_string(),
-                status: 500,
-                detail: "Error while attempting to verify the existence of a git repository at the specified url".to_string(),
-            });
-        }
-    }
+    let repository_url = new_software.repository_url.clone();
     // Insert in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match SoftwareData::create(&conn, new_software) {
-            Ok(software) => Ok(software),
-            Err(e) => {
-                error!("{}", e);
-                Err(e)
-            }
-        }
+        create_software_and_download_repo(new_software, &git_repo_manager, &conn)
     })
     .await
     {
         // If there is no error, return a response with the created software
         Ok(results) => HttpResponse::Ok().json(results),
-        Err(e) => {
-            error!("{}", e);
-            // If there is an error, return a 500
-            default_500(&e)
-        }
+        Err(e) => match e {
+            BlockingError::Error(CreateError::Git(git_repos::Error::Git(_))) => {
+                error!(
+                    "Encountered an error while trying to clone a git repo at {} : {}",
+                    &repository_url, e
+                );
+                return HttpResponse::BadRequest().json(ErrorBody {
+                    title: "Failed to clone git repo".to_string(),
+                    status: 400,
+                    detail: format!("Encountered an error while attempting to clone a git repository at the specified url ({}).  Does the repo exist and does carrot have access to it?", repository_url),
+                });
+            }
+            BlockingError::Error(CreateError::Git(e)) => {
+                error!(
+                    "Encountered an error while trying to clone a git repo at {} : {}",
+                    &repository_url, e
+                );
+                return HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: format!("Error while attempting to clone the specified repo: {}", e),
+                });
+            }
+            _ => {
+                error!("{}", e);
+                // If there is an error, return a 500
+                default_500(&e)
+            }
+        },
     }
 }
 
@@ -218,6 +242,26 @@ async fn update(
             default_500(&e)
         }
     }
+}
+
+/// Inserts `new_software` into the database with `conn` and uses `git_repo_manager` to clone the
+/// repo for the software (with no checkout).  This is done in a transaction which is not committed
+/// if the clone fails for any reason.  Returns either the created software if successful or an
+/// error if something fails
+fn create_software_and_download_repo(
+    new_software: NewSoftware,
+    git_repo_manager: &git_repos::GitRepoManager,
+    conn: &PgConnection,
+) -> Result<SoftwareData, CreateError> {
+    // We'll do this in a transaction, so if the download fails, we won't commit the insert
+    conn.transaction::<SoftwareData, CreateError, _>(|| {
+        // Insert the software
+        let software: SoftwareData = SoftwareData::create(conn, new_software)?;
+        // Attempt to download the specified repo
+        git_repo_manager.download_git_repo(software.software_id, &software.repository_url)?;
+        // Return the created software
+        Ok(software)
+    })
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -267,9 +311,10 @@ mod tests {
     use crate::custom_sql_types::MachineTypeEnum;
     use crate::routes::error_handling::ErrorBody;
     use crate::unit_test_util::*;
-    use crate::util::git_repos::GitRepoChecker;
+    use crate::util::git_repos::GitRepoManager;
     use actix_web::{http, test, App};
     use diesel::PgConnection;
+    use tempfile::TempDir;
     use uuid::Uuid;
 
     fn create_test_software(conn: &PgConnection) -> SoftwareData {
@@ -284,8 +329,8 @@ mod tests {
         SoftwareData::create(conn, new_software).expect("Failed inserting test software")
     }
 
-    fn create_test_git_repo_checker() -> GitRepoChecker {
-        GitRepoChecker::new(None)
+    fn create_test_git_repo_checker(repo_path: &str) -> GitRepoManager {
+        GitRepoManager::new(None, repo_path.to_owned())
     }
 
     #[actix_rt::test]
@@ -490,10 +535,13 @@ mod tests {
     #[actix_rt::test]
     async fn create_success() {
         let pool = get_test_db_pool();
+        let temp_repo_dir = TempDir::new().unwrap();
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(create_test_git_repo_checker())
+                .data(create_test_git_repo_checker(
+                    temp_repo_dir.path().to_str().unwrap(),
+                ))
                 .configure(init_routes_software_building_enabled),
         )
         .await;
@@ -539,10 +587,14 @@ mod tests {
 
         let software = create_test_software(&pool.get().unwrap());
 
+        let temp_repo_dir = TempDir::new().unwrap();
+
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(create_test_git_repo_checker())
+                .data(create_test_git_repo_checker(
+                    temp_repo_dir.path().to_str().unwrap(),
+                ))
                 .configure(init_routes_software_building_enabled),
         )
         .await;
@@ -575,18 +627,20 @@ mod tests {
     async fn create_failure_bad_repo() {
         let pool = get_test_db_pool();
 
-        let software = create_test_software(&pool.get().unwrap());
+        let temp_repo_dir = TempDir::new().unwrap();
 
         let mut app = test::init_service(
             App::new()
                 .data(pool)
-                .data(create_test_git_repo_checker())
+                .data(create_test_git_repo_checker(
+                    temp_repo_dir.path().to_str().unwrap(),
+                ))
                 .configure(init_routes_software_building_enabled),
         )
         .await;
 
         let new_software = NewSoftware {
-            name: software.name.clone(),
+            name: String::from("example"),
             description: Some(String::from("Kevin's test description")),
             repository_url: String::from("git://example.com/example/example.git"),
             machine_type: Some(MachineTypeEnum::Standard),
@@ -605,11 +659,11 @@ mod tests {
 
         let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(error_body.title, "Git Repo does not exist");
+        assert_eq!(error_body.title, "Failed to clone git repo");
         assert_eq!(error_body.status, 400);
         assert_eq!(
             error_body.detail,
-            "Failed to verify the existence of a git repository at the specified url"
+            "Encountered an error while attempting to clone a git repository at the specified url (git://example.com/example/example.git).  Does the repo exist and does carrot have access to it?"
         );
     }
 

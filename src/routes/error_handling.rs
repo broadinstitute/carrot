@@ -19,12 +19,17 @@ pub struct ErrorBody {
 
 /// Creates and returns a generic error message HttpResponse that includes `error_message`
 pub fn default_500(error_message: &impl Display) -> HttpResponse {
-    HttpResponse::InternalServerError().json(ErrorBody {
+    HttpResponse::InternalServerError().json(default_500_body(error_message))
+}
+
+/// Creates and returns a generic error message body that includes `error_message`
+pub fn default_500_body(error_message: &impl Display) -> ErrorBody {
+    ErrorBody {
         title: "Server error".to_string(),
         status: 500,
         detail: format!(
             "Encountered the following error while trying to process your request: {}",
             error_message
         ),
-    })
+    }
 }

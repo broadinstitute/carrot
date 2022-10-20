@@ -278,13 +278,11 @@ fn get_base_or_head_or_not_for_run(
     split.next();
     let commit: &str = match split.next() {
         Some(commit) => commit,
-        None => return String::new()
+        None => return String::new(),
     };
-    if commit == &github_info.head_commit
-    {
+    if commit == &github_info.head_commit {
         String::from("head")
-    } else if commit == &github_info.base_commit
-    {
+    } else if commit == &github_info.base_commit {
         String::from("base")
     } else {
         String::from("")

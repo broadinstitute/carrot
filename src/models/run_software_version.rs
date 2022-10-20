@@ -253,6 +253,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
+            commit_date: "2021-06-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version)
@@ -320,6 +321,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
             software_id: new_software.software_id,
+            commit_date: "2021-05-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version)
@@ -328,6 +330,7 @@ mod tests {
         let new_software_version2 = NewSoftwareVersion {
             commit: String::from("c9d1a4eb7d1c49428b03bee19a72401b02cec466 "),
             software_id: new_software.software_id,
+            commit_date: "2021-04-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version2 = SoftwareVersionData::create(conn, new_software_version2)

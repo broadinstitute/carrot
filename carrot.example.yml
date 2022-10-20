@@ -76,6 +76,8 @@ custom_image_build:
     kms_keyring: example-key-ring
     # The GCloud KMS key for decrypting `client_pass_uri`
     kms_key: example-key
+  # The local directory where metadata-only clones of software repos will be kept for keeping track of tags and commits
+  repo_cache_location: ~/carrot/repos
 # Config for validating parts of a test
 validation:
   # The location of the womtool jar to use to validate WDLs

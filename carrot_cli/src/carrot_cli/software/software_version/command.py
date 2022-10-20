@@ -52,6 +52,18 @@ def find_by_id(id):
     "YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
+    "--committed_before",
+    default="",
+    help="Upper bound for software version's commit_date value, in the format "
+         "YYYY-MM-DDThh:mm:ss.ssssss",
+)
+@click.option(
+    "--committed_after",
+    default="",
+    help="Lower bound for software version's commit_date value, in the format "
+         "YYYY-MM-DDThh:mm:ss.ssssss",
+)
+@click.option(
     "--sort",
     default=None,
     type=str,
@@ -78,6 +90,8 @@ def find(
     commit,
     created_before,
     created_after,
+    committed_before,
+    committed_after,
     sort,
     limit,
     offset,
@@ -95,11 +109,20 @@ def find(
             commit,
             created_before,
             created_after,
+            committed_before,
+            committed_after,
             sort,
             limit,
             offset,
         )
     )
 
+@main.command(name="update")
+@click.argument("id")
+def update(
+    id
+):
+    """Refreshes the commit, commit_date, and tags for the software_version specified by ID"""
+    print(software_versions.update(id))
 
 main.add_command(software_build.main)

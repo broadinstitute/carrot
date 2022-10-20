@@ -7,10 +7,12 @@ use crate::models::software_build::{
     NewSoftwareBuild, SoftwareBuildChangeset, SoftwareBuildData, SoftwareBuildQuery,
 };
 use crate::models::software_version::{
-    NewSoftwareVersion, SoftwareVersionData, SoftwareVersionQuery,
+    NewSoftwareVersion, SoftwareVersionChangeset, SoftwareVersionData, SoftwareVersionQuery,
 };
+use crate::models::software_version_tag::{NewSoftwareVersionTag, SoftwareVersionTagData};
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use crate::util::temp_storage;
+use chrono::NaiveDateTime;
 use diesel::PgConnection;
 use serde_json::{json, Value};
 use std::fmt;
@@ -168,10 +170,12 @@ impl SoftwareBuilder {
 
 /// Attempts to retrieve a software_version record with the specified `software_id` and `commit`,
 /// and creates one if unsuccessful
-pub fn get_or_create_software_version(
+pub fn get_or_create_software_version_with_tags(
     conn: &PgConnection,
     software_id: Uuid,
     commit: &str,
+    tags: &[String],
+    commit_date: &NaiveDateTime,
 ) -> Result<SoftwareVersionData, Error> {
     let software_version_closure = || {
         // Try to find a software version row for this software and commit hash to see if we've ever
@@ -183,23 +187,46 @@ pub fn get_or_create_software_version(
             software_name: None,
             created_before: None,
             created_after: None,
+            committed_before: None,
+            committed_after: None,
             sort: None,
             limit: None,
             offset: None,
         };
         let mut software_version = SoftwareVersionData::find(conn, software_version_query)?;
 
-        // If we found it, return it
+        // If we found it, update its tags and return it
         if !software_version.is_empty() {
-            return Ok(software_version.pop().unwrap());
+            let software_version = software_version.pop().unwrap();
+            return update_existing_software_version(
+                conn,
+                &software_version,
+                commit,
+                tags,
+                commit_date,
+            );
         }
         // If not, create it
         let new_software_version = NewSoftwareVersion {
             commit: String::from(commit),
             software_id,
+            commit_date: commit_date.to_owned(),
         };
+        let software_version: SoftwareVersionData =
+            SoftwareVersionData::create(conn, new_software_version)?;
+        // Create software_version_tag records for any tags
+        if !tags.is_empty() {
+            let mut new_software_version_tags: Vec<NewSoftwareVersionTag> = Vec::new();
+            for tag in tags {
+                new_software_version_tags.push(NewSoftwareVersionTag {
+                    software_version_id: software_version.software_version_id,
+                    tag: tag.to_owned(),
+                });
+            }
+            SoftwareVersionTagData::batch_create(conn, new_software_version_tags)?;
+        }
 
-        Ok(SoftwareVersionData::create(conn, new_software_version)?)
+        Ok(software_version)
     };
 
     // Call in a transaction
@@ -212,6 +239,46 @@ pub fn get_or_create_software_version(
     // tests, we don't specify that this be run in a transaction.
     #[cfg(test)]
     return software_version_closure();
+}
+
+/// Updates the tags for `software_version` using `tags` and also updates `software_version` if its
+/// commit doesn't match `commit` or its commit_date doesn't match `commit_date`.  Returns the
+/// updated software_version record if successful, or an error if it fails
+pub fn update_existing_software_version(
+    conn: &PgConnection,
+    software_version: &SoftwareVersionData,
+    commit: &str,
+    tags: &[String],
+    commit_date: &NaiveDateTime,
+) -> Result<SoftwareVersionData, Error> {
+    // Delete tags so we can replace them with the current ones
+    SoftwareVersionTagData::delete_by_software_version(conn, software_version.software_version_id)?;
+    if !tags.is_empty() {
+        let mut new_software_version_tags: Vec<NewSoftwareVersionTag> = Vec::new();
+        for tag in tags {
+            new_software_version_tags.push(NewSoftwareVersionTag {
+                software_version_id: software_version.software_version_id,
+                tag: tag.to_owned(),
+            });
+        }
+        SoftwareVersionTagData::batch_create(conn, new_software_version_tags)?;
+    }
+    // If the existing software_version has a tag in its commit column, update it to have
+    // the commit and also delete its builds so it'll build again and tag with the commit
+    // hash
+    if software_version.commit != commit || software_version.commit_date != *commit_date {
+        let software_version = SoftwareVersionData::update(
+            &conn,
+            software_version.software_version_id,
+            SoftwareVersionChangeset {
+                commit: Some(String::from(commit)),
+                commit_date: Some(commit_date.to_owned()),
+            },
+        )?;
+        SoftwareBuildData::delete_by_software_version(&conn, software_version.software_version_id)?;
+        return Ok(software_version);
+    }
+    return Ok((*software_version).clone());
 }
 
 /// Attempts to retrieve the most recent software_build record for the specified
@@ -281,16 +348,21 @@ mod tests {
     use crate::config::CustomImageBuildConfig;
     use crate::custom_sql_types::{BuildStatusEnum, MachineTypeEnum};
     use crate::manager::software_builder::{
-        get_or_create_software_build, get_or_create_software_version, SoftwareBuilder,
+        get_or_create_software_build, get_or_create_software_version_with_tags, SoftwareBuilder,
     };
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::models::software_version_tag::{
+        NewSoftwareVersionTag, SoftwareVersionTagData, SoftwareVersionTagQuery,
+    };
     use crate::requests::cromwell_requests::CromwellClient;
     use crate::unit_test_util::get_test_db_connection;
     use actix_web::client::Client;
+    use chrono::NaiveDateTime;
     use diesel::PgConnection;
     use serde_json::json;
+    use tempfile::TempDir;
 
     fn insert_test_software_version(conn: &PgConnection) -> SoftwareVersionData {
         let new_software = NewSoftware {
@@ -306,6 +378,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
+            commit_date: "2021-06-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         SoftwareVersionData::create(conn, new_software_version)
@@ -338,6 +411,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("2bb75e67f32721abc420294378b3891b97c5a6dc7"),
+            commit_date: "2021-05-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version).unwrap();
@@ -368,6 +442,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("2bb75e67f32721abc420294378b3891b97c5a6dc7"),
+            commit_date: "2021-04-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version).unwrap();
@@ -400,6 +475,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("78875e67f32721abc4202943abc3891b97c5a6dc7"),
+            commit_date: "2021-03-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version).unwrap();
@@ -422,14 +498,59 @@ mod tests {
 
         let test_software_version = insert_test_software_version(&conn);
 
-        let result = get_or_create_software_version(
+        let test_software_version_tags = SoftwareVersionTagData::batch_create(
+            &conn,
+            vec![
+                NewSoftwareVersionTag {
+                    software_version_id: test_software_version.software_version_id,
+                    tag: String::from("tag1"),
+                },
+                NewSoftwareVersionTag {
+                    software_version_id: test_software_version.software_version_id,
+                    tag: String::from("tag2"),
+                },
+            ],
+        )
+        .unwrap();
+
+        let new_tags = vec![String::from("tag1"), String::from("tag3")];
+
+        let result = get_or_create_software_version_with_tags(
             &conn,
             test_software_version.software_id,
             &test_software_version.commit,
+            &new_tags,
+            &"2021-06-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         )
         .unwrap();
 
         assert_eq!(test_software_version, result);
+
+        let created_tags = SoftwareVersionTagData::find(
+            &conn,
+            SoftwareVersionTagQuery {
+                software_version_id: Some(result.software_version_id),
+                tag: None,
+                created_before: None,
+                created_after: None,
+                sort: Some(String::from("tag")),
+                limit: None,
+                offset: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(created_tags.len(), 2);
+        assert_eq!(
+            created_tags[0].software_version_id,
+            result.software_version_id
+        );
+        assert_eq!(created_tags[0].tag, "tag1");
+        assert_eq!(
+            created_tags[1].software_version_id,
+            result.software_version_id
+        );
+        assert_eq!(created_tags[1].tag, "tag3");
     }
 
     #[test]
@@ -438,15 +559,45 @@ mod tests {
 
         let test_software = insert_test_software(&conn);
 
-        let result = get_or_create_software_version(
+        let tags = vec![String::from("tag1"), String::from("tag2")];
+
+        let result = get_or_create_software_version_with_tags(
             &conn,
             test_software.software_id,
             "1a4c5eb5fc4921b2642b6ded863894b3745a5dc7",
+            &tags,
+            &"2021-06-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         )
         .unwrap();
 
         assert_eq!(result.commit, "1a4c5eb5fc4921b2642b6ded863894b3745a5dc7");
         assert_eq!(result.software_id, test_software.software_id);
+
+        let created_tags = SoftwareVersionTagData::find(
+            &conn,
+            SoftwareVersionTagQuery {
+                software_version_id: Some(result.software_version_id),
+                tag: None,
+                created_before: None,
+                created_after: None,
+                sort: Some(String::from("tag")),
+                limit: None,
+                offset: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(created_tags.len(), 2);
+        assert_eq!(
+            created_tags[0].software_version_id,
+            result.software_version_id
+        );
+        assert_eq!(created_tags[0].tag, "tag1");
+        assert_eq!(
+            created_tags[1].software_version_id,
+            result.software_version_id
+        );
+        assert_eq!(created_tags[1].tag, "tag2");
     }
 
     #[test]
@@ -504,8 +655,12 @@ mod tests {
         let conn = get_test_db_connection();
         let client = Client::default();
         let cromwell_client = CromwellClient::new(client, &mockito::server_url());
-        let config: CustomImageBuildConfig =
-            CustomImageBuildConfig::new(String::from("https://example.com"), None);
+        let temp_repo_dir = TempDir::new().unwrap();
+        let config: CustomImageBuildConfig = CustomImageBuildConfig::new(
+            String::from("https://example.com"),
+            None,
+            temp_repo_dir.path().to_str().unwrap().to_owned(),
+        );
         let test_software_builder: SoftwareBuilder = SoftwareBuilder::new(cromwell_client, &config);
 
         let test_software_build = insert_test_software_build_created(&conn);
