@@ -409,7 +409,7 @@ def test_find(find_data):
                 "example.com/she-ra_eval_dep.zip",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
@@ -1497,7 +1497,7 @@ def test_unsubscribe(unsubscribe_data):
                 "out_horde_tanks",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
@@ -2292,7 +2292,7 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                 "single"
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {

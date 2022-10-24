@@ -474,7 +474,7 @@ def test_delete(delete_data, caplog):
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {

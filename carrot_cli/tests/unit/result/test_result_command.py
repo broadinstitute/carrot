@@ -222,7 +222,7 @@ def test_find(find_data):
                 "numeric",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
@@ -622,7 +622,7 @@ def test_delete(delete_data, caplog):
                 "out_horde_tanks",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {

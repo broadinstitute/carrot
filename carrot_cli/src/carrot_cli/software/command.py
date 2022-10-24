@@ -4,6 +4,7 @@ import sys
 import click
 
 from .. import dependency_util
+from .. import email_util
 from ..config import manager as config
 from ..rest import software as software_rest
 from .software_version import command as software_version
@@ -129,16 +130,7 @@ def find(
 def create(name, description, repository_url, machine_type, created_by):
     """Create software definition with the specified parameters"""
     # If created_by is not set and there is an email config variable, fill with that
-    if created_by == "":
-        email_config_val = config.load_var_no_error("email")
-        if email_config_val is not None:
-            created_by = email_config_val
-        else:
-            LOGGER.error(
-                "No email config variable set.  If a value is not specified for --created by, "
-                "there must be a value set for email."
-            )
-            sys.exit(1)
+    created_by = email_util.check_created_by(created_by)
     print(software_rest.create(name, description, repository_url, machine_type, created_by))
 
 

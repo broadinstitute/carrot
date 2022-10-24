@@ -5,6 +5,7 @@ import click
 
 from .. import command_util
 from .. import dependency_util
+from .. import email_util
 from .. import file_util
 from ..config import manager as config
 from ..rest import report_maps, reports, run_groups
@@ -157,16 +158,7 @@ def create_report(run_group_id, report, created_by, delete_failed):
     with the report specified by REPORT (id or name)
     """
     # If created_by is not set and there is an email config variable, fill with that
-    if created_by == "":
-        email_config_val = config.load_var_no_error("email")
-        if email_config_val is not None:
-            created_by = email_config_val
-        else:
-            LOGGER.error(
-                "No email config variable set.  If a value is not specified for --created by, "
-                "there must be a value set for email."
-            )
-            sys.exit(1)
+    created_by = email_util.check_created_by(created_by)
     # Do the same for report
     report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
     print(report_maps.create_map("run-groups", run_group_id, report_id, created_by, delete_failed))

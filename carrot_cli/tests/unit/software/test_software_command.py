@@ -234,7 +234,7 @@ def test_find(find_data):
                 "n1-highcpu-8",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {

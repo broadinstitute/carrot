@@ -439,7 +439,7 @@ def test_find(find_data):
                 "tests/data/mock_eval_options.json",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
@@ -1006,7 +1006,7 @@ def test_delete(delete_data, caplog):
                 "tests/data/mock_eval_options.json",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
