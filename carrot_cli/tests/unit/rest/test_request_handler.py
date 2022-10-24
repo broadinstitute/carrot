@@ -720,7 +720,7 @@ def create_map_with_other_thing_data(request):
 
 
 def test_create_map_with_other_thing(create_map_with_other_thing_data):
-    result = request_handler.create_map_with_other_thing(
+    result = request_handler.create_map_with_target(
         create_map_with_other_thing_data["entity1"],
         create_map_with_other_thing_data["entity1_id"],
         create_map_with_other_thing_data["entity2"],
@@ -855,7 +855,7 @@ def find_map_by_ids_and_other_thing_data(request):
 
 
 def test_find_map_by_ids_and_other_thing(find_map_by_ids_and_other_thing_data):
-    result = request_handler.find_map_by_ids_and_other_thing(
+    result = request_handler.find_map_by_ids_and_target(
         find_map_by_ids_and_other_thing_data["entity1"],
         find_map_by_ids_and_other_thing_data["entity1_id"],
         find_map_by_ids_and_other_thing_data["entity2"],
@@ -973,7 +973,7 @@ def delete_map_by_ids_and_other_thing_data(request):
 
 
 def test_delete_map_by_ids_and_other_thing(delete_map_by_ids_and_other_thing_data):
-    result = request_handler.delete_map_by_ids_and_other_thing(
+    result = request_handler.delete_map_by_ids_and_target(
         delete_map_by_ids_and_other_thing_data["entity1"],
         delete_map_by_ids_and_other_thing_data["entity1_id"],
         delete_map_by_ids_and_other_thing_data["entity2"],

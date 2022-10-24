@@ -10,6 +10,7 @@ use std::fmt::Formatter;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::str::SplitN;
 use tempfile::TempDir;
 use uuid::Uuid;
 use zip::write::FileOptions;
@@ -272,12 +273,17 @@ fn get_base_or_head_or_not_for_run(
     };
 
     // Check if the commit in value matches head or base (or none)
-    if value.len() > github_info.head_commit.len()
-        && &value[(value.len() - github_info.head_commit.len())..] == &github_info.head_commit
+    // The commit will appear after the first | if there is one in the value
+    let mut split: SplitN<&str> = value.splitn(2, "|");
+    split.next();
+    let commit: &str = match split.next() {
+        Some(commit) => commit,
+        None => return String::new()
+    };
+    if commit == &github_info.head_commit
     {
         String::from("head")
-    } else if value.len() > github_info.base_commit.len()
-        && &value[(value.len() - github_info.base_commit.len())..] == &github_info.base_commit
+    } else if commit == &github_info.base_commit
     {
         String::from("base")
     } else {

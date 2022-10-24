@@ -7,7 +7,7 @@ LOGGER = logging.getLogger(__name__)
 
 def create_map(template_id, report_id, report_trigger, created_by):
     """Submits a request to CARROT's template_report create mapping"""
-    return request_handler.create_map_with_other_thing(
+    return request_handler.create_map_with_target(
         "templates",
         template_id,
         "reports",
@@ -45,13 +45,13 @@ def find_maps(
 
 def find_map_by_ids(template_id, report_id, report_trigger):
     """Submits a request to CARROT's template_report find_by_id mapping"""
-    return request_handler.find_map_by_ids_and_other_thing(
+    return request_handler.find_map_by_ids_and_target(
         "templates", template_id, "reports", report_id, report_trigger
     )
 
 
 def delete_map_by_ids(template_id, report_id, report_trigger):
     """Submits a request to CARROT's template_report delete mapping"""
-    return request_handler.delete_map_by_ids_and_other_thing(
+    return request_handler.delete_map_by_ids_and_target(
         "templates", template_id, "reports", report_id, report_trigger
     )

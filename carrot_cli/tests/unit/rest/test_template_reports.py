@@ -43,12 +43,12 @@ from carrot_cli.rest import request_handler, template_reports
 )
 def create_map_data(request):
     # Set all requests to return None so only the one we expect will return a value
-    mockito.when(request_handler).create_map_with_other_thing(...).thenReturn(None)
+    mockito.when(request_handler).create_map_with_target(...).thenReturn(None)
     # Mock up request response
     params = [
         ("created_by", request.param["created_by"]),
     ]
-    mockito.when(request_handler).create_map_with_other_thing(
+    mockito.when(request_handler).create_map_with_target(
         "templates",
         request.param["template_id"],
         "reports",
@@ -180,9 +180,9 @@ def test_find_maps(find_maps_data):
 )
 def find_map_by_ids_data(request):
     # Set all requests to return None so only the one we expect will return a value
-    mockito.when(request_handler).find_map_by_ids_and_other_thing(...).thenReturn(None)
+    mockito.when(request_handler).find_map_by_ids_and_target(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).find_map_by_ids_and_other_thing(
+    mockito.when(request_handler).find_map_by_ids_and_target(
         "templates", request.param["template_id"], "reports", request.param["report_id"], request.param["report_trigger"]
     ).thenReturn(request.param["return"])
     return request.param
@@ -223,9 +223,9 @@ def test_find_maps_by_id(find_map_by_ids_data):
 )
 def delete_map_by_ids_data(request):
     # Set all requests to return None so only the one we expect will return a value
-    mockito.when(request_handler).delete_map_by_ids_and_other_thing(...).thenReturn(None)
+    mockito.when(request_handler).delete_map_by_ids_and_target(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).delete_map_by_ids_and_other_thing(
+    mockito.when(request_handler).delete_map_by_ids_and_target(
         "templates", request.param["template_id"], "reports", request.param["report_id"], request.param["report_trigger"]
     ).thenReturn(request.param["return"])
     return request.param
