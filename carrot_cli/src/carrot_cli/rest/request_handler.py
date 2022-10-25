@@ -217,6 +217,50 @@ def delete_map_by_ids(entity1, entity1_id, entity2, entity2_id):
     # Create and send request
     return send_request("DELETE", address)
 
+def create_map_with_target(entity1, entity1_id, entity2, entity2_id, target, params, query_params=None):
+    """
+    Submits a request for creating a mapping between entity1 and entity2 with the target, with the specified
+    params.
+    """
+    # Build request address
+    server_address = config.load_var("carrot_server_address")
+    address = (
+        f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
+    )
+    # Build request json body from params, filtering out empty ones
+    body = {}
+    for param in params:
+        if param[1] != "":
+            body[param[0]] = param[1]
+    # Create and send request
+    return send_request("POST", address, json=body, params=query_params)
+
+def find_map_by_ids_and_target(entity1, entity1_id, entity2, entity2_id, target):
+    """
+    Submits a request for finding a mapping between entity1 and entity2, with the specified
+    ids and target (like a report trigger, in the case of template reports)
+    """
+    # Build request address
+    server_address = config.load_var("carrot_server_address")
+    address = (
+        f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
+    )
+    # Create and send request
+    return send_request("GET", address)
+
+
+def delete_map_by_ids_and_target(entity1, entity1_id, entity2, entity2_id, target):
+    """
+    Submits a request for deleting a mapping between entity1 and entity2, with the specified
+    ids and target (like a report trigger, in the case of template reports)
+    """
+    # Build request address
+    server_address = config.load_var("carrot_server_address")
+    address = (
+        f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
+    )
+    # Create and send request
+    return send_request("DELETE", address)
 
 def send_request(method, url, params=None, json=None, body=None, files=None, expected_format=ResponseFormat.JSON):
     """

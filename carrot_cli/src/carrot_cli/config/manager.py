@@ -3,6 +3,8 @@ import logging
 import os
 import sys
 
+from ..email_util import verify_email
+
 LOGGER = logging.getLogger(__name__)
 
 CONFIG_VARIABLES = ["carrot_server_address", "email"]
@@ -63,6 +65,12 @@ def load_var_no_error(var_name):
 def set_var(var_name, val):
     """Sets the specified variable with the specified value in the config file"""
     LOGGER.debug("Setting config variable %s to %s", var_name, val)
+    # If the variable being set is email, make sure it's a valid email
+    if var_name == "email":
+        if not verify_email(val):
+            # Print an error and exit if it's not valid
+            LOGGER.error("Value provided for email is not a valid email address")
+            sys.exit(1)
     # Open file and load as json
     config_file_path = os.path.expanduser("~/.carrot_cli/config.json")
     config_file = open(config_file_path, "r+")

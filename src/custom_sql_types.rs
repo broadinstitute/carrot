@@ -225,3 +225,35 @@ impl fmt::Display for MachineTypeEnum {
         }
     }
 }
+
+/// Maps to the custom type `report_trigger_enum` in the DB
+///
+/// Represents the enum used in the DB for representing a type of run that can trigger a report
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+#[DieselType = "Report_trigger_enum"]
+pub enum ReportTriggerEnum {
+    Pr,
+    Single,
+}
+
+/// Maps to the custom type `reportable_enum` in the DB
+///
+/// Represents the enum used in the DB for representing a an entity that a report can be generated
+/// for
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+#[DieselType = "Reportable_enum"]
+pub enum ReportableEnum {
+    Run,
+    RunGroup,
+}
+
+impl fmt::Display for ReportableEnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ReportableEnum::Run => write!(f, "run"),
+            ReportableEnum::RunGroup => write!(f, "run_group"),
+        }
+    }
+}

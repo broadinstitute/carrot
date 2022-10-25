@@ -8,7 +8,7 @@
 use crate::custom_sql_types::REPORT_FAILURE_STATUSES;
 use crate::schema::report;
 use crate::schema::report::dsl::*;
-use crate::schema::run_report;
+use crate::schema::report_map;
 use crate::util;
 use chrono::NaiveDateTime;
 use core::fmt;
@@ -239,7 +239,7 @@ impl ReportData {
     /// Updates a specified report in the DB
     ///
     /// Updates the report row in the DB using `conn` specified by `id` with the values in
-    /// `params`.  Fails if trying to update notebook and there are nonfailed run_reports associated
+    /// `params`.  Fails if trying to update notebook and there are nonfailed report_maps associated
     /// with this report
     /// Returns a result containing either the newly updated report or an error if the update
     /// fails for some reason
@@ -248,19 +248,19 @@ impl ReportData {
         id: Uuid,
         params: ReportChangeset,
     ) -> Result<Self, UpdateError> {
-        // If trying to update the notebook, verify that no non-failed run_reports exist for this
+        // If trying to update the notebook, verify that no non-failed report_maps exist for this
         // report
         if matches!(params.notebook, Some(_)) {
-            match Self::has_nonfailed_run_reports(conn, id) {
-                // If there is a nonfailed run_report, return an error
+            match Self::has_nonfailed_report_maps(conn, id) {
+                // If there is a nonfailed report_map, return an error
                 Ok(true) => {
-                    let err = UpdateError::Prohibited(String::from("Attempted to update notebook when a non-failed run_report exists for this template.  Doing so is prohibited"));
+                    let err = UpdateError::Prohibited(String::from("Attempted to update notebook when a non-failed report_map exists for this template.  Doing so is prohibited"));
                     error!("Failed to update due to error: {}", err);
                     return Err(err);
                 }
-                // If there are no nonfailed run_reports, don't stop execution
+                // If there are no nonfailed report_maps, don't stop execution
                 Ok(false) => {}
-                // If checking for run_reports failed for some reason, return the error
+                // If checking for report_maps failed for some reason, return the error
                 Err(e) => {
                     error!("Failed to update due to error: {}", e);
                     return Err(UpdateError::DB(e));
@@ -281,26 +281,26 @@ impl ReportData {
         diesel::delete(report.filter(report_id.eq(id))).execute(conn)
     }
 
-    /// Checks whether the specified report has nonfailed run_reports associated with it
+    /// Checks whether the specified report has nonfailed report_maps associated with it
     ///
-    /// Returns either a boolean indicating whether there are run_reports in the database that are
+    /// Returns either a boolean indicating whether there are report_maps in the database that are
     /// children of the report specified by `id` that have non-failure statuses, or a diesel error
     /// if one is encountered
-    pub fn has_nonfailed_run_reports(
+    pub fn has_nonfailed_report_maps(
         conn: &PgConnection,
         id: Uuid,
     ) -> Result<bool, diesel::result::Error> {
-        // Query the run_reports table for non failed run reports
-        let non_failed_run_reports_count = run_report::dsl::run_report
-            .filter(run_report::dsl::report_id.eq(id))
-            .filter(run_report::dsl::status.ne(all(REPORT_FAILURE_STATUSES.to_vec())))
-            .select(run_report::dsl::run_id)
+        // Query the report_maps table for non failed run reports
+        let non_failed_report_maps_count = report_map::dsl::report_map
+            .filter(report_map::dsl::report_id.eq(id))
+            .filter(report_map::dsl::status.ne(all(REPORT_FAILURE_STATUSES.to_vec())))
+            .select(report_map::dsl::entity_id)
             .first::<Uuid>(conn);
 
-        match non_failed_run_reports_count {
-            // If we got a result, there is a nonfailed run_report, so return true
+        match non_failed_report_maps_count {
+            // If we got a result, there is a nonfailed report_map, so return true
             Ok(_) => Ok(true),
-            // If we got not found, then there are no nonfailed run_reports, so return false
+            // If we got not found, then there are no nonfailed report_maps, so return false
             Err(diesel::result::Error::NotFound) => Ok(false),
             // Otherwise, return the error
             Err(e) => Err(e),
@@ -312,10 +312,10 @@ impl ReportData {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, ReportableEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::run::{NewRun, RunData};
-    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
@@ -426,7 +426,7 @@ mod tests {
         reports
     }
 
-    fn insert_test_run_report_failed(conn: &PgConnection) -> RunReportData {
+    fn insert_test_report_map_failed(conn: &PgConnection) -> ReportMapData {
         let run = insert_test_run(conn);
 
         let new_report = NewReport {
@@ -440,8 +440,9 @@ mod tests {
         let new_report =
             ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: new_report.report_id,
             status: ReportStatusEnum::Failed,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -450,10 +451,10 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
-    fn insert_test_run_report_non_failed(conn: &PgConnection) -> RunReportData {
+    fn insert_test_report_map_non_failed(conn: &PgConnection) -> ReportMapData {
         let run = insert_test_run(conn);
 
         let new_report = NewReport {
@@ -467,8 +468,9 @@ mod tests {
         let new_report =
             ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: new_report.report_id,
             status: ReportStatusEnum::Running,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -477,7 +479,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
     #[test]
@@ -838,9 +840,9 @@ mod tests {
     fn delete_failure_foreign_key() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_non_failed(&conn);
+        let test_report_map = insert_test_report_map_non_failed(&conn);
 
-        let delete_result = ReportData::delete(&conn, test_run_report.report_id);
+        let delete_result = ReportData::delete(&conn, test_report_map.report_id);
 
         assert!(matches!(
             delete_result,
@@ -852,36 +854,36 @@ mod tests {
     }
 
     #[test]
-    fn has_non_failed_run_reports_true() {
+    fn has_non_failed_report_maps_true() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_non_failed(&conn);
+        let test_report_map = insert_test_report_map_non_failed(&conn);
 
         let result =
-            ReportData::has_nonfailed_run_reports(&conn, test_run_report.report_id).unwrap();
+            ReportData::has_nonfailed_report_maps(&conn, test_report_map.report_id).unwrap();
 
         assert!(result);
     }
 
     #[test]
-    fn has_non_failed_run_reports_false() {
+    fn has_non_failed_report_maps_false() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_failed(&conn);
+        let test_report_map = insert_test_report_map_failed(&conn);
 
         let result =
-            ReportData::has_nonfailed_run_reports(&conn, test_run_report.report_id).unwrap();
+            ReportData::has_nonfailed_report_maps(&conn, test_report_map.report_id).unwrap();
 
         assert!(!result);
     }
 
     #[test]
-    fn has_non_failed_run_reports_false_no_runs() {
+    fn has_non_failed_report_maps_false_no_runs() {
         let conn = get_test_db_connection();
 
         let test_report = insert_test_report(&conn);
 
-        let result = ReportData::has_nonfailed_run_reports(&conn, test_report.report_id).unwrap();
+        let result = ReportData::has_nonfailed_report_maps(&conn, test_report.report_id).unwrap();
 
         assert!(!result);
     }

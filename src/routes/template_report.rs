@@ -3,10 +3,9 @@
 //! Contains functions for processing requests to create, update, and search template_report
 //! mappings, along with their URI mappings
 
+use crate::custom_sql_types::ReportTriggerEnum;
 use crate::db;
-use crate::models::template_report::{
-    DeleteError, NewTemplateReport, TemplateReportData, TemplateReportQuery,
-};
+use crate::models::template_report::{NewTemplateReport, TemplateReportData, TemplateReportQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::util::parse_id;
@@ -26,11 +25,11 @@ struct NewTemplateReportIncomplete {
     pub created_by: Option<String>,
 }
 
-/// Handles requests to /templates/{id}/reports/{report_id} for retrieving template_report mapping
-/// info by template_id and report_id
+/// Handles requests to /templates/{id}/reports/{report_id}/{report_trigger} for retrieving
+/// template_report mapping info by template_id and report_id
 ///
 /// This function is called by Actix-Web when a get request is made to the
-/// /templates/{id}/reports/{report_id} mapping
+/// /templates/{id}/reports/{report_id}/{report_trigger} mapping
 /// It parses the id and report_id from `req`, connects to the db via a connection from `pool`,
 /// and returns the retrieved template_report mapping, or an error message if there is no matching
 /// template_report mapping or some other error occurs
@@ -41,6 +40,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
+    let report_trigger = &req.match_info().get("report_trigger").unwrap();
 
     // Parse ID into Uuid
     let id = match parse_id(id) {
@@ -54,11 +54,22 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
         Err(error_response) => return error_response,
     };
 
+    // Parse report_trigger into ReportTriggerEnum
+    let report_trigger = match parse_report_trigger(report_trigger) {
+        Ok(trigger) => trigger,
+        Err(error_response) => return error_response,
+    };
+
     // Query DB for report in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateReportData::find_by_template_and_report(&conn, id, report_id) {
+        match TemplateReportData::find_by_template_and_report_and_trigger(
+            &conn,
+            id,
+            report_id,
+            report_trigger,
+        ) {
             Ok(template_report) => Ok(template_report),
             Err(e) => {
                 error!("{}", e);
@@ -152,11 +163,11 @@ async fn find(
     }
 }
 
-/// Handles requests to /templates/{id}/reports/{report_id} mapping for creating template_report
-/// mappings
+/// Handles requests to /templates/{id}/reports/{report_id}/{report_trigger} mapping for creating
+/// template_report mappings
 ///
 /// This function is called by Actix-Web when a post request is made to the
-/// /templates/{id}/reports{report_id} mapping
+/// /templates/{id}/reports/{report_id}/{report_trigger} mapping
 /// It deserializes the request body to a NewTemplateReportIncomplete, uses that with the id and
 /// report_id to assemble a NewTemplateReport, connects to the db via a connection from `pool`,
 /// creates a template_report mapping with the specified parameters, and returns the created
@@ -166,12 +177,13 @@ async fn find(
 /// Panics if attempting to connect to the database reports in an error
 async fn create(
     req: HttpRequest,
-    web::Json(new_test): web::Json<NewTemplateReportIncomplete>,
+    web::Json(new_mapping): web::Json<NewTemplateReportIncomplete>,
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
+    let report_trigger = &req.match_info().get("report_trigger").unwrap();
 
     // Parse ID into Uuid
     let id = match parse_id(id) {
@@ -185,11 +197,18 @@ async fn create(
         Err(error_response) => return error_response,
     };
 
+    // Parse report_trigger into ReportTriggerEnum
+    let report_trigger = match parse_report_trigger(report_trigger) {
+        Ok(trigger) => trigger,
+        Err(error_response) => return error_response,
+    };
+
     // Create a NewTemplateReport to pass to the create function
     let new_test = NewTemplateReport {
         template_id: id,
         report_id,
-        created_by: new_test.created_by,
+        report_trigger,
+        created_by: new_mapping.created_by,
     };
 
     // Insert in new thread
@@ -216,11 +235,11 @@ async fn create(
     }
 }
 
-/// Handles DELETE requests to /templates/{id}/reports/{report_id} for deleting template_report
-/// mappings
+/// Handles DELETE requests to /templates/{id}/reports/{report_id}/{report_trigger} for deleting
+/// template_report mappings
 ///
 /// This function is called by Actix-Web when a delete request is made to the
-/// /templates/{id}/reports/{report_id} mapping
+/// /templates/{id}/reports/{report_id}/{report_trigger} mapping
 /// It parses the id from `req`, connects to the db via a connection from `pool`, and attempts to
 /// delete the specified template_report mapping, returning the number or rows deleted or an error
 /// message if some error occurs
@@ -231,6 +250,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
     // Pull id params from path
     let id = &req.match_info().get("id").unwrap();
     let report_id = &req.match_info().get("report_id").unwrap();
+    let report_trigger = &req.match_info().get("report_trigger").unwrap();
 
     // Parse ID into Uuid
     let id = match parse_id(id) {
@@ -244,11 +264,17 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
         Err(error_response) => return error_response,
     };
 
+    // Parse report_trigger into ReportTriggerEnum
+    let report_trigger = match parse_report_trigger(report_trigger) {
+        Ok(trigger) => trigger,
+        Err(error_response) => return error_response,
+    };
+
     //Query DB for pipeline in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match TemplateReportData::delete(&conn, id, report_id) {
+        match TemplateReportData::delete(&conn, id, report_id, report_trigger) {
             Ok(delete_count) => Ok(delete_count),
             Err(e) => {
                 error!("{}", e);
@@ -273,18 +299,26 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
         }
         Err(e) => {
             error!("{}", e);
-            match e {
-                // If no template is found, return a 404
-                BlockingError::Error(
-                    DeleteError::Prohibited(_)
-                ) => HttpResponse::Forbidden().json(ErrorBody {
-                    title: "Cannot delete".to_string(),
-                    status: 403,
-                    detail: "Cannot delete a template_report mapping if the associated template has non-failed run that has a non-failed run_report from the associated report".to_string(),
-                }),
-                // For other errors, return a 500
-                _ => default_500(&e),
-            }
+            // For any errors, return a 500
+            default_500(&e)
+        }
+    }
+}
+
+/// Attempts to parse `s` as a ReportTriggerEnum.  Returns the parsed value or an error http
+/// response if unsuccessful
+fn parse_report_trigger(s: &str) -> Result<ReportTriggerEnum, HttpResponse> {
+    match &*s.to_lowercase() {
+        "pr" => Ok(ReportTriggerEnum::Pr),
+        "single" => Ok(ReportTriggerEnum::Single),
+        _ => {
+            error!("Failed to parse submitted report trigger value {}", s);
+            // If it doesn't parse successfully, return an error to the user
+            Err(HttpResponse::BadRequest().json(ErrorBody {
+                title: "Unsupported value for report_trigger".to_string(),
+                status: 400,
+                detail: "Supported values for report_trigger: pr, single".to_string(),
+            }))
         }
     }
 }
@@ -306,7 +340,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig, enable_reporting: bool) {
 /// enabled
 fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::resource("/templates/{id}/reports/{report_id}")
+        web::resource("/templates/{id}/reports/{report_id}/{report_trigger}")
             .route(web::get().to(find_by_id))
             .route(web::post().to(create))
             .route(web::delete().to(delete_by_id)),
@@ -321,7 +355,7 @@ fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
             .route(web::route().to(disabled_features::reporting_disabled_mapping)),
     );
     cfg.service(
-        web::resource("/templates/{id}/reports/{report_id}")
+        web::resource("/templates/{id}/reports/{report_id}/{report_trigger}")
             .route(web::route().to(disabled_features::reporting_disabled_mapping)),
     );
 }
@@ -329,11 +363,11 @@ fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, ReportableEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::run::{NewRun, RunData};
-    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
@@ -380,6 +414,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             report_id: report.report_id,
             template_id: template.template_id,
+            report_trigger: ReportTriggerEnum::Single,
             created_by: Some(String::from("Kevin@example.com")),
         };
 
@@ -428,7 +463,7 @@ mod tests {
         conn: &PgConnection,
         test_report_id: Uuid,
         test_template_id: Uuid,
-    ) -> RunReportData {
+    ) -> ReportMapData {
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
             template_id: test_template_id,
@@ -459,8 +494,9 @@ mod tests {
 
         let run = RunData::create(&conn, new_run).expect("Failed to insert run");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_run_report = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: test_report_id,
             status: ReportStatusEnum::Running,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -469,7 +505,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[actix_rt::test]
@@ -487,7 +523,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 new_template_report.template_id, new_template_report.report_id
             ))
             .to_request();
@@ -516,7 +552,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 new_template_report.template_id, new_template_report.report_id
             ))
             .to_request();
@@ -547,7 +583,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 Uuid::new_v4(),
                 Uuid::new_v4()
             ))
@@ -581,7 +617,7 @@ mod tests {
         .await;
 
         let req = test::TestRequest::get()
-            .uri("/templates/123456789/reports/12345678910")
+            .uri("/templates/123456789/reports/12345678910/single")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -737,7 +773,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 template.template_id, report.report_id
             ))
             .set_json(&new_template_report)
@@ -776,7 +812,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 template.template_id, report.report_id
             ))
             .set_json(&new_template_report)
@@ -807,7 +843,7 @@ mod tests {
         .await;
 
         let req = test::TestRequest::get()
-            .uri("/templates/123456789/reports/12345678910")
+            .uri("/templates/123456789/reports/12345678910/single")
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -836,7 +872,7 @@ mod tests {
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 template_report.template_id, template_report.report_id
             ))
             .to_request();
@@ -869,7 +905,7 @@ mod tests {
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 template_report.template_id, template_report.report_id
             ))
             .to_request();
@@ -900,7 +936,7 @@ mod tests {
 
         let req = test::TestRequest::delete()
             .uri(&format!(
-                "/templates/{}/reports/{}",
+                "/templates/{}/reports/{}/single",
                 Uuid::new_v4(),
                 template_report.report_id
             ))
@@ -921,45 +957,6 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn delete_failure_not_allowed() {
-        let pool = get_test_db_pool();
-
-        let template_report = insert_test_template_report(&pool.get().unwrap());
-        insert_test_run_report_non_failed_with_report_id_and_template_id(
-            &pool.get().unwrap(),
-            template_report.report_id,
-            template_report.template_id,
-        );
-
-        let mut app = test::init_service(
-            App::new()
-                .data(pool)
-                .configure(init_routes_reporting_enabled),
-        )
-        .await;
-
-        let req = test::TestRequest::delete()
-            .uri(&format!(
-                "/templates/{}/reports/{}",
-                template_report.template_id, template_report.report_id
-            ))
-            .to_request();
-        let resp = test::call_service(&mut app, req).await;
-
-        assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
-
-        let report = test::read_body(resp).await;
-        let error_body: ErrorBody = serde_json::from_slice(&report).unwrap();
-
-        assert_eq!(error_body.title, "Cannot delete");
-        assert_eq!(error_body.status, 403);
-        assert_eq!(
-            error_body.detail,
-            "Cannot delete a template_report mapping if the associated template has non-failed run that has a non-failed run_report from the associated report"
-        );
-    }
-
-    #[actix_rt::test]
     async fn delete_failure_bad_uuid() {
         let pool = get_test_db_pool();
 
@@ -971,7 +968,7 @@ mod tests {
         .await;
 
         let req = test::TestRequest::delete()
-            .uri(&format!("/templates/123456789/reports/123456789"))
+            .uri(&format!("/templates/123456789/reports/123456789/single"))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 

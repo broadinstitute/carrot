@@ -2,19 +2,21 @@ import json
 
 import mockito
 import pytest
-from carrot_cli.rest import request_handler, run_reports
+from carrot_cli.rest import request_handler, report_maps
 
 
 @pytest.fixture(
     params=[
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
             "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "created_by": "rogelio@example.com",
             "delete_failed": True,
             "return": json.dumps(
                 {
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity_type": "run",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "created",
                     "results": {},
@@ -28,7 +30,8 @@ from carrot_cli.rest import request_handler, run_reports
             ),
         },
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
             "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "created_by": "rogelio@example.com",
             "delete_failed": False,
@@ -55,8 +58,8 @@ def create_map_data(request):
         ("delete_failed", "true" if request.param["delete_failed"] else "false")
     ]
     mockito.when(request_handler).create_map(
-        "runs",
-        request.param["run_id"],
+        request.param["entity"],
+        request.param["entity_id"],
         "reports",
         request.param["report_id"],
         params,
@@ -66,8 +69,9 @@ def create_map_data(request):
 
 
 def test_create_map(create_map_data):
-    report = run_reports.create_map(
-        create_map_data["run_id"],
+    report = report_maps.create_map(
+        create_map_data["entity"],
+        create_map_data["entity_id"],
         create_map_data["report_id"],
         create_map_data["created_by"],
         create_map_data["delete_failed"],
@@ -78,7 +82,8 @@ def test_create_map(create_map_data):
 @pytest.fixture(
     params=[
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             "params": [
                 ("report_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
                 ("status", ""),
@@ -95,7 +100,8 @@ def test_create_map(create_map_data):
             ],
             "return": json.dumps(
                 {
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity_type": "run",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
                     "cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
@@ -109,7 +115,8 @@ def test_create_map(create_map_data):
             ),
         },
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
             "params": [
                 ("report_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
                 ("status", ""),
@@ -126,9 +133,9 @@ def test_create_map(create_map_data):
             ],
             "return": json.dumps(
                 {
-                    "title": "No run_report mapping found",
+                    "title": "No report_map mapping found",
                     "status": 404,
-                    "detail": "No run_report mapping found with the specified parameters",
+                    "detail": "No report_map mapping found with the specified parameters",
                 },
                 indent=4,
                 sort_keys=True,
@@ -141,14 +148,15 @@ def find_maps_data(request):
     mockito.when(request_handler).find_maps(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).find_maps(
-        "runs", request.param["run_id"], "reports", request.param["params"]
+        request.param["entity"], request.param["entity_id"], "reports", request.param["params"]
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find_maps(find_maps_data):
-    report = run_reports.find_maps(
-        find_maps_data["run_id"],
+    report = report_maps.find_maps(
+        find_maps_data["entity"],
+        find_maps_data["entity_id"],
         find_maps_data["params"][0][1],
         find_maps_data["params"][1][1],
         find_maps_data["params"][2][1],
@@ -168,11 +176,13 @@ def test_find_maps(find_maps_data):
 @pytest.fixture(
     params=[
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "return": json.dumps(
                 {
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity_type": "run",
+                    "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
                     "cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
@@ -186,13 +196,14 @@ def test_find_maps(find_maps_data):
             ),
         },
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "return": json.dumps(
                 {
-                    "title": "No run_report mapping found",
+                    "title": "No report_map mapping found",
                     "status": 404,
-                    "detail": "No run_report mapping found with the specified ID",
+                    "detail": "No report_map mapping found with the specified ID",
                 },
                 indent=4,
                 sort_keys=True,
@@ -205,14 +216,14 @@ def find_map_by_ids_data(request):
     mockito.when(request_handler).find_map_by_ids(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).find_map_by_ids(
-        "runs", request.param["run_id"], "reports", request.param["report_id"]
+        request.param["entity"], request.param["entity_id"], "reports", request.param["report_id"]
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find_maps_by_id(find_map_by_ids_data):
-    report = run_reports.find_map_by_ids(
-        find_map_by_ids_data["run_id"], find_map_by_ids_data["report_id"]
+    report = report_maps.find_map_by_ids(
+        find_map_by_ids_data["entity"], find_map_by_ids_data["entity_id"], find_map_by_ids_data["report_id"]
     )
     assert report == find_map_by_ids_data["return"]
 
@@ -220,20 +231,22 @@ def test_find_maps_by_id(find_map_by_ids_data):
 @pytest.fixture(
     params=[
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "return": json.dumps(
                 {"message": "Successfully deleted 1 row"}, indent=4, sort_keys=True
             ),
         },
         {
-            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "entity": "runs",
+            "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "return": json.dumps(
                 {
-                    "title": "No run_report mapping found",
+                    "title": "No report_map mapping found",
                     "status": 404,
-                    "detail": "No run_report mapping found with the specified ID",
+                    "detail": "No report_map mapping found with the specified ID",
                 },
                 indent=4,
                 sort_keys=True,
@@ -246,13 +259,13 @@ def delete_map_by_ids_data(request):
     mockito.when(request_handler).delete_map_by_ids(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).delete_map_by_ids(
-        "runs", request.param["run_id"], "reports", request.param["report_id"]
+        request.param["entity"], request.param["entity_id"], "reports", request.param["report_id"]
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_delete_maps_by_id(delete_map_by_ids_data):
-    report = run_reports.delete_map_by_ids(
-        delete_map_by_ids_data["run_id"], delete_map_by_ids_data["report_id"]
+    report = report_maps.delete_map_by_ids(
+        delete_map_by_ids_data["entity"], delete_map_by_ids_data["entity_id"], delete_map_by_ids_data["report_id"]
     )
     assert report == delete_map_by_ids_data["return"]

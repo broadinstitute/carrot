@@ -1,17 +1,16 @@
 //! Contains functions for sending notifications to users
 
-use crate::custom_sql_types::RUN_TERMINAL_STATUSES;
+use crate::custom_sql_types::{ReportableEnum, RUN_TERMINAL_STATUSES};
+use crate::models::report_map::ReportMapData;
 use crate::models::run::{RunData, RunQuery, RunWithResultsAndErrorsData};
 use crate::models::run_group_is_from_github::RunGroupIsFromGithubData;
 use crate::models::run_is_from_github::RunIsFromGithubData;
-use crate::models::run_report::RunReportData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::{emailer, github_commenter};
 use crate::util::json_parsing;
 use diesel::PgConnection;
 use log::error;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
 use uuid::Uuid;
@@ -108,25 +107,28 @@ impl NotificationHandler {
     }
 
     /// Sends notifications (emails and github comments if appropriate) for the completion of
-    /// `run_report`, using `run` and `report_name` to provide additional context to the user
-    pub async fn send_run_report_complete_notifications(
+    /// `report_map`, using `runs` and `report_name` to provide additional context to the user
+    pub async fn send_report_map_complete_notifications(
         &self,
         conn: &PgConnection,
-        run_report: &RunReportData,
-        run: &RunData,
+        report_map: &ReportMapData,
+        runs: &[RunData],
         report_name: &str,
     ) -> Result<(), Error> {
         // Send emails
         if self.emailer.is_some() {
-            self.send_run_report_complete_emails(conn, run_report, run, report_name)?;
+            self.send_report_map_complete_emails(conn, report_map, runs, report_name)?;
         }
         // Post github comments
         if self.github_commenter.is_some() {
-            self.post_run_report_complete_comment_if_from_github(
+            // Get test name to include in comment
+            let test_name = TestData::find_name_by_id(conn, runs[0].test_id)?;
+            // Post the comment
+            self.post_report_map_complete_comment_if_from_github(
                 conn,
-                run_report,
+                report_map,
                 report_name,
-                &run.name,
+                &test_name,
             )
             .await?;
         }
@@ -487,40 +489,48 @@ impl NotificationHandler {
     }
 
     /// Sends email to each user subscribed to the test, template, or pipeline for the run specified
-    /// by `run`, and the creator, if any, of the run_report specified by `run_report`.
-    /// The email includes the contents of the RunReportData instance for that run_report, and indicates
+    /// by `run`, and the creator, if any, of the report_map specified by `report_map`.
+    /// The email includes the contents of the RunReportData instance for that report_map, and indicates
     /// which report by `report_name`
-    fn send_run_report_complete_emails(
+    fn send_report_map_complete_emails(
         &self,
         conn: &PgConnection,
-        run_report: &RunReportData,
-        run: &RunData,
+        report_map: &ReportMapData,
+        runs: &[RunData],
         report_name: &str,
     ) -> Result<(), Error> {
         // Obviously, we can only send emails if we have an emailer
         match &self.emailer {
             Some(emailer) => {
                 // Get subscriptions
-                let subs = SubscriptionData::find_all_for_test(conn, run.test_id)?;
+                let subs = SubscriptionData::find_all_for_test(conn, runs[0].test_id)?;
 
                 // Assemble set of email addresses to notify
                 let mut email_addresses = HashSet::new();
-                if let Some(address) = &run_report.created_by {
+                if let Some(address) = &report_map.created_by {
                     email_addresses.insert(address.as_str());
                 }
-                if let Some(address) = &run.created_by {
-                    email_addresses.insert(address.as_str());
+                for run in runs {
+                    if let Some(address) = &run.created_by {
+                        email_addresses.insert(address.as_str());
+                    }
                 }
                 for sub in &subs {
                     email_addresses.insert(&sub.email);
                 }
 
                 // Put together subject and message for emails
-                let subject = format!(
-                    "Run report completed for run {} and report {} with status {}",
-                    run.name, report_name, run_report.status
-                );
-                let message = serde_json::to_string_pretty(&run_report)?;
+                let subject = match report_map.entity_type {
+                    ReportableEnum::Run => format!(
+                        "Report generated for run {} and report {} with status {}",
+                        runs[0].name, report_name, report_map.status
+                    ),
+                    ReportableEnum::RunGroup => format!(
+                        "Report generated for run_group {} and report {} with status {}",
+                        report_map.entity_id, report_name, report_map.status
+                    ),
+                };
+                let message = serde_json::to_string_pretty(&report_map)?;
 
                 // Attempt to send email, and log an error and mark the error boolean as true if it fails
                 if !email_addresses.is_empty() {
@@ -686,8 +696,7 @@ impl NotificationHandler {
     ) -> bool {
         // Check if it's in test inputs
         if let Some(key) = test_input_key {
-            if let Some(key_val) =
-                json_parsing::get_string_val_for_input_key(&run.test_input, key)
+            if let Some(key_val) = json_parsing::get_string_val_for_input_key(&run.test_input, key)
             {
                 if &key_val[(key_val.len() - commit.len())..] == commit {
                     return true;
@@ -696,8 +705,7 @@ impl NotificationHandler {
         }
         // Now check eval inputs
         if let Some(key) = eval_input_key {
-            if let Some(key_val) =
-                json_parsing::get_string_val_for_input_key(&run.eval_input, key)
+            if let Some(key_val) = json_parsing::get_string_val_for_input_key(&run.eval_input, key)
             {
                 if &key_val[(key_val.len() - commit.len())..] == commit {
                     return true;
@@ -707,42 +715,78 @@ impl NotificationHandler {
         return false;
     }
 
-    /// Checks to see if the run for `run_report` was triggered from Github (i.e has a
+    /// Checks to see if the run for `report_map` was triggered from Github (i.e has a
     /// corresponding row in the RUN_IS_FROM_GITHUB table) and, if so, attempts to post a comment to
-    /// GitHub to indicate `run_report` has finished, with the results. Returns an error if there is
+    /// GitHub to indicate `report_map` has finished, with the results. Returns an error if there is
     /// some issue querying the db or posting the comment
-    async fn post_run_report_complete_comment_if_from_github(
+    async fn post_report_map_complete_comment_if_from_github(
         &self,
         conn: &PgConnection,
-        run_report: &RunReportData,
+        report_map: &ReportMapData,
         report_name: &str,
-        run_name: &str,
+        test_name: &str,
     ) -> Result<(), Error> {
         // We can only post github comments if we have a github commenter
         match &self.github_commenter {
             Some(github_commenter) => {
-                // Check if run was triggered by a github comment and retrieve relevant data if so
-                match RunIsFromGithubData::find_by_run_id(conn, run_report.run_id) {
-                    Ok(data_from_github) => {
-                        // If the run was triggered from github, post the report info to github as a reply
-                        github_commenter
-                            .post_run_report_finished_comment(
-                                &data_from_github.owner,
-                                &data_from_github.repo,
-                                data_from_github.issue_number,
-                                run_report,
-                                report_name,
-                                run_name,
-                            )
-                            .await?;
-                        Ok(())
+                match report_map.entity_type {
+                    // If report is mapped to a run, check if run was triggered by a github comment and
+                    // retrieve relevant data if so
+                    ReportableEnum::Run => {
+                        match RunIsFromGithubData::find_by_run_id(conn, report_map.entity_id) {
+                            Ok(data_from_github) => {
+                                // If the run was triggered from github, post the report info to github as a reply
+                                github_commenter
+                                    .post_report_map_finished_comment(
+                                        &data_from_github.owner,
+                                        &data_from_github.repo,
+                                        data_from_github.issue_number,
+                                        report_map,
+                                        report_name,
+                                        test_name,
+                                    )
+                                    .await?;
+                                Ok(())
+                            }
+                            Err(e) => {
+                                match e {
+                                    // If we just didn't get a record, that's fine
+                                    diesel::result::Error::NotFound => Ok(()),
+                                    // We want to return any other error
+                                    _ => Err(Error::DB(e)),
+                                }
+                            }
+                        }
                     }
-                    Err(e) => {
-                        match e {
-                            // If we just didn't get a record, that's fine
-                            diesel::result::Error::NotFound => Ok(()),
-                            // We want to return any other error
-                            _ => Err(Error::DB(e)),
+                    // Check if run_group for run was triggered by a github comment and retrieve
+                    // relevant data if so
+                    ReportableEnum::RunGroup => {
+                        match RunGroupIsFromGithubData::find_by_run_group_id(
+                            conn,
+                            report_map.entity_id,
+                        ) {
+                            Ok(data_from_github) => {
+                                // If the run was triggered from github, post the report info to github as a reply
+                                github_commenter
+                                    .post_report_map_finished_comment(
+                                        &data_from_github.owner,
+                                        &data_from_github.repo,
+                                        data_from_github.issue_number,
+                                        report_map,
+                                        report_name,
+                                        test_name,
+                                    )
+                                    .await?;
+                                Ok(())
+                            }
+                            Err(e) => {
+                                match e {
+                                    // If we just didn't get a record, that's fine
+                                    diesel::result::Error::NotFound => Ok(()),
+                                    // We want to return any other error
+                                    _ => Err(Error::DB(e)),
+                                }
+                            }
                         }
                     }
                 }
@@ -756,17 +800,19 @@ impl NotificationHandler {
 #[cfg(test)]
 mod tests {
     use crate::config::{EmailConfig, EmailSendmailConfig};
-    use crate::custom_sql_types::{EntityTypeEnum, ReportStatusEnum, RunStatusEnum};
+    use crate::custom_sql_types::{
+        EntityTypeEnum, ReportStatusEnum, ReportableEnum, RunStatusEnum,
+    };
     use crate::manager::notification_handler::{Error, NotificationHandler};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
     use crate::models::run_group::RunGroupData;
     use crate::models::run_group_is_from_github::{
         NewRunGroupIsFromGithub, RunGroupIsFromGithubData,
     };
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
-    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::subscription::{NewSubscription, SubscriptionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
@@ -978,11 +1024,12 @@ mod tests {
         RunIsFromGithubData::create(conn, new_run_is_from_github).unwrap()
     }
 
-    fn insert_test_run_report_with_run_id(
+    fn insert_test_report_map_with_run_id(
         conn: &PgConnection,
-        run_id: Uuid,
+        entity_type: ReportableEnum,
+        entity_id: Uuid,
         email_base_name: &str,
-    ) -> RunReportData {
+    ) -> ReportMapData {
         let new_report = NewReport {
             name: String::from("Kevin's Report"),
             description: Some(String::from("Kevin made this report for testing")),
@@ -993,8 +1040,9 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id,
+        let new_report_map = NewReportMap {
+            entity_type,
+            entity_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Succeeded,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -1008,7 +1056,7 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
     #[test]
@@ -1181,7 +1229,7 @@ mod tests {
     }
 
     #[test]
-    fn test_send_run_report_complete_emails_success() {
+    fn test_send_report_map_complete_emails_success() {
         // Create an emailer
         let test_email_config =
             EmailConfig::Sendmail(EmailSendmailConfig::new(String::from("kevin@example.com")));
@@ -1196,31 +1244,33 @@ mod tests {
 
         let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(
             &pool.get().unwrap(),
-            "test_send_run_report_complete_emails",
+            "test_send_report_map_complete_emails",
         );
 
-        let new_run_report = insert_test_run_report_with_run_id(
+        let new_report_map = insert_test_report_map_with_run_id(
             &pool.get().unwrap(),
+            ReportableEnum::Run,
             new_run.run_id,
-            "test_send_run_report_complete_emails",
+            "test_send_report_map_complete_emails",
         );
 
-        let test_subject = "Run report completed for run Kevin's Run and report Kevin's Report with status succeeded";
-        let test_message = serde_json::to_string_pretty(&new_run_report).unwrap();
+        let test_subject =
+            "Report generated for run Kevin's Run and report Kevin's Report with status succeeded";
+        let test_message = serde_json::to_string_pretty(&new_report_map).unwrap();
 
         // Make temporary directory for the email
         let email_path = Builder::new()
-            .prefix("test_send_run_report_complete_emails")
+            .prefix("test_send_report_map_complete_emails")
             .rand_bytes(0)
             .tempdir_in(temp_dir())
             .unwrap();
 
         // Send email
         test_handler
-            .send_run_report_complete_emails(
+            .send_report_map_complete_emails(
                 &pool.get().unwrap(),
-                &new_run_report,
-                &new_run,
+                &new_report_map,
+                &[new_run],
                 "Kevin's Report",
             )
             .unwrap();
@@ -1245,7 +1295,7 @@ mod tests {
                 .unwrap()
                 .get(0)
                 .unwrap(),
-            "test_send_run_report_complete_emails@example.com"
+            "test_send_report_map_complete_emails@example.com"
         );
         assert_eq!(
             test_email.envelope.get("reverse_path").unwrap(),
@@ -1267,7 +1317,7 @@ mod tests {
     }
 
     #[test]
-    fn test_send_run_report_complete_emails_failure_bad_email() {
+    fn test_send_report_map_complete_emails_failure_bad_email() {
         // Create an emailer
         let test_email_config =
             EmailConfig::Sendmail(EmailSendmailConfig::new(String::from("kevin@example.com")));
@@ -1282,19 +1332,20 @@ mod tests {
 
         let (new_run, _) = insert_test_run_with_subscriptions_with_entities(
             &pool.get().unwrap(),
-            "test_send_run_report_complete_emails@",
+            "test_send_report_map_complete_emails@",
         );
-        let new_run_report = insert_test_run_report_with_run_id(
+        let new_report_map = insert_test_report_map_with_run_id(
             &pool.get().unwrap(),
+            ReportableEnum::Run,
             new_run.run_id,
-            "test_send_run_report_complete_emails@",
+            "test_send_report_map_complete_emails@",
         );
 
         // Send emails
-        match test_handler.send_run_report_complete_emails(
+        match test_handler.send_report_map_complete_emails(
             &pool.get().unwrap(),
-            &new_run_report,
-            &new_run,
+            &new_report_map,
+            &[new_run],
             "Kevin's Report",
         ) {
             Err(e) => match e {
@@ -1311,7 +1362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_send_run_report_complete_emails_failure_no_emailer() {
+    fn test_send_report_map_complete_emails_failure_no_emailer() {
         // Create a notification handler with no emailer
         let test_handler = NotificationHandler {
             emailer: None,
@@ -1322,21 +1373,22 @@ mod tests {
 
         let (new_run, new_test) = insert_test_run_with_subscriptions_with_entities(
             &pool.get().unwrap(),
-            "test_send_run_report_complete_emails",
+            "test_send_report_map_complete_emails",
         );
 
-        let new_run_report = insert_test_run_report_with_run_id(
+        let new_report_map = insert_test_report_map_with_run_id(
             &pool.get().unwrap(),
+            ReportableEnum::Run,
             new_run.run_id,
-            "test_send_run_report_complete_emails",
+            "test_send_report_map_complete_emails",
         );
 
         // Send email
         let result = test_handler
-            .send_run_report_complete_emails(
+            .send_report_map_complete_emails(
                 &pool.get().unwrap(),
-                &new_run_report,
-                &new_run,
+                &new_report_map,
+                &[new_run],
                 "Kevin's Report",
             )
             .unwrap_err();
@@ -1725,7 +1777,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_post_run_report_complete_comment_if_from_github() {
+    async fn test_post_report_map_complete_comment_if_from_github() {
         // Get client
         let client = Client::default();
         // Create a github client
@@ -1746,10 +1798,11 @@ mod tests {
         let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
-        let new_run_report = insert_test_run_report_with_run_id(
+        let new_report_map = insert_test_report_map_with_run_id(
             &conn,
+            ReportableEnum::Run,
             test_run.run_id,
-            "test_post_run_report_complete_comment_if_from_github@",
+            "test_post_report_map_complete_comment_if_from_github@",
         );
 
         let expected_results = vec![
@@ -1764,8 +1817,8 @@ mod tests {
         let request_body = json!({
             "body":
                 format!(
-                    "### 🥕CARROT🥕 run report Kevin's Report finished\nfor run Kevin's Run ({})\n{}",
-                    new_run_report.run_id, expected_results
+                    "### 🥕CARROT🥕 report map Kevin's Report finished\nfor test Kevin's test test (run: {})\n{}",
+                    test_run.run_id, expected_results
                 )
         });
 
@@ -1777,11 +1830,11 @@ mod tests {
             .create();
 
         let result = test_handler
-            .post_run_report_complete_comment_if_from_github(
+            .post_report_map_complete_comment_if_from_github(
                 &conn,
-                &new_run_report,
+                &new_report_map,
                 "Kevin's Report",
-                "Kevin's Run",
+                "Kevin's test test",
             )
             .await
             .unwrap();
@@ -1790,7 +1843,74 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_post_run_report_complete_comment_if_from_github_not_from_github() {
+    async fn test_post_report_map_complete_comment_if_from_github_run_group() {
+        // Get client
+        let client = Client::default();
+        // Create a github client
+        let github_client = GithubClient::new("user", "aaaaaaaaaaaaaaaaaaaaaa", client);
+        // Create a github commenter
+        let github_commenter = GithubCommenter::new(github_client);
+        // Create a notification handler
+        let test_handler = NotificationHandler {
+            emailer: None,
+            github_commenter: Some(github_commenter),
+        };
+        let pool = get_test_db_pool();
+        let conn = pool.get().unwrap();
+
+        let pipeline = insert_test_pipeline(&conn);
+        let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
+        let test = insert_test_test_with_template_id(&conn, template.template_id);
+        let (test_run1, test_run2, test_run_group) =
+            insert_pr_runs_with_test_id(&conn, test.test_id, "doesnotmatter");
+        let test_github_data =
+            insert_run_group_is_from_github_with_run_group_id(&conn, test_run_group.run_group_id);
+        let new_report_map = insert_test_report_map_with_run_id(
+            &conn,
+            ReportableEnum::RunGroup,
+            test_run_group.run_group_id,
+            "test_post_report_map_complete_comment_if_from_github_run_group@",
+        );
+
+        let expected_results = vec![
+            "| File | URI |",
+            "| --- | --- |",
+            "| empty_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/empty_report.ipynb) |",
+            "| html_report | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/report.html) |",
+            "| populated_notebook | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/filled_report.ipynb) |",
+            "| run_csv_zip | [View in the GCS Console](https://console.cloud.google.com/storage/browser/_details/test_bucket/run_csvs.zip) |",
+        ]
+            .join("\n");
+        let request_body = json!({
+            "body":
+                format!(
+                    "### 🥕CARROT🥕 report map Kevin's Report finished\nfor test Kevin's test test (run_group: {})\n{}",
+                    test_run_group.run_group_id, expected_results
+                )
+        });
+
+        // Define mockito mapping for response
+        let mock = mockito::mock("POST", "/repos/exampleowner/examplerepo/issues/1/comments")
+            .match_body(mockito::Matcher::Json(request_body))
+            .match_header("Accept", "application/vnd.github.v3+json")
+            .with_status(201)
+            .create();
+
+        let result = test_handler
+            .post_report_map_complete_comment_if_from_github(
+                &conn,
+                &new_report_map,
+                "Kevin's Report",
+                "Kevin's test test",
+            )
+            .await
+            .unwrap();
+
+        mock.assert();
+    }
+
+    #[actix_rt::test]
+    async fn test_post_report_map_complete_comment_if_from_github_not_from_github() {
         // Get client
         let client = Client::default();
         // Create a github client
@@ -1810,10 +1930,11 @@ mod tests {
         let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
         let test = insert_test_test_with_template_id(&conn, template.template_id);
         let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
-        let new_run_report = insert_test_run_report_with_run_id(
+        let new_report_map = insert_test_report_map_with_run_id(
             &conn,
+            ReportableEnum::Run,
             test_run.run_id,
-            "test_post_run_report_complete_comment_if_from_github_not_from_github@",
+            "test_post_report_map_complete_comment_if_from_github_not_from_github@",
         );
 
         // Define mockito mapping for response
@@ -1822,9 +1943,9 @@ mod tests {
             .create();
 
         let result = test_handler
-            .post_run_report_complete_comment_if_from_github(
+            .post_report_map_complete_comment_if_from_github(
                 &conn,
-                &new_run_report,
+                &new_report_map,
                 "Kevin's Report",
                 "Kevin's Run",
             )
@@ -1835,7 +1956,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_post_run_report_complete_comment_if_from_github_failed_no_commenter() {
+    async fn test_post_report_map_complete_comment_if_from_github_failed_no_commenter() {
         // Create a notification handler with no github commenter
         let test_handler = NotificationHandler {
             emailer: None,
@@ -1849,16 +1970,17 @@ mod tests {
         let template = insert_test_template_with_pipeline_id(&conn, pipeline.pipeline_id);
         let test = insert_test_test_with_template_id(&conn, template.template_id);
         let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
-        let new_run_report = insert_test_run_report_with_run_id(
+        let new_report_map = insert_test_report_map_with_run_id(
             &conn,
+            ReportableEnum::Run,
             test_run.run_id,
-            "test_post_run_report_complete_comment_if_from_github_not_from_github@",
+            "test_post_report_map_complete_comment_if_from_github_not_from_github@",
         );
 
         let result = test_handler
-            .post_run_report_complete_comment_if_from_github(
+            .post_report_map_complete_comment_if_from_github(
                 &conn,
-                &new_run_report,
+                &new_report_map,
                 "Kevin's Report",
                 "Kevin's Run",
             )

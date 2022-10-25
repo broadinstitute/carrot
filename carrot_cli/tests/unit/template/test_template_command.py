@@ -409,7 +409,7 @@ def test_find(find_data):
                 "example.com/she-ra_eval_dep.zip",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
@@ -1497,7 +1497,7 @@ def test_unsubscribe(unsubscribe_data):
                 "out_horde_tanks",
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
@@ -2152,12 +2152,14 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single",
                 "adora@example.com",
             ],
             "return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "report_trigger": "single",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
                 },
@@ -2171,12 +2173,14 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                 "map_to_report",
                 "Horde Template",
                 "Horde Report",
+                "pr",
                 "--created_by",
                 "adora@example.com",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "pr",
                 "adora@example.com",
             ],
             "from_names": {
@@ -2271,6 +2275,7 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "report_trigger": "pr",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
                 },
@@ -2284,15 +2289,16 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                 "map_to_report",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "params": [],
-            "logging": "No email config variable set.  If a value is not specified for --created by, "
+            "logging": "No email config variable set.  If a value is not specified for --created_by, "
             "there must be a value set for email.",
         },
         {
             "args": ["template", "map_to_report"],
             "params": [],
-            "return": "Usage: carrot_cli template map_to_report [OPTIONS] TEMPLATE REPORT\n"
+            "return": "Usage: carrot_cli template map_to_report [OPTIONS] TEMPLATE REPORT [[single|pr]]\n"
             "Try 'carrot_cli template map_to_report -h' for help.\n"
             "\n"
             "Error: Missing argument 'TEMPLATE'.",
@@ -2319,6 +2325,7 @@ def map_to_report_data(request):
             request.param["params"][0],
             request.param["params"][1],
             request.param["params"][2],
+            request.param["params"][3]
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -2340,15 +2347,18 @@ def test_map_to_report(map_to_report_data, caplog):
                 "find_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "report_trigger": "single",
                     "input_map": {"section1": {"input1": "val1"}},
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
@@ -2363,10 +2373,12 @@ def test_map_to_report(map_to_report_data, caplog):
                 "find_report_map_by_id",
                 "Horde Template",
                 "Horde Report",
+                "single"
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "from_names": {
                 "report_name": "Horde Report",
@@ -2460,6 +2472,7 @@ def test_map_to_report(map_to_report_data, caplog):
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "report_trigger": "single",
                     "input_map": {"section1": {"input1": "val1"}},
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
@@ -2472,6 +2485,7 @@ def test_map_to_report(map_to_report_data, caplog):
             "args": ["template", "find_report_map_by_id"],
             "params": [],
             "return": "Usage: carrot_cli template find_report_map_by_id [OPTIONS] TEMPLATE REPORT\n"
+            "                                                 {single|pr}\n"
             "Try 'carrot_cli template find_report_map_by_id -h' for help.\n"
             "\n"
             "Error: Missing argument 'TEMPLATE'.",
@@ -2497,6 +2511,7 @@ def find_report_map_by_id_data(request):
         mockito.when(template_reports).find_map_by_ids(
             request.param["params"][0],
             request.param["params"][1],
+            request.param["params"][2]
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -2516,6 +2531,8 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "--report_id",
                 "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "--report_trigger",
+                "single",
                 "--created_by",
                 "adora@example.com",
                 "--created_before",
@@ -2532,6 +2549,7 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single",
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
                 "adora@example.com",
@@ -2544,6 +2562,7 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
                     {
                         "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                         "report_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                        "report_trigger": "single",
                         "created_at": "2020-09-24T19:07:59.311462",
                         "created_by": "adora@example.com",
                     }
@@ -2557,8 +2576,10 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
                 "template",
                 "find_report_maps",
                 "Horde Template",
-                "--report_id",
+                "--report",
                 "Horde Report",
+                "--report_trigger",
+                "single",
                 "--created_by",
                 "adora@example.com",
                 "--created_before",
@@ -2575,6 +2596,7 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single",
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
                 "adora@example.com",
@@ -2675,6 +2697,7 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
                     {
                         "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                         "report_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                        "report_trigger": "single",
                         "created_at": "2020-09-24T19:07:59.311462",
                         "created_by": "adora@example.com",
                     }
@@ -2691,6 +2714,7 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
             ],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
+                "",
                 "",
                 "",
                 "",
@@ -2735,6 +2759,7 @@ def find_report_maps_data(request):
         request.param["params"][5],
         request.param["params"][6],
         request.param["params"][7],
+        request.param["params"][8],
     ).thenReturn(request.param["return"])
     return request.param
 
@@ -2753,16 +2778,18 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
-            "ids": [
+            "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "find_return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "input_map": {"section1": {"input1": "val1"}},
+                    "report_trigger": "single",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
                 },
@@ -2780,16 +2807,18 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "Horde Template",
                 "Horde Report",
+                "single"
             ],
-            "ids": [
+            "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "find_return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "input_map": {"section1": {"input1": "val1"}},
+                    "report_trigger": "single",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
                 },
@@ -2896,16 +2925,18 @@ def test_find_report_maps(find_report_maps_data):
                 "-y",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
-            "ids": [
+            "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "find_return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "input_map": {"section1": {"input1": "val1"}},
+                    "report_trigger": "single",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "rogelio@example.com",
                 },
@@ -2923,16 +2954,18 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
-            "ids": [
+            "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "find_return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "input_map": {"section1": {"input1": "val1"}},
+                    "report_trigger": "single",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "adora@example.com",
                 },
@@ -2946,8 +2979,8 @@ def test_find_report_maps(find_report_maps_data):
             "interactive": {
                 "input": "y",
                 "message": "Mapping for template with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and "
-                "report with id 3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are "
-                "you sure you want to delete? [y/N]: y\n",
+                "report with id 3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 triggered by single was created by "
+                "adora@example.com. Are you sure you want to delete? [y/N]: y\n",
             },
         },
         {
@@ -2956,16 +2989,18 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
-            "ids": [
+            "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                "single"
             ],
             "find_return": json.dumps(
                 {
                     "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "input_map": {"section1": {"input1": "val1"}},
+                    "report_trigger": "single",
                     "created_at": "2020-09-24T19:07:59.311462",
                     "created_by": "adora@example.com",
                 },
@@ -2977,16 +3012,17 @@ def test_find_report_maps(find_report_maps_data):
             "interactive": {
                 "input": "n",
                 "message": "Mapping for template with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and "
-                "report with id 3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are "
-                "you sure you want to delete? [y/N]: n",
+                "report with id 3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 triggered by single was created by "
+               "adora@example.com. Are you sure you want to delete? [y/N]: n",
             },
             "logging": "Okay, aborting delete operation",
         },
         {
             "args": ["template", "delete_report_map_by_id"],
-            "ids": [],
+            "params": [],
             "email": "rogelio@example.com",
             "return": "Usage: carrot_cli template delete_report_map_by_id [OPTIONS] TEMPLATE REPORT\n"
+                      "                                                   {single|pr}\n"
             "Try 'carrot_cli template delete_report_map_by_id -h' for help.\n"
             "\n"
             "Error: Missing argument 'TEMPLATE'.",
@@ -3011,14 +3047,16 @@ def delete_report_map_by_id_data(request):
             limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
-    if len(request.param["ids"]) > 0:
+    if len(request.param["params"]) > 0:
         mockito.when(template_reports).delete_map_by_ids(
-            request.param["ids"][0],
-            request.param["ids"][1],
+            request.param["params"][0],
+            request.param["params"][1],
+            request.param["params"][2],
         ).thenReturn(request.param["return"])
         mockito.when(template_reports).find_map_by_ids(
-            request.param["ids"][0],
-            request.param["ids"][1],
+            request.param["params"][0],
+            request.param["params"][1],
+            request.param["params"][2],
         ).thenReturn(request.param["find_return"])
     return request.param
 

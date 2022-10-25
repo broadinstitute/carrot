@@ -1,9 +1,9 @@
-FROM rust:1.57.0 as builder
+FROM rust:1.59.0-buster as builder
 WORKDIR /usr/src/carrot
 COPY . .
 RUN cargo install --path .
 
-FROM debian:buster-20210408
+FROM debian:buster-20220912
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get -y --no-install-recommends install \
@@ -11,7 +11,8 @@ RUN apt-get update && \
     ca-certificates \
     git \
     openjdk-11-jre \
-    wget
+    wget \
+    libc6
 
 RUN wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/54/womtool-54.jar
 

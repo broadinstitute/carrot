@@ -6,9 +6,10 @@ import click
 
 from .. import command_util
 from .. import dependency_util
+from .. import email_util
 from .. import file_util
 from ..config import manager as config
-from ..rest import reports, run_reports, runs
+from ..rest import reports, report_maps, runs
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,21 +67,12 @@ def create_report(run, report, created_by, delete_failed):
     with the report specified by REPORT (id or name)
     """
     # If created_by is not set and there is an email config variable, fill with that
-    if created_by == "":
-        email_config_val = config.load_var_no_error("email")
-        if email_config_val is not None:
-            created_by = email_config_val
-        else:
-            LOGGER.error(
-                "No email config variable set.  If a value is not specified for --created by, "
-                "there must be a value set for email."
-            )
-            sys.exit(1)
+    created_by = email_util.check_created_by(created_by)
     # Process run to get id if it's a name
     id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
     # Do the same for report
     report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
-    print(run_reports.create_map(id, report_id, created_by, delete_failed))
+    print(report_maps.create_map("runs", id, report_id, created_by, delete_failed))
 
 
 @main.command(name="find_report_by_ids")
@@ -95,7 +87,7 @@ def find_report_by_ids(run, report):
     id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
     # Do the same for report
     report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
-    print(run_reports.find_map_by_ids(id, report_id))
+    print(report_maps.find_map_by_ids("runs", id, report_id))
 
 
 @main.command(name="find_reports")
@@ -185,7 +177,8 @@ def find_reports(
     else:
         report_id = ""
     print(
-        run_reports.find_maps(
+        report_maps.find_maps(
+            "runs",
             id,
             report_id,
             status,
@@ -223,4 +216,4 @@ def delete_report_by_ids(run, report, yes):
     id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
     # Do the same for report
     report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
-    command_util.delete_map(id, report_id, yes, run_reports, "run", "report")
+    command_util.delete_map(id, report_id, yes, report_maps, "run", "report", entity1_rest_name="runs")

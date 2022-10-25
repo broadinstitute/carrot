@@ -5,16 +5,15 @@ from click.testing import CliRunner
 
 import mockito
 import pytest
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
-from carrot_cli.rest import reports, report_maps, runs
-
+from carrot_cli.rest import reports, report_maps, run_groups
 
 @pytest.fixture(autouse=True)
 def unstub():
     yield
     mockito.unstub()
-
 
 @pytest.fixture(autouse=True)
 def no_email():
@@ -23,52 +22,46 @@ def no_email():
 @pytest.fixture(
     params=[
         {
-            "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
+            "args": ["run_group", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
             "csv": None,
             "return": json.dumps(
                 {
-                    "created_at": "2020-09-16T18:48:06.371563",
-                    "finished_at": None,
-                    "created_by": "adora@example.com",
-                    "test_input": {"in_prev_owner": "Mara"},
-                    "eval_input": {"in_creators": "Old Ones"},
-                    "status": "testsubmitted",
-                    "results": {},
-                    "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                    "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                    "name": "Sword of Protection run",
-                    "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "created_at": "2020-09-16T18:48:08.371563",
+                    "created_by": "glimmer@example.com",
+                    "owner": "WhatACoolExampleOrganization",
+                    "repo": "WhatACoolExampleRepo",
+                    "issue_number": 12,
+                    "author": "WhatACoolExampleUser",
+                    "base_commit": "13c988d4f15e06bcdd0b0af290086a3079cdadb0",
+                    "head_commit": "d240853866f20fc3e536cb3bca86c86c54b723ce",
+                    "test_input_key": "example_workflow.docker_key",
+                    "eval_input_key": None,
+                    "run_group_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,
                 sort_keys=True,
             ),
         },
         {
-            "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
+            "args": ["run_group", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
             "csv": None,
             "return": json.dumps(
                 {
-                    "title": "No run found",
+                    "title": "No run group found",
                     "status": 404,
-                    "detail": "No run found with the specified ID",
+                    "detail": "No run group found with the specified ID",
                 },
                 indent=4,
                 sort_keys=True,
             ),
-        },
-        {
-            "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819", "--zip_csv", "csvs.zip"],
-            "csv": "csvs.zip",
-            "return": "Success!"
         },
     ]
 )
 def find_by_id_data(request):
     # Set all requests to return None so only the one we expect will return a value
-    mockito.when(runs).find_by_id(...).thenReturn(None)
+    mockito.when(run_groups).find_by_id(...).thenReturn(None)
     # Mock up request response
-    mockito.when(runs).find_by_id(request.param["args"][2], csv=request.param["csv"]).thenReturn(
+    mockito.when(run_groups).find_by_id(request.param["args"][2]).thenReturn(
         request.param["return"]
     )
     return request.param
@@ -79,189 +72,155 @@ def test_find_by_id(find_by_id_data):
     result = runner.invoke(carrot, find_by_id_data["args"])
     assert result.output == find_by_id_data["return"] + "\n"
 
+@pytest.fixture(
+    params=[
+        {
+            "args": [
+                "run_group",
+                "find",
+                "--run_group_id",
+                "bd132568-06fe-4b1a-9e96-47d4f36bf819",
+                "--owner",
+                "WhatACoolExampleOrganization",
+                "--repo",
+                "WhatACoolExampleRepo",
+                "--issue_number",
+                "12",
+                "--author",
+                "WhatACoolExampleUser",
+                "--base_commit",
+                "13c988d4f15e06bcdd0b0af290086a3079cdadb0",
+                "--head_commit",
+                "d240853866f20fc3e536cb3bca86c86c54b723ce",
+                "--test_input_key",
+                "example_workflow.docker_key",
+                "--eval_input_key",
+                "other_workflow.docker_key",
+                "--created_before",
+                "2020-10-00T00:00:00.000000",
+                "--created_after",
+                "2020-09-00T00:00:00.000000",
+                "--sort",
+                "asc(owner)",
+                "--limit",
+                1,
+                "--offset",
+                0,
+            ],
+            "params": [
+                "bd132568-06fe-4b1a-9e96-47d4f36bf819",
+                "WhatACoolExampleOrganization",
+                "WhatACoolExampleRepo",
+                "12",
+                "WhatACoolExampleUser",
+                "13c988d4f15e06bcdd0b0af290086a3079cdadb0",
+                "d240853866f20fc3e536cb3bca86c86c54b723ce",
+                "example_workflow.docker_key",
+                "other_workflow.docker_key",
+                "2020-10-00T00:00:00.000000",
+                "2020-09-00T00:00:00.000000",
+                "asc(owner)",
+                1,
+                0,
+            ],
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:08.371563",
+                    "created_by": "glimmer@example.com",
+                    "owner": "WhatACoolExampleOrganization",
+                    "repo": "WhatACoolExampleRepo",
+                    "issue_number": 12,
+                    "author": "WhatACoolExampleUser",
+                    "base_commit": "13c988d4f15e06bcdd0b0af290086a3079cdadb0",
+                    "head_commit": "d240853866f20fc3e536cb3bca86c86c54b723ce",
+                    "test_input_key": "example_workflow.docker_key",
+                    "eval_input_key": "other_workflow.docker_key",
+                    "run_group_id": "bd132568-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "args": [
+                "run_group",
+                "find",
+                "--run_group_id",
+                "986325ba-06fe-4b1a-9e96-47d4f36bf819",
+            ],
+            "params": [
+                "986325ba-06fe-4b1a-9e96-47d4f36bf819",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                20,
+                0,
+            ],
+            "return": json.dumps(
+                {
+                    "title": "No run groups found",
+                    "status": 404,
+                    "detail": "No run groups found with the specified parameters",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+    ]
+)
+def find_data(request):
+    # Set all requests to return None so only the one we expect will return a value
+    mockito.when(run_groups).find(...).thenReturn(None)
+    # Mock up request response
+    mockito.when(run_groups).find(
+        request.param["params"][0],
+        request.param["params"][1],
+        request.param["params"][2],
+        request.param["params"][3],
+        request.param["params"][4],
+        request.param["params"][5],
+        request.param["params"][6],
+        request.param["params"][7],
+        request.param["params"][8],
+        request.param["params"][9],
+        request.param["params"][10],
+        request.param["params"][11],
+        request.param["params"][12],
+        request.param["params"][13],
+    ).thenReturn(request.param["return"])
+    return request.param
+
+
+def test_find(find_data):
+    runner = CliRunner()
+    result = runner.invoke(carrot, find_data["args"])
+    assert result.output == find_data["return"] + "\n"
 
 @pytest.fixture(
     params=[
         {
-            "args": ["run", "delete", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
+            "args": ["run_group", "delete", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
             "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-            "find_return": json.dumps(
-                {
-                    "created_at": "2020-09-16T18:48:06.371563",
-                    "finished_at": "2020-09-16T18:58:06.371563",
-                    "created_by": "adora@example.com",
-                    "test_input": {"in_prev_owner": "Mara"},
-                    "eval_input": {"in_creators": "Old Ones"},
-                    "status": "evalfailed",
-                    "results": {},
-                    "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                    "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                    "name": "Sword of Protection run",
-                    "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                },
-                indent=4,
-                sort_keys=True,
-            ),
-            "email": "adora@example.com",
             "return": json.dumps(
                 {"message": "Successfully deleted 1 row"}, indent=4, sort_keys=True
             ),
         },
         {
-            "args": ["run", "delete", "Sword of Protection run"],
+            "args": ["run_group", "delete", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
             "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-            "find_return": json.dumps(
-                {
-                    "created_at": "2020-09-16T18:48:06.371563",
-                    "finished_at": "2020-09-16T18:58:06.371563",
-                    "created_by": "adora@example.com",
-                    "test_input": {"in_prev_owner": "Mara"},
-                    "eval_input": {"in_creators": "Old Ones"},
-                    "status": "evalfailed",
-                    "results": {},
-                    "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                    "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                    "name": "Sword of Protection run",
-                    "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                },
-                indent=4,
-                sort_keys=True,
-            ),
-            "from_name": {
-                "name": "Sword of Protection run",
-                "return": json.dumps(
-                    [
-                        {
-                            "created_at": "2020-09-16T18:48:06.371563",
-                            "finished_at": "2020-09-16T18:58:06.371563",
-                            "created_by": "adora@example.com",
-                            "test_input": {"in_prev_owner": "Mara"},
-                            "eval_input": {"in_creators": "Old Ones"},
-                            "status": "evalfailed",
-                            "results": {},
-                            "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                            "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                            "name": "Sword of Protection run",
-                            "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        }
-                    ],
-                    indent=4,
-                    sort_keys=True,
-                )
-            },
-            "email": "adora@example.com",
             "return": json.dumps(
-                {"message": "Successfully deleted 1 row"}, indent=4, sort_keys=True
-            ),
-        },
-        {
-            "args": ["run", "delete", "-y", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
-            "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-            "find_return": json.dumps(
                 {
-                    "created_at": "2020-09-16T18:48:06.371563",
-                    "finished_at": "2020-09-16T18:58:06.371563",
-                    "created_by": "adora@example.com",
-                    "test_input": {"in_prev_owner": "Mara"},
-                    "eval_input": {"in_creators": "Old Ones"},
-                    "status": "evalfailed",
-                    "results": {},
-                    "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                    "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                    "name": "Sword of Protection run",
-                    "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                },
-                indent=4,
-                sort_keys=True,
-            ),
-            "email": "catra@example.com",
-            "return": json.dumps(
-                {"message": "Successfully deleted 1 row"}, indent=4, sort_keys=True
-            ),
-        },
-        {
-            "args": ["run", "delete", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
-            "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-            "find_return": json.dumps(
-                {
-                    "created_at": "2020-09-16T18:48:06.371563",
-                    "finished_at": "2020-09-16T18:58:06.371563",
-                    "created_by": "adora@example.com",
-                    "test_input": {"in_prev_owner": "Mara"},
-                    "eval_input": {"in_creators": "Old Ones"},
-                    "status": "evalfailed",
-                    "results": {},
-                    "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                    "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                    "name": "Sword of Protection run",
-                    "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                },
-                indent=4,
-                sort_keys=True,
-            ),
-            "email": "catra@example.com",
-            "return": json.dumps(
-                {"message": "Successfully deleted 1 row"}, indent=4, sort_keys=True
-            ),
-            "interactive": {
-                "input": "y",
-                "message": "Run with id cd987859-06fe-4b1a-9e96-47d4f36bf819 was created by adora@example.com. "
-                "Are you sure you want to delete? [y/N]: y\n",
-            },
-        },
-        {
-            "args": ["run", "delete", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
-            "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-            "find_return": json.dumps(
-                {
-                    "created_at": "2020-09-16T18:48:06.371563",
-                    "finished_at": "2020-09-16T18:58:06.371563",
-                    "created_by": "adora@example.com",
-                    "test_input": {"in_prev_owner": "Mara"},
-                    "eval_input": {"in_creators": "Old Ones"},
-                    "status": "evalfailed",
-                    "results": {},
-                    "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                    "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                    "name": "Sword of Protection run",
-                    "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                },
-                indent=4,
-                sort_keys=True,
-            ),
-            "email": "catra@example.com",
-            "return": "",
-            "interactive": {
-                "input": "n",
-                "message": "Run with id cd987859-06fe-4b1a-9e96-47d4f36bf819 was created by adora@example.com. "
-                "Are you sure you want to delete? [y/N]: n",
-            },
-            "logging": "Okay, aborting delete operation",
-        },
-        {
-            "args": ["run", "delete", "cd987859-06fe-4b1a-9e96-47d4f36bf819"],
-            "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-            "find_return": json.dumps(
-                {
-                    "title": "No run found",
+                    "title": "No run group found",
                     "status": 404,
-                    "detail": "No run found with the specified ID",
-                },
-                indent=4,
-                sort_keys=True,
-            ),
-            "email": "adora@example.com",
-            "return": json.dumps(
-                {
-                    "title": "No run found",
-                    "status": 404,
-                    "detail": "No run found with the specified ID",
+                    "detail": "No run group found with the specified ID",
                 },
                 indent=4,
                 sort_keys=True,
@@ -270,51 +229,26 @@ def test_find_by_id(find_by_id_data):
     ]
 )
 def delete_data(request):
-    # We want to load the value from "email" from config
-    mockito.when(config).load_var("email").thenReturn(request.param["email"])
     # Set all requests to return None so only the one we expect will return a value
-    mockito.when(runs).delete(...).thenReturn(None)
-    mockito.when(runs).find_by_id(...).thenReturn(None)
-    # If there's a value for from_name, set the return value for trying to retrieve the existing
-    # record
-    if "from_name" in request.param:
-        mockito.when(runs).find(
-            name=request.param["from_name"]["name"],
-            limit=2
-        ).thenReturn(request.param["from_name"]["return"])
+    mockito.when(run_groups).delete(...).thenReturn(None)
     # Mock up request response
-    mockito.when(runs).delete(request.param["id"]).thenReturn(request.param["return"])
-    mockito.when(runs).find_by_id(request.param["id"]).thenReturn(
-        request.param["find_return"]
+    mockito.when(run_groups).delete(request.param["id"]).thenReturn(
+        request.param["return"]
     )
     return request.param
 
 
-def test_delete(delete_data, caplog):
-    caplog.set_level(logging.INFO)
+def test_delete(delete_data):
     runner = CliRunner()
-    # Include interactive input and expected message if this test should trigger interactive stuff
-    if "interactive" in delete_data:
-        expected_output = (
-            delete_data["interactive"]["message"] + delete_data["return"] + "\n"
-        )
-        result = runner.invoke(
-            carrot, delete_data["args"], input=delete_data["interactive"]["input"]
-        )
-        assert result.output == expected_output
-    else:
-        result = runner.invoke(carrot, delete_data["args"])
-        assert result.output == delete_data["return"] + "\n"
-    # If we expect logging that we want to check, make sure it's there
-    if "logging" in delete_data:
-        assert delete_data["logging"] in caplog.text
+    result = runner.invoke(carrot, delete_data["args"])
+    assert result.output == delete_data["return"] + "\n"
 
 
 @pytest.fixture(
     params=[
         {
             "args": [
-                "run",
+                "run_group",
                 "create_report",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
@@ -345,9 +279,9 @@ def test_delete(delete_data, caplog):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "create_report",
-                "Sword of Protection run",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection report",
                 "--created_by",
                 "adora@example.com",
@@ -429,27 +363,6 @@ def test_delete(delete_data, caplog):
                     indent=4,
                     sort_keys=True,
                 ),
-                "run_name": "Sword of Protection run",
-                "run_return": json.dumps(
-                    [
-                        {
-                            "created_at": "2020-09-16T18:48:06.371563",
-                            "finished_at": "2020-09-16T18:58:06.371563",
-                            "created_by": "adora@example.com",
-                            "test_input": {"in_prev_owner": "Mara"},
-                            "eval_input": {"in_creators": "Old Ones"},
-                            "status": "succeeded",
-                            "results": {},
-                            "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                            "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                            "name": "Sword of Protection run",
-                            "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        }
-                    ],
-                    indent=4,
-                    sort_keys=True,
-                )
             },
             "return": json.dumps(
                 {
@@ -468,22 +381,22 @@ def test_delete(delete_data, caplog):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "create_report",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             ],
             "params": [],
             "logging": "No email config variable set.  If a value is not specified for --created_by, "
-            "there must be a value set for email.",
+                       "there must be a value set for email.",
         },
         {
-            "args": ["run", "create_report"],
+            "args": ["run_group", "create_report"],
             "params": [],
-            "return": "Usage: carrot_cli run create_report [OPTIONS] RUN REPORT\n"
-            "Try 'carrot_cli run create_report -h' for help.\n"
-            "\n"
-            "Error: Missing argument 'RUN'.",
+            "return": "Usage: carrot_cli run_group create_report [OPTIONS] RUN_GROUP_ID REPORT\n"
+                      "Try 'carrot_cli run_group create_report -h' for help.\n"
+                      "\n"
+                      "Error: Missing argument 'RUN_GROUP_ID'.",
         },
     ]
 )
@@ -493,10 +406,6 @@ def create_report_data(request):
     # If there's a value for from_name, set the return value for trying to retrieve the existing
     # record
     if "from_names" in request.param:
-        mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
-        ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
             name=request.param["from_names"]["report_name"],
             limit=2
@@ -504,7 +413,7 @@ def create_report_data(request):
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
         mockito.when(report_maps).create_map(
-            "runs",
+            "run-groups",
             request.param["params"][0],
             request.param["params"][1],
             request.param["params"][2],
@@ -526,7 +435,7 @@ def test_create_report(create_report_data, caplog):
     params=[
         {
             "args": [
-                "run",
+                "run_group",
                 "find_report_by_ids",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
@@ -552,9 +461,9 @@ def test_create_report(create_report_data, caplog):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "find_report_by_ids",
-                "Sword of Protection run",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection report",
             ],
             "params": [
@@ -631,31 +540,11 @@ def test_create_report(create_report_data, caplog):
                     indent=4,
                     sort_keys=True,
                 ),
-                "run_name": "Sword of Protection run",
-                "run_return": json.dumps(
-                    [
-                        {
-                            "created_at": "2020-09-16T18:48:06.371563",
-                            "finished_at": "2020-09-16T18:58:06.371563",
-                            "created_by": "adora@example.com",
-                            "test_input": {"in_prev_owner": "Mara"},
-                            "eval_input": {"in_creators": "Old Ones"},
-                            "status": "succeeded",
-                            "results": {},
-                            "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                            "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                            "name": "Sword of Protection run",
-                            "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        }
-                    ],
-                    indent=4,
-                    sort_keys=True,
-                )
             },
             "return": json.dumps(
                 {
-                    "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity": "run_group",
+                    "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
                     "cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
@@ -669,12 +558,12 @@ def test_create_report(create_report_data, caplog):
             ),
         },
         {
-            "args": ["run", "find_report_by_ids"],
+            "args": ["run_group", "find_report_by_ids"],
             "params": [],
-            "return": "Usage: carrot_cli run find_report_by_ids [OPTIONS] RUN REPORT\n"
-            "Try 'carrot_cli run find_report_by_ids -h' for help.\n"
-            "\n"
-            "Error: Missing argument 'RUN'.",
+            "return": "Usage: carrot_cli run_group find_report_by_ids [OPTIONS] RUN_GROUP_ID REPORT\n"
+                      "Try 'carrot_cli run_group find_report_by_ids -h' for help.\n"
+                      "\n"
+                      "Error: Missing argument 'RUN_GROUP_ID'.",
         },
     ]
 )
@@ -684,10 +573,6 @@ def find_report_by_ids_data(request):
     # If there's a value for from_name, set the return value for trying to retrieve the existing
     # record
     if "from_names" in request.param:
-        mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
-        ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
             name=request.param["from_names"]["report_name"],
             limit=2
@@ -695,7 +580,7 @@ def find_report_by_ids_data(request):
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
         mockito.when(report_maps).find_map_by_ids(
-            "runs",
+            "run-groups",
             request.param["params"][0],
             request.param["params"][1],
         ).thenReturn(request.param["return"])
@@ -712,7 +597,7 @@ def test_find_report_by_ids(find_report_by_ids_data):
     params=[
         {
             "args": [
-                "run",
+                "run_group",
                 "find_reports",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "--report_id",
@@ -758,7 +643,8 @@ def test_find_report_by_ids(find_report_by_ids_data):
             "return": json.dumps(
                 [
                     {
-                        "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                        "entity": "run_group",
+                        "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                         "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "status": "succeeded",
                         "cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
@@ -774,9 +660,9 @@ def test_find_report_by_ids(find_report_by_ids_data):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "find_reports",
-                "Sword of Protection run",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "--report",
                 "New Sword of Protection report",
                 "--status",
@@ -887,32 +773,12 @@ def test_find_report_by_ids(find_report_by_ids_data):
                     indent=4,
                     sort_keys=True,
                 ),
-                "run_name": "Sword of Protection run",
-                "run_return": json.dumps(
-                    [
-                        {
-                            "created_at": "2020-09-16T18:48:06.371563",
-                            "finished_at": "2020-09-16T18:58:06.371563",
-                            "created_by": "adora@example.com",
-                            "test_input": {"in_prev_owner": "Mara"},
-                            "eval_input": {"in_creators": "Old Ones"},
-                            "status": "succeeded",
-                            "results": {},
-                            "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                            "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                            "name": "Sword of Protection run",
-                            "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        }
-                    ],
-                    indent=4,
-                    sort_keys=True,
-                )
             },
             "return": json.dumps(
                 [
                     {
-                        "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                        "entity": "run_group",
+                        "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                         "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "status": "succeeded",
                         "cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
@@ -928,7 +794,7 @@ def test_find_report_by_ids(find_report_by_ids_data):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "find_reports",
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
             ],
@@ -965,17 +831,13 @@ def find_reports_data(request):
     # If there's a value for from_name, set the return value for trying to retrieve the existing
     # record
     if "from_names" in request.param:
-        mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
-        ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
             name=request.param["from_names"]["report_name"],
             limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response
     mockito.when(report_maps).find_maps(
-        "runs",
+        "run-groups",
         request.param["params"][0],
         request.param["params"][1],
         request.param["params"][2],
@@ -1003,7 +865,7 @@ def test_find_reports(find_reports_data):
     params=[
         {
             "args": [
-                "run",
+                "run_group",
                 "delete_report_by_ids",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
@@ -1014,7 +876,7 @@ def test_find_reports(find_reports_data):
             ],
             "find_return": json.dumps(
                 {
-                    "entity": "run",
+                    "entity": "run_group",
                     "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
@@ -1034,9 +896,9 @@ def test_find_reports(find_reports_data):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "delete_report_by_ids",
-                "Sword of Protection run",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection report",
             ],
             "ids": [
@@ -1045,7 +907,7 @@ def test_find_reports(find_reports_data):
             ],
             "find_return": json.dumps(
                 {
-                    "entity": "run",
+                    "entity": "run_group",
                     "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
@@ -1128,27 +990,6 @@ def test_find_reports(find_reports_data):
                     indent=4,
                     sort_keys=True,
                 ),
-                "run_name": "Sword of Protection run",
-                "run_return": json.dumps(
-                    [
-                        {
-                            "created_at": "2020-09-16T18:48:06.371563",
-                            "finished_at": "2020-09-16T18:58:06.371563",
-                            "created_by": "adora@example.com",
-                            "test_input": {"in_prev_owner": "Mara"},
-                            "eval_input": {"in_creators": "Old Ones"},
-                            "status": "succeeded",
-                            "results": {},
-                            "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
-                            "eval_cromwell_job_id": "39482203-6b71-429c-a4de-8e90222488cd",
-                            "name": "Sword of Protection run",
-                            "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                            "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        }
-                    ],
-                    indent=4,
-                    sort_keys=True,
-                )
             },
             "email": "adora@example.com",
             "return": json.dumps(
@@ -1157,7 +998,7 @@ def test_find_reports(find_reports_data):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "delete_report_by_ids",
                 "-y",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -1169,7 +1010,7 @@ def test_find_reports(find_reports_data):
             ],
             "find_return": json.dumps(
                 {
-                    "entity": "run",
+                    "entity": "run_group",
                     "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
@@ -1189,7 +1030,7 @@ def test_find_reports(find_reports_data):
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "delete_report_by_ids",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
@@ -1200,7 +1041,7 @@ def test_find_reports(find_reports_data):
             ],
             "find_return": json.dumps(
                 {
-                    "entity": "run",
+                    "entity": "run_group",
                     "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
@@ -1219,14 +1060,14 @@ def test_find_reports(find_reports_data):
             ),
             "interactive": {
                 "input": "y",
-                "message": "Mapping for run with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and report with id "
-                "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
-                "want to delete? [y/N]: y\n",
+                "message": "Mapping for run-group with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and report with id "
+                           "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
+                           "want to delete? [y/N]: y\n",
             },
         },
         {
             "args": [
-                "run",
+                "run_group",
                 "delete_report_by_ids",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
@@ -1237,7 +1078,7 @@ def test_find_reports(find_reports_data):
             ],
             "find_return": json.dumps(
                 {
-                    "entity": "run",
+                    "entity": "run_group",
                     "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
@@ -1254,18 +1095,18 @@ def test_find_reports(find_reports_data):
             "return": "",
             "interactive": {
                 "input": "n",
-                "message": "Mapping for run with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and report with id "
-                "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
-                "want to delete? [y/N]: n",
+                "message": "Mapping for run-group with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and report with id "
+                           "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
+                           "want to delete? [y/N]: n",
             },
             "logging": "Okay, aborting delete operation",
         },
         {
-            "args": ["run", "delete_report_by_ids"],
+            "args": ["run_group", "delete_report_by_ids"],
             "ids": [],
             "find_return": json.dumps(
                 {
-                    "entity": "run",
+                    "entity": "run_group",
                     "entity_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                     "report_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "status": "succeeded",
@@ -1279,10 +1120,10 @@ def test_find_reports(find_reports_data):
                 sort_keys=True,
             ),
             "email": "adora@example.com",
-            "return": "Usage: carrot_cli run delete_report_by_ids [OPTIONS] RUN REPORT\n"
-            "Try 'carrot_cli run delete_report_by_ids -h' for help.\n"
-            "\n"
-            "Error: Missing argument 'RUN'.",
+            "return": "Usage: carrot_cli run_group delete_report_by_ids [OPTIONS] RUN_GROUP_ID REPORT\n"
+                      "Try 'carrot_cli run_group delete_report_by_ids -h' for help.\n"
+                      "\n"
+                      "Error: Missing argument 'RUN_GROUP_ID'.",
         },
     ]
 )
@@ -1295,10 +1136,6 @@ def delete_report_by_ids_data(request):
     # If there's a value for from_name, set the return value for trying to retrieve the existing
     # record
     if "from_names" in request.param:
-        mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
-        ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
             name=request.param["from_names"]["report_name"],
             limit=2
@@ -1306,12 +1143,12 @@ def delete_report_by_ids_data(request):
     # Mock up request response only if we expect it to get that far
     if len(request.param["ids"]) > 0:
         mockito.when(report_maps).delete_map_by_ids(
-            "runs",
+            "run-groups",
             request.param["ids"][0],
             request.param["ids"][1],
         ).thenReturn(request.param["return"])
         mockito.when(report_maps).find_map_by_ids(
-            "runs",
+            "run-groups",
             request.param["ids"][0],
             request.param["ids"][1],
         ).thenReturn(request.param["find_return"])
@@ -1324,9 +1161,9 @@ def test_delete_report_by_ids(delete_report_by_ids_data, caplog):
     # Include interactive input and expected message if this test should trigger interactive stuff
     if "interactive" in delete_report_by_ids_data:
         expected_output = (
-            delete_report_by_ids_data["interactive"]["message"]
-            + delete_report_by_ids_data["return"]
-            + "\n"
+                delete_report_by_ids_data["interactive"]["message"]
+                + delete_report_by_ids_data["return"]
+                + "\n"
         )
         result = runner.invoke(
             carrot,

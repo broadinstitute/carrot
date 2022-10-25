@@ -309,10 +309,10 @@ fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
 mod tests {
 
     use super::*;
-    use crate::custom_sql_types::{ReportStatusEnum, RunStatusEnum};
+    use crate::custom_sql_types::{ReportStatusEnum, ReportableEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
+    use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::run::{NewRun, RunData};
-    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
@@ -389,7 +389,7 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_test_run_report_non_failed(conn: &PgConnection) -> RunReportData {
+    fn insert_test_run_report_non_failed(conn: &PgConnection) -> ReportMapData {
         let run = insert_test_run(conn);
 
         let new_report = NewReport {
@@ -403,8 +403,9 @@ mod tests {
         let new_report =
             ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_run_report = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: new_report.report_id,
             status: ReportStatusEnum::Running,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -413,7 +414,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_run_report).expect("Failed inserting test run_report")
     }
 
     #[actix_rt::test]

@@ -213,6 +213,23 @@ table! {
 table! {
     use diesel::sql_types::*;
 
+    run_group_with_github(run_group_id) {
+        run_group_id -> Uuid,
+        owner -> Nullable<Text>,
+        repo -> Nullable<Text>,
+        issue_number -> Nullable<Integer>,
+        author -> Nullable<Text>,
+        base_commit -> Nullable<Text>,
+        head_commit -> Nullable<Text>,
+        test_input_key -> Nullable<Text>,
+        eval_input_key -> Nullable<Text>,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
     run_group_is_from_github(run_group_id) {
         run_group_id -> Uuid,
         owner -> Text,
@@ -243,10 +260,12 @@ table! {
 
 table! {
     use diesel::sql_types::*;
+    use crate::custom_sql_types::Report_trigger_enum;
 
     template_report(template_id, report_id) {
         template_id -> Uuid,
         report_id -> Uuid,
+        report_trigger -> Report_trigger_enum,
         created_at -> Timestamptz,
         created_by -> Nullable<Text>,
     }
@@ -254,10 +273,11 @@ table! {
 
 table! {
     use diesel::sql_types::*;
-    use crate::custom_sql_types::Report_status_enum;
+    use crate::custom_sql_types::{Report_status_enum, Reportable_enum};
 
-    run_report(run_id, report_id) {
-        run_id -> Uuid,
+    report_map(entity_type, entity_id, report_id) {
+        entity_type -> Reportable_enum,
+        entity_id -> Uuid,
         report_id -> Uuid,
         status -> Report_status_enum,
         cromwell_job_id -> Nullable<Text>,
@@ -318,7 +338,7 @@ allow_tables_to_appear_in_same_query!(
     run_is_from_github,
     report,
     template_report,
-    run_report,
+    report_map,
     run_error,
     run_group,
     run_group_is_from_github

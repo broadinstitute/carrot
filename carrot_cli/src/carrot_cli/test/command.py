@@ -6,6 +6,7 @@ import click
 
 from .. import command_util
 from .. import dependency_util
+from .. import email_util
 from .. import file_util
 from ..config import manager as config
 from ..rest import runs, templates, tests
@@ -186,16 +187,7 @@ def create(
 ):
     """Create test with the specified parameters"""
     # If created_by is not set and there is an email config variable, fill with that
-    if created_by == "":
-        email_config_val = config.load_var_no_error("email")
-        if email_config_val is not None:
-            created_by = email_config_val
-        else:
-            LOGGER.error(
-                "No email config variable set.  If a value is not specified for --created by, "
-                "there must be a value set for email."
-            )
-            sys.exit(1)
+    created_by = email_util.check_created_by(created_by)
     # Process template to get id if it's a name
     template_id = dependency_util.get_id_from_id_or_name_and_handle_error(template, templates, "template_id", "template")
     # Load data from files for test_input_defaults, test_option_defaults, eval_input_defaults and eval_option_defaults,
@@ -317,16 +309,7 @@ def delete(test, yes):
 def run(test, name, test_input, test_options, eval_input, eval_options, created_by):
     """Start a run for the test specified by TEST (id or name) with the specified params"""
     # If created_by is not set and there is an email config variable, fill with that
-    if created_by == "":
-        email_config_val = config.load_var_no_error("email")
-        if email_config_val is not None:
-            created_by = email_config_val
-        else:
-            LOGGER.error(
-                "No email config variable set.  If a value is not specified for --created by, "
-                "there must be a value set for email."
-            )
-            sys.exit(1)
+    created_by = email_util.check_created_by(created_by)
     # Process test to get id if it's a name
     id = dependency_util.get_id_from_id_or_name_and_handle_error(test, tests, "test_id", "test")
     # Load data from files for test_input, test_options, eval_input and eval_options, if set

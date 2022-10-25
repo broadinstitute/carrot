@@ -6,7 +6,7 @@
 //! for any tests runs that complete
 
 use crate::config::{Config, StatusManagerConfig};
-use crate::custom_sql_types::{BuildStatusEnum, ReportStatusEnum, RunStatusEnum};
+use crate::custom_sql_types::{BuildStatusEnum, ReportStatusEnum, ReportableEnum, RunStatusEnum};
 use crate::db::DbPool;
 use crate::manager::notification_handler::NotificationHandler;
 use crate::manager::report_builder;
@@ -16,8 +16,8 @@ use crate::manager::test_runner::{RunBuildStatus, TestRunner};
 use crate::manager::util::{check_for_terminate_message, check_for_terminate_message_with_timeout};
 use crate::manager::{notification_handler, software_builder, test_runner};
 use crate::models::report::ReportData;
-use crate::models::run::{RunChangeset, RunData};
-use crate::models::run_report::{RunReportChangeset, RunReportData};
+use crate::models::report_map::{ReportMapChangeset, ReportMapData};
+use crate::models::run::{RunChangeset, RunData, RunQuery};
 use crate::models::run_result::{NewRunResult, RunResultData};
 use crate::models::software_build::{SoftwareBuildChangeset, SoftwareBuildData};
 use crate::models::template_result::TemplateResultData;
@@ -282,33 +282,33 @@ impl StatusManager {
             // Update report statuses if reporting is enabled
             if self.report_builder.is_some() {
                 // Query DB for unfinished run reports
-                let unfinished_run_reports =
-                    RunReportData::find_unfinished(&self.db_pool.get().unwrap());
-                match unfinished_run_reports {
+                let unfinished_report_maps =
+                    ReportMapData::find_unfinished(&self.db_pool.get().unwrap());
+                match unfinished_report_maps {
                     // If we got them successfully, check and update their statuses
-                    Ok(run_reports) => {
+                    Ok(report_maps) => {
                         // Reset the consecutive failures counter
                         consecutive_failures = 0;
-                        debug!("Checking status of {} run_reports", run_reports.len());
-                        for run_report in run_reports {
+                        debug!("Checking status of {} report_maps", report_maps.len());
+                        for report_map in report_maps {
                             // Check for message from main thread to exit
                             if check_for_terminate_message(&self.channel_recv).is_some() {
                                 return Ok(());
                             }
                             // Check and update status
                             debug!(
-                                "Checking status of run_report with run_id {} and report_id: {}",
-                                run_report.run_id, run_report.report_id
+                                "Checking status of report_map with entity_type {} entity_id {} and report_id: {}",
+                                report_map.entity_type, report_map.entity_id, report_map.report_id
                             );
                             match self
-                                .check_and_update_run_report_status(
-                                    &run_report,
+                                .check_and_update_report_map_status(
+                                    &report_map,
                                     &self.db_pool.get().unwrap(),
                                 )
                                 .await
                             {
                                 Err(e) => {
-                                    error!("Encountered error while trying to update status for run_report with run_id {} and report_id {} : {}", run_report.run_id, run_report.report_id, e);
+                                    error!("Encountered error while trying to update status for report_map with entity_type {} entity_id {} and report_id {} : {}", report_map.entity_type, report_map.entity_id, report_map.report_id, e);
                                     self.increment_consecutive_failures(
                                         &mut consecutive_failures,
                                         e,
@@ -316,9 +316,10 @@ impl StatusManager {
                                 }
                                 Ok(_) => {
                                     debug!(
-                                        "Successfully checked/updated status for run_report with run_id {} and report_id {}",
-                                        run_report.run_id,
-                                        run_report.report_id
+                                        "Successfully checked/updated status for report_map with entity_type {} entity_id {} and report_id {}",
+                                        report_map.entity_type,
+                                        report_map.entity_id,
+                                        report_map.report_id
                                     );
                                 }
                             }
@@ -755,7 +756,7 @@ impl StatusManager {
                 if let Some(report_builder) = &self.report_builder {
                     debug!("Starting report generation for run with id: {}", run.run_id);
                     report_builder
-                        .create_run_reports_for_completed_run(conn, run)
+                        .create_report_maps_for_completed_run(conn, run)
                         .await?;
                 }
             }
@@ -810,34 +811,82 @@ impl StatusManager {
         }
     }
 
-    /// Sends any necessary terminal status notifications for `run_report`, currently emails
-    async fn send_notifications_for_run_report_completion(
+    /// Sends any necessary terminal status notifications for `report_map`, currently emails
+    async fn send_notifications_for_report_map_completion(
         &self,
         conn: &PgConnection,
-        run_report: &RunReportData,
+        report_map: &ReportMapData,
     ) -> Result<(), UpdateStatusError> {
-        // Get run and report
-        let run = match RunData::find_by_id(conn, run_report.run_id) {
-            Ok(run) => run,
-            Err(e) => {
-                return Err(UpdateStatusError::DB(format!(
-                    "Retrieving run with id {} failed with error {}",
-                    run_report.run_id, e
-                )));
+        // Get run(s) and report
+        let runs: Vec<RunData> = match report_map.entity_type {
+            ReportableEnum::Run => {
+                let run = match RunData::find_by_id(conn, report_map.entity_id) {
+                    Ok(run) => run,
+                    Err(e) => {
+                        return Err(UpdateStatusError::DB(format!(
+                            "Retrieving run with id {} failed with error {}",
+                            report_map.entity_id, e
+                        )));
+                    }
+                };
+                vec![run]
+            }
+            ReportableEnum::RunGroup => {
+                match RunData::find(
+                    conn,
+                    RunQuery {
+                        pipeline_id: None,
+                        template_id: None,
+                        test_id: None,
+                        run_group_id: Some(report_map.entity_id),
+                        name: None,
+                        status: None,
+                        test_input: None,
+                        test_options: None,
+                        eval_input: None,
+                        eval_options: None,
+                        test_cromwell_job_id: None,
+                        eval_cromwell_job_id: None,
+                        created_before: None,
+                        created_after: None,
+                        created_by: None,
+                        finished_before: None,
+                        finished_after: None,
+                        sort: None,
+                        limit: None,
+                        offset: None,
+                    },
+                ) {
+                    Ok(runs) => {
+                        if runs.is_empty() {
+                            return Err(UpdateStatusError::DB(format!(
+                                "Retrieving runs with group id {} returned no results",
+                                report_map.entity_id
+                            )));
+                        }
+                        runs
+                    }
+                    Err(e) => {
+                        return Err(UpdateStatusError::DB(format!(
+                            "Retrieving runs with group id {} failed with error {}",
+                            report_map.entity_id, e
+                        )));
+                    }
+                }
             }
         };
-        let report = match ReportData::find_by_id(conn, run_report.report_id) {
+        let report = match ReportData::find_by_id(conn, report_map.report_id) {
             Ok(report) => report,
             Err(e) => {
                 return Err(UpdateStatusError::DB(format!(
                     "Retrieving report with id {} failed with error {}",
-                    run_report.report_id, e
+                    report_map.report_id, e
                 )));
             }
         };
         // Send notifications
         self.notification_handler
-            .send_run_report_complete_notifications(conn, run_report, &run, &report.name)
+            .send_report_map_complete_notifications(conn, report_map, &runs, &report.name)
             .await?;
 
         Ok(())
@@ -974,18 +1023,18 @@ impl StatusManager {
 
     /// Gets status for a run report job from cromwell and updates the status in the DB if appropriate
     ///
-    /// Retrieves metadata information for the cromwell job tied to `run_report` via a request to
-    /// cromwell's metadata API mapping, updates the status for `run_report` in the DB if the retreived
+    /// Retrieves metadata information for the cromwell job tied to `report_map` via a request to
+    /// cromwell's metadata API mapping, updates the status for `report_map` in the DB if the retreived
     /// status is different, and, in the case that it is a terminal status, sends notifications to
     /// subscribed users and fills results
-    async fn check_and_update_run_report_status(
+    async fn check_and_update_report_map_status(
         &self,
-        run_report: &RunReportData,
+        report_map: &ReportMapData,
         conn: &PgConnection,
     ) -> Result<(), UpdateStatusError> {
         // Get metadata
         let metadata = self
-            .get_status_metadata_from_cromwell(run_report.cromwell_job_id.as_ref().unwrap())
+            .get_status_metadata_from_cromwell(report_map.cromwell_job_id.as_ref().unwrap())
             .await?;
         // If the status is different from what's stored in the DB currently, update it
         let status = match metadata.get("status") {
@@ -1008,21 +1057,21 @@ impl StatusManager {
                 )))
             }
         };
-        if status != run_report.status {
+        if status != report_map.status {
             // Set the changes based on the status
-            let run_report_update: RunReportChangeset = match status {
+            let report_map_update: ReportMapChangeset = match status {
                 ReportStatusEnum::Succeeded => {
-                    StatusManager::get_run_report_changeset_from_succeeded_cromwell_metadata(
+                    StatusManager::get_report_map_changeset_from_succeeded_cromwell_metadata(
                         &metadata,
                     )?
                 }
-                ReportStatusEnum::Failed | ReportStatusEnum::Aborted => RunReportChangeset {
+                ReportStatusEnum::Failed | ReportStatusEnum::Aborted => ReportMapChangeset {
                     status: Some(status.clone()),
                     cromwell_job_id: None,
                     finished_at: Some(StatusManager::get_end(&metadata)?),
                     results: None,
                 },
-                _ => RunReportChangeset {
+                _ => ReportMapChangeset {
                     status: Some(status.clone()),
                     cromwell_job_id: None,
                     finished_at: None,
@@ -1030,19 +1079,20 @@ impl StatusManager {
                 },
             };
             // Update
-            let updated_run_report: RunReportData = match RunReportData::update(
+            let updated_report_map: ReportMapData = match ReportMapData::update(
                 conn,
-                run_report.run_id,
-                run_report.report_id,
-                run_report_update,
+                report_map.entity_type,
+                report_map.entity_id,
+                report_map.report_id,
+                report_map_update,
             ) {
                 Err(e) => {
                     return Err(UpdateStatusError::DB(format!(
-                    "Updating run_report with run_id {} and report_id {} in DB failed with error {}",
-                    run_report.run_id, run_report.report_id, e
+                    "Updating report_map with run_id {} and report_id {} in DB failed with error {}",
+                    report_map.entity_id, report_map.report_id, e
                 )))
                 }
-                Ok(updated_run_report) => updated_run_report,
+                Ok(updated_report_map) => updated_report_map,
             };
 
             // If it ended, send notifications
@@ -1050,7 +1100,7 @@ impl StatusManager {
                 || status == ReportStatusEnum::Failed
                 || status == ReportStatusEnum::Aborted
             {
-                self.send_notifications_for_run_report_completion(conn, &updated_run_report)
+                self.send_notifications_for_report_map_completion(conn, &updated_report_map)
                     .await?;
             }
         }
@@ -1059,11 +1109,11 @@ impl StatusManager {
     }
 
     /// Extracts the expected run report outputs from the cromwell metadata object `metadata` and
-    /// returns a RunReportChangeset for updating a run_report to Succeeded with the expected outputs
+    /// returns a RunReportChangeset for updating a report_map to Succeeded with the expected outputs
     /// as its results
-    fn get_run_report_changeset_from_succeeded_cromwell_metadata(
+    fn get_report_map_changeset_from_succeeded_cromwell_metadata(
         metadata: &Map<String, Value>,
-    ) -> Result<RunReportChangeset, UpdateStatusError> {
+    ) -> Result<ReportMapChangeset, UpdateStatusError> {
         // Get the outputs so we can get the report file locations
         let outputs = match metadata.get("outputs") {
             Some(outputs) => outputs.as_object().unwrap().clone(),
@@ -1073,9 +1123,9 @@ impl StatusManager {
                 )))
             }
         };
-        // We'll build a json map to contain the outputs we want and store it in the DB in run_report's
+        // We'll build a json map to contain the outputs we want and store it in the DB in report_map's
         // result field
-        let mut run_report_outputs_map: Map<String, Value> = Map::new();
+        let mut report_map_outputs_map: Map<String, Value> = Map::new();
         // Loop through the four outputs we want, get them from `outputs`, and put them in our outputs
         // map
         for output_key in &[
@@ -1104,13 +1154,13 @@ impl StatusManager {
                     }
                 };
             // Add it to our output map
-            run_report_outputs_map.insert(String::from(*output_key), Value::String(output_val));
+            report_map_outputs_map.insert(String::from(*output_key), Value::String(output_val));
         }
 
-        Ok(RunReportChangeset {
+        Ok(ReportMapChangeset {
             status: Some(ReportStatusEnum::Succeeded),
             cromwell_job_id: None,
-            results: Some(Value::Object(run_report_outputs_map)),
+            results: Some(Value::Object(report_map_outputs_map)),
             finished_at: Some(StatusManager::get_end(metadata)?),
         })
     }
@@ -1302,7 +1352,8 @@ impl StatusManager {
 mod tests {
 
     use crate::custom_sql_types::{
-        BuildStatusEnum, MachineTypeEnum, ReportStatusEnum, ResultTypeEnum, RunStatusEnum,
+        BuildStatusEnum, MachineTypeEnum, ReportStatusEnum, ReportTriggerEnum, ReportableEnum,
+        ResultTypeEnum, RunStatusEnum,
     };
     use crate::db::DbPool;
     use crate::manager::notification_handler::NotificationHandler;
@@ -1312,10 +1363,10 @@ mod tests {
     use crate::manager::test_runner::TestRunner;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
+    use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
     use crate::models::run_is_from_github::{NewRunIsFromGithub, RunIsFromGithubData};
-    use crate::models::run_report::{NewRunReport, RunReportData};
     use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
     use crate::models::software::{NewSoftware, SoftwareData};
     use crate::models::software_build::{NewSoftwareBuild, SoftwareBuildData};
@@ -1669,13 +1720,14 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_test_run_report(conn: &PgConnection) -> RunReportData {
+    fn insert_test_report_map(conn: &PgConnection) -> ReportMapData {
         let run = insert_test_run(conn);
 
         let report = insert_test_report(conn);
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Submitted,
             cromwell_job_id: Some(String::from("ca92ed46-cb1e-4486-b8ff-fc48d7771e67")),
@@ -1684,7 +1736,7 @@ mod tests {
             finished_at: None,
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
     fn map_run_to_version(conn: &PgConnection, run_id: Uuid, software_version_id: Uuid) {
@@ -1720,6 +1772,7 @@ mod tests {
         let new_template_report = NewTemplateReport {
             template_id,
             report_id,
+            report_trigger: ReportTriggerEnum::Single,
             created_by: Some(String::from("kevin@example.com")),
         };
 
@@ -2091,11 +2144,15 @@ mod tests {
         assert_eq!(results.get("Greeting Text").unwrap(), "Yo, Cool Person");
         // Make sure the report job was started
         cromwell_mock.assert();
-        let result_run_report =
-            RunReportData::find_by_run_and_report(&conn, result_run.run_id, test_report.report_id)
-                .expect("Failed to retrieve run report");
+        let result_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            ReportableEnum::Run,
+            result_run.run_id,
+            test_report.report_id,
+        )
+        .expect("Failed to retrieve run report");
         assert_eq!(
-            result_run_report.cromwell_job_id,
+            result_report_map.cromwell_job_id,
             Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
         );
     }
@@ -2659,17 +2716,17 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_run_report_status_succeeded() {
+    async fn test_check_and_update_report_map_status_succeeded() {
         load_default_config();
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         let test_status_manager = create_test_status_manager(pool);
         // Set up email dir for the notification email
         let email_dir = setup_test_email_dir("test_send_email");
-        // Insert run_report we'll use for testing
-        let run_report = insert_test_run_report(&conn);
+        // Insert report_map we'll use for testing
+        let report_map = insert_test_report_map(&conn);
         let test_run_is_from_github =
-            insert_test_run_is_from_github_with_run_id(&conn, run_report.run_id);
+            insert_test_run_is_from_github_with_run_id(&conn, report_map.entity_id);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
             "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
@@ -2693,22 +2750,26 @@ mod tests {
         let github_mock = setup_github_mock();
         // Check and update status
         test_status_manager
-            .check_and_update_run_report_status(&run_report, &conn)
+            .check_and_update_report_map_status(&report_map, &conn)
             .await
             .unwrap();
         mock.assert();
-        // Query for run_report to make sure data was filled properly
-        let result_run_report =
-            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id)
-                .unwrap();
-        assert_eq!(result_run_report.status, ReportStatusEnum::Succeeded);
+        // Query for report_map to make sure data was filled properly
+        let result_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            report_map.entity_type,
+            report_map.entity_id,
+            report_map.report_id,
+        )
+        .unwrap();
+        assert_eq!(result_report_map.status, ReportStatusEnum::Succeeded);
         assert_eq!(
-            result_run_report.finished_at.unwrap(),
+            result_report_map.finished_at.unwrap(),
             NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
                 .unwrap()
         );
         assert_eq!(
-            result_run_report.results.unwrap(),
+            result_report_map.results.unwrap(),
             json!({
                 "populated_notebook": "gs://example/example/populated_notebook.ipynb",
                 "html_report": "gs://example/example/html_report.html",
@@ -2719,14 +2780,14 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_run_report_status_failed() {
+    async fn test_check_and_update_report_map_status_failed() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         let test_status_manager = create_test_status_manager(pool);
         // Set up email dir for the notification email
         let email_dir = setup_test_email_dir("test_send_email");
-        // Insert run_report we'll use for testing
-        let run_report = insert_test_run_report(&conn);
+        // Insert report_map we'll use for testing
+        let report_map = insert_test_report_map(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
@@ -2744,31 +2805,35 @@ mod tests {
         .create();
         // Check and update status
         test_status_manager
-            .check_and_update_run_report_status(&run_report, &conn)
+            .check_and_update_report_map_status(&report_map, &conn)
             .await
             .unwrap();
         mock.assert();
-        // Query for run_report to make sure data was filled properly
-        let result_run_report =
-            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id)
-                .unwrap();
-        assert_eq!(result_run_report.status, ReportStatusEnum::Failed);
+        // Query for report_map to make sure data was filled properly
+        let result_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            report_map.entity_type,
+            report_map.entity_id,
+            report_map.report_id,
+        )
+        .unwrap();
+        assert_eq!(result_report_map.status, ReportStatusEnum::Failed);
         assert_eq!(
-            result_run_report.finished_at.unwrap(),
+            result_report_map.finished_at.unwrap(),
             NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
                 .unwrap()
         );
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_run_report_status_aborted() {
+    async fn test_check_and_update_report_map_status_aborted() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         let test_status_manager = create_test_status_manager(pool);
         // Set up email dir for the notification email
         let email_dir = setup_test_email_dir("test_send_email");
-        // Insert run_report we'll use for testing
-        let run_report = insert_test_run_report(&conn);
+        // Insert report_map we'll use for testing
+        let report_map = insert_test_report_map(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
@@ -2786,29 +2851,33 @@ mod tests {
         .create();
         // Check and update status
         test_status_manager
-            .check_and_update_run_report_status(&run_report, &conn)
+            .check_and_update_report_map_status(&report_map, &conn)
             .await
             .unwrap();
         mock.assert();
-        // Query for run_report to make sure data was filled properly
-        let result_run_report =
-            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id)
-                .unwrap();
-        assert_eq!(result_run_report.status, ReportStatusEnum::Aborted);
+        // Query for report_map to make sure data was filled properly
+        let result_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            report_map.entity_type,
+            report_map.entity_id,
+            report_map.report_id,
+        )
+        .unwrap();
+        assert_eq!(result_report_map.status, ReportStatusEnum::Aborted);
         assert_eq!(
-            result_run_report.finished_at.unwrap(),
+            result_report_map.finished_at.unwrap(),
             NaiveDateTime::parse_from_str("2020-12-31T11:11:11.0000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
                 .unwrap()
         );
     }
 
     #[actix_rt::test]
-    async fn test_check_and_update_run_report_status_running() {
+    async fn test_check_and_update_report_map_status_running() {
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
         let test_status_manager = create_test_status_manager(pool);
-        // Insert run_report we'll use for testing
-        let run_report = insert_test_run_report(&conn);
+        // Insert report_map we'll use for testing
+        let report_map = insert_test_report_map(&conn);
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
           "id": "ca92ed46-cb1e-4486-b8ff-fc48d7771e67",
@@ -2826,14 +2895,18 @@ mod tests {
         .create();
         // Check and update status
         test_status_manager
-            .check_and_update_run_report_status(&run_report, &conn)
+            .check_and_update_report_map_status(&report_map, &conn)
             .await
             .unwrap();
         mock.assert();
-        // Query for run_report to make sure data was filled properly
-        let result_run_report =
-            RunReportData::find_by_run_and_report(&conn, run_report.run_id, run_report.report_id)
-                .unwrap();
-        assert_eq!(result_run_report.status, ReportStatusEnum::Running);
+        // Query for report_map to make sure data was filled properly
+        let result_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            report_map.entity_type,
+            report_map.entity_id,
+            report_map.report_id,
+        )
+        .unwrap();
+        assert_eq!(result_report_map.status, ReportStatusEnum::Running);
     }
 }

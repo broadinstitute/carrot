@@ -1,0 +1,3 @@
+run_id,test_id,name,status,test_cromwell_job_id,eval_cromwell_job_id,created_at,created_by,finished_at,errors,base_or_head
+67e55044-10b1-426f-9247-bb680e5fe0c8,8dd6d043-e16c-406c-8828-ce7ec2143e7f,Test Run 1,succeeded,0d0e02d5-070f-4240-a385-6c276bc07dd3,18a83622-3578-4266-b1b5-43faac6a00f1,2099-01-01 00:00:00,test@example.com,2099-01-01 12:00:00,,base
+4f27abe7-2cfa-42c3-acc2-ce5344b0e471,8dd6d043-e16c-406c-8828-ce7ec2143e7f,Test Run 2,succeeded,f34b7d2a-d0f8-49d6-aace-3b82ccb4c084,4dc770b8-df72-4cb3-9599-f758cefb5788,2099-01-01 23:00:00,test@example.com,2099-01-02 00:00:00,,head

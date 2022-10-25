@@ -1,11 +1,12 @@
-//! Contains structs and functions for doing operations on run_reports.
+//! Contains structs and functions for doing operations on report_maps.
 //!
-//! A run_report represents a specific, filled report generated from the results of a run.
-//! Represented in the database by the RUN_REPORT table.
+//! A report_map represents a specific, filled report generated from the results of a run or
+//! run_group.
+//! Represented in the database by the REPORT_MAP table.
 
-use crate::custom_sql_types::ReportStatusEnum;
-use crate::schema::run_report;
-use crate::schema::run_report::dsl::*;
+use crate::custom_sql_types::{ReportStatusEnum, ReportableEnum};
+use crate::schema::report_map;
+use crate::schema::report_map::dsl::*;
 use crate::util;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -13,13 +14,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-/// Mapping to a run_report mapping as it exists in the RUN_REPORT table in the
+/// Mapping to a report_map mapping as it exists in the REPORT_MAP table in the
 /// database.
 ///
-/// An instance of this struct will be returned by any queries for run_reports.
+/// An instance of this struct will be returned by any queries for report_maps.
 #[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
-pub struct RunReportData {
-    pub run_id: Uuid,
+pub struct ReportMapData {
+    pub entity_type: ReportableEnum,
+    pub entity_id: Uuid,
     pub report_id: Uuid,
     pub status: ReportStatusEnum,
     pub cromwell_job_id: Option<String>,
@@ -29,14 +31,15 @@ pub struct RunReportData {
     pub finished_at: Option<NaiveDateTime>,
 }
 
-/// Represents all possible parameters for a query of the RUN_REPORT table
+/// Represents all possible parameters for a query of the REPORT_MAP table
 ///
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
-/// with either asc() or desc().  For example: asc(run_id),desc(report_id),report_key
+/// with either asc() or desc().  For example: asc(entity_id),desc(report_id),report_key
 #[derive(Deserialize)]
-pub struct RunReportQuery {
-    pub run_id: Option<Uuid>,
+pub struct ReportMapQuery {
+    pub entity_type: Option<ReportableEnum>,
+    pub entity_id: Option<Uuid>,
     pub report_id: Option<Uuid>,
     pub status: Option<ReportStatusEnum>,
     pub cromwell_job_id: Option<String>,
@@ -51,14 +54,15 @@ pub struct RunReportQuery {
     pub offset: Option<i64>,
 }
 
-/// A new run_report mapping to be inserted into the DB
+/// A new report_map mapping to be inserted into the DB
 ///
-/// run_id, report_id, and report_key are all required fields, but created_by is not
+/// entity_type, entity_id, report_id, and report_key are all required fields, but created_by is not
 /// created_at is populated automatically by the DB
 #[derive(Deserialize, Serialize, Insertable)]
-#[table_name = "run_report"]
-pub struct NewRunReport {
-    pub run_id: Uuid,
+#[table_name = "report_map"]
+pub struct NewReportMap {
+    pub entity_type: ReportableEnum,
+    pub entity_id: Uuid,
     pub report_id: Uuid,
     pub status: ReportStatusEnum,
     pub cromwell_job_id: Option<String>,
@@ -67,53 +71,58 @@ pub struct NewRunReport {
     pub finished_at: Option<NaiveDateTime>,
 }
 
-/// Represents fields to change when updating a run_report
+/// Represents fields to change when updating a report_map
 ///
 /// Only status, cromwell_job_id, results, and finished_at can be updated
 #[derive(Deserialize, Serialize, AsChangeset, Debug)]
-#[table_name = "run_report"]
-pub struct RunReportChangeset {
+#[table_name = "report_map"]
+pub struct ReportMapChangeset {
     pub status: Option<ReportStatusEnum>,
     pub cromwell_job_id: Option<String>,
     pub results: Option<Value>,
     pub finished_at: Option<NaiveDateTime>,
 }
 
-impl RunReportData {
-    /// Queries the DB for a run_report for the specified ids
+impl ReportMapData {
+    /// Queries the DB for a report_map for the specified ids
     ///
-    /// Queries the DB using `conn` to retrieve the first row with a run_id matching
-    /// `query_run_id` and a report_id matching `query_report_id`
-    /// Returns a result containing either the retrieved run_reports as a
+    /// Queries the DB using `conn` to retrieve the first row with an entity_type matching `query_entity_type`,
+    /// entity_id matching `query_entity_id` and a report_id matching `query_report_id`
+    /// Returns a result containing either the retrieved report_maps as a
     /// RunReportData instance or an error if the query fails for some reason or if no
     /// mapping is found matching the criteria
-    pub fn find_by_run_and_report(
+    pub fn find_by_entity_type_and_id_and_report(
         conn: &PgConnection,
-        query_run_id: Uuid,
+        query_entity_type: ReportableEnum,
+        query_entity_id: Uuid,
         query_report_id: Uuid,
     ) -> Result<Self, diesel::result::Error> {
-        run_report
+        report_map
+            .filter(entity_type.eq(query_entity_type))
             .filter(report_id.eq(query_report_id))
-            .filter(run_id.eq(query_run_id))
+            .filter(entity_id.eq(query_entity_id))
             .first::<Self>(conn)
     }
 
-    /// Queries the DB for run_report mappings matching the specified query criteria
+    /// Queries the DB for report_map mappings matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve run_report mappings matching the criteria in
+    /// Queries the DB using `conn` to retrieve report_map mappings matching the criteria in
     /// `params`
-    /// Returns a result containing either a vector of the retrieved run_reports as
+    /// Returns a result containing either a vector of the retrieved report_maps as
     /// RunReportData instances or an error if the query fails for some reason
     pub fn find(
         conn: &PgConnection,
-        params: RunReportQuery,
+        params: ReportMapQuery,
     ) -> Result<Vec<Self>, diesel::result::Error> {
         // Put the query into a box (pointer) so it can be built dynamically
-        let mut query = run_report.into_boxed();
+        let mut query = report_map.into_boxed();
 
         // Add filters for each of the params if they have values
-        if let Some(param) = params.run_id {
-            query = query.filter(run_id.eq(param));
+        if let Some(param) = params.entity_type {
+            query = query.filter(entity_type.eq(param));
+        }
+        if let Some(param) = params.entity_id {
+            query = query.filter(entity_id.eq(param));
         }
         if let Some(param) = params.report_id {
             query = query.filter(report_id.eq(param));
@@ -148,11 +157,18 @@ impl RunReportData {
             let sort = util::sort_string::parse(&sort);
             for sort_clause in sort {
                 match &sort_clause.key[..] {
-                    "run_id" => {
+                    "entity_type" => {
                         if sort_clause.ascending {
-                            query = query.then_order_by(run_id.asc());
+                            query = query.then_order_by(entity_type.asc());
                         } else {
-                            query = query.then_order_by(run_id.desc());
+                            query = query.then_order_by(entity_type.desc());
+                        }
+                    }
+                    "entity_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(entity_id.asc());
+                        } else {
+                            query = query.then_order_by(entity_id.desc());
                         }
                     }
                     "report_id" => {
@@ -221,65 +237,70 @@ impl RunReportData {
         query.load::<Self>(conn)
     }
 
-    /// Queries the DB for run_reports that haven't finished yet
+    /// Queries the DB for report_maps that haven't finished yet
     ///
-    /// Returns result containing either a vector of the retrieved run_reports (which have a
+    /// Returns result containing either a vector of the retrieved report_maps (which have a
     /// null value in the `finished_at` column) or a diesel error if retrieving the rows fails for
     /// some reason
     pub fn find_unfinished(conn: &PgConnection) -> Result<Vec<Self>, diesel::result::Error> {
-        run_report.filter(finished_at.is_null()).load::<Self>(conn)
+        report_map.filter(finished_at.is_null()).load::<Self>(conn)
     }
 
-    /// Inserts a new run_report mapping into the DB
+    /// Inserts a new report_map mapping into the DB
     ///
-    /// Creates a new run_report row in the DB using `conn` with the values specified in
+    /// Creates a new report_map row in the DB using `conn` with the values specified in
     /// `params`
-    /// Returns a report containing either the new run_report mapping that was created or an
+    /// Returns a report containing either the new report_map mapping that was created or an
     /// error if the insert fails for some reason
     pub fn create(
         conn: &PgConnection,
-        params: NewRunReport,
+        params: NewReportMap,
     ) -> Result<Self, diesel::result::Error> {
-        diesel::insert_into(run_report)
+        diesel::insert_into(report_map)
             .values(&params)
             .get_result(conn)
     }
 
-    /// Updates a specified run_report in the DB
+    /// Updates a specified report_map in the DB
     ///
-    /// Updates the run_report row in the DB using `conn` specified by `query_run_id` and
-    /// `query_report_id` with the values in `params`
-    /// Returns a result containing either the newly updated run_report or an error if the update
+    /// Updates the report_map row in the DB using `conn` specified by `query_entity_type`,
+    /// `query_entity_id` and `query_report_id` with the values in `params`
+    /// Returns a result containing either the newly updated report_map or an error if the update
     /// fails for some reason
     pub fn update(
         conn: &PgConnection,
-        query_run_id: Uuid,
+        query_entity_type: ReportableEnum,
+        query_entity_id: Uuid,
         query_report_id: Uuid,
-        params: RunReportChangeset,
+        params: ReportMapChangeset,
     ) -> Result<Self, diesel::result::Error> {
         diesel::update(
-            run_report
-                .filter(run_id.eq(query_run_id))
+            report_map
+                .filter(entity_type.eq(query_entity_type))
+                .filter(entity_id.eq(query_entity_id))
                 .filter(report_id.eq(query_report_id)),
         )
         .set(params)
         .get_result(conn)
     }
 
-    /// Deletes a specific run_report row in the DB
+    /// Deletes a specific report_map row in the DB
     ///
-    /// Deletes the run_report row in the DB using `conn` with a run_id equal to
-    /// `query_run_id` and a report_id equal to `query_report_id`
+    /// Deletes the report_map row in the DB using `conn` with an entity_type equal to
+    /// `query_entity_type`, an entity_id equal to `query_entity_id` and a report_id equal to
+    /// `query_report_id`
     /// Returns a result containing either the number of rows deleted or an error if the delete
     /// fails for some reason
     pub fn delete(
         conn: &PgConnection,
-        query_run_id: Uuid,
+        query_entity_type: ReportableEnum,
+        query_entity_id: Uuid,
         query_report_id: Uuid,
     ) -> Result<usize, diesel::result::Error> {
         diesel::delete(
-            run_report
-                .filter(run_id.eq(query_run_id))
+            report_map
+                .filter(entity_type.eq(query_entity_type))
+                .filter(entity_id.eq(query_entity_id))
                 .filter(report_id.eq(query_report_id)),
         )
         .execute(conn)
@@ -293,7 +314,8 @@ mod tests {
     use crate::custom_sql_types::RunStatusEnum;
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::report::{NewReport, ReportData};
-    use crate::models::run::{NewRun, RunData};
+    use crate::models::run::{NewRun, RunChangeset, RunData};
+    use crate::models::run_group::RunGroupData;
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::unit_test_util::*;
@@ -411,7 +433,7 @@ mod tests {
         RunData::create(&conn, new_run).expect("Failed to insert run")
     }
 
-    fn insert_test_run_report_failed(conn: &PgConnection) -> RunReportData {
+    fn insert_test_report_map_failed(conn: &PgConnection) -> ReportMapData {
         let run = insert_test_run(conn);
 
         let new_report = NewReport {
@@ -424,8 +446,9 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Failed,
             cromwell_job_id: Some(String::from("testtesttesttest")),
@@ -434,11 +457,38 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report")
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
     }
 
-    fn insert_test_run_reports_not_failed(conn: &PgConnection) -> Vec<RunReportData> {
-        let mut run_reports = Vec::new();
+    fn insert_test_report_map_in_group(conn: &PgConnection) -> ReportMapData {
+        let run_group = RunGroupData::create(conn).unwrap();
+
+        let new_report = NewReport {
+            name: String::from("Kevin's Report"),
+            description: Some(String::from("Kevin made this report for testing")),
+            notebook: json!({"test":[{"test1":"test"}]}),
+            config: None,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
+
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::RunGroup,
+            entity_id: run_group.run_group_id,
+            report_id: report.report_id,
+            status: ReportStatusEnum::Failed,
+            cromwell_job_id: Some(String::from("testtesttesttest")),
+            results: None,
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map")
+    }
+
+    fn insert_test_report_maps_not_failed(conn: &PgConnection) -> Vec<ReportMapData> {
+        let mut report_maps = Vec::new();
 
         let run = insert_test_run(conn);
 
@@ -452,8 +502,9 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Succeeded,
             cromwell_job_id: Some(String::from("testtesttesttest2")),
@@ -464,8 +515,8 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        run_reports.push(
-            RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report"),
+        report_maps.push(
+            ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map"),
         );
 
         let run = insert_different_test_run(conn);
@@ -480,8 +531,9 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Running,
             cromwell_job_id: Some(String::from("testtesttesttest3")),
@@ -490,8 +542,8 @@ mod tests {
             finished_at: None,
         };
 
-        run_reports.push(
-            RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report"),
+        report_maps.push(
+            ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map"),
         );
 
         let new_report = NewReport {
@@ -504,8 +556,9 @@ mod tests {
 
         let report = ReportData::create(conn, new_report).expect("Failed inserting test report");
 
-        let new_run_report = NewRunReport {
-            run_id: run.run_id,
+        let new_report_map = NewReportMap {
+            entity_type: ReportableEnum::Run,
+            entity_id: run.run_id,
             report_id: report.report_id,
             status: ReportStatusEnum::Submitted,
             cromwell_job_id: Some(String::from("testtesttesttest4")),
@@ -514,50 +567,57 @@ mod tests {
             finished_at: None,
         };
 
-        run_reports.push(
-            RunReportData::create(conn, new_run_report).expect("Failed inserting test run_report"),
+        report_maps.push(
+            ReportMapData::create(conn, new_report_map).expect("Failed inserting test report_map"),
         );
 
-        run_reports
+        report_maps
     }
 
     #[test]
-    fn find_by_run_and_report_exists() {
+    fn find_by_entity_type_and_id_and_report_exists() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_failed(&conn);
+        let test_report_map = insert_test_report_map_failed(&conn);
 
-        let found_run_report = RunReportData::find_by_run_and_report(
+        let found_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
             &conn,
-            test_run_report.run_id,
-            test_run_report.report_id,
+            test_report_map.entity_type,
+            test_report_map.entity_id,
+            test_report_map.report_id,
         )
-        .expect("Failed to retrieve test run_report by id.");
+        .expect("Failed to retrieve test report_map by id.");
 
-        assert_eq!(found_run_report, test_run_report);
+        assert_eq!(found_report_map, test_report_map);
     }
 
     #[test]
     fn find_by_id_not_exists() {
         let conn = get_test_db_connection();
 
-        let nonexistent_run_report =
-            RunReportData::find_by_run_and_report(&conn, Uuid::new_v4(), Uuid::new_v4());
+        let nonexistent_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
+            &conn,
+            ReportableEnum::RunGroup,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        );
 
         assert!(matches!(
-            nonexistent_run_report,
+            nonexistent_report_map,
             Err(diesel::result::Error::NotFound)
         ));
     }
 
     #[test]
-    fn find_with_run_id() {
+    fn find_with_entity_type() {
         let conn = get_test_db_connection();
 
-        let test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
+        let test_report_map_for_group = insert_test_report_map_in_group(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: Some(test_run_reports[0].run_id),
+        let test_query = ReportMapQuery {
+            entity_type: Some(ReportableEnum::RunGroup),
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -572,22 +632,23 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[0]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_map_for_group);
     }
 
     #[test]
-    fn find_with_report_id() {
+    fn find_with_entity_id() {
         let conn = get_test_db_connection();
 
-        let test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
-            report_id: Some(test_run_reports[1].report_id),
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: Some(test_report_maps[0].entity_id),
+            report_id: None,
             status: None,
             cromwell_job_id: None,
             results: None,
@@ -601,21 +662,52 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[1]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[0]);
+    }
+
+    #[test]
+    fn find_with_report_id() {
+        let conn = get_test_db_connection();
+
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
+
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
+            report_id: Some(test_report_maps[1].report_id),
+            status: None,
+            cromwell_job_id: None,
+            results: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            finished_before: None,
+            finished_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
+
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[1]);
     }
 
     #[test]
     fn find_with_status() {
         let conn = get_test_db_connection();
 
-        let test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: Some(ReportStatusEnum::Succeeded),
             cromwell_job_id: None,
@@ -630,21 +722,22 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[0]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[0]);
     }
 
     #[test]
     fn find_with_cromwell_job_id() {
         let conn = get_test_db_connection();
 
-        let test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: Some(String::from("testtesttesttest2")),
@@ -659,21 +752,22 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[0]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[0]);
     }
 
     #[test]
     fn find_with_results() {
         let conn = get_test_db_connection();
 
-        let test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -690,21 +784,22 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[0]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[0]);
     }
 
     #[test]
     fn find_with_sort_and_limit_and_offset() {
         let conn = get_test_db_connection();
 
-        let test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let test_report_maps = insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -719,14 +814,15 @@ mod tests {
             offset: Some(0),
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[2]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[2]);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -741,21 +837,22 @@ mod tests {
             offset: Some(1),
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
-        assert_eq!(found_run_reports[0], test_run_reports[1]);
+        assert_eq!(found_report_maps.len(), 1);
+        assert_eq!(found_report_maps[0], test_report_maps[1]);
     }
 
     #[test]
     fn find_with_created_before_and_created_after() {
         let conn = get_test_db_connection();
 
-        insert_test_run_reports_not_failed(&conn);
+        insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -770,13 +867,14 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 0);
+        assert_eq!(found_report_maps.len(), 0);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -791,20 +889,21 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 3);
+        assert_eq!(found_report_maps.len(), 3);
     }
 
     #[test]
     fn find_with_finished_before_and_finished_after() {
         let conn = get_test_db_connection();
 
-        insert_test_run_reports_not_failed(&conn);
+        insert_test_report_maps_not_failed(&conn);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -819,13 +918,14 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 0);
+        assert_eq!(found_report_maps.len(), 0);
 
-        let test_query = RunReportQuery {
-            run_id: None,
+        let test_query = ReportMapQuery {
+            entity_type: None,
+            entity_id: None,
             report_id: None,
             status: None,
             cromwell_job_id: None,
@@ -840,51 +940,51 @@ mod tests {
             offset: None,
         };
 
-        let found_run_reports =
-            RunReportData::find(&conn, test_query).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find(&conn, test_query).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 1);
+        assert_eq!(found_report_maps.len(), 1);
     }
 
     #[test]
     fn find_unfinished_success() {
         let conn = get_test_db_connection();
 
-        let _test_run_reports = insert_test_run_reports_not_failed(&conn);
+        let _test_report_maps = insert_test_report_maps_not_failed(&conn);
 
-        let found_run_reports =
-            RunReportData::find_unfinished(&conn).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find_unfinished(&conn).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 2);
-        assert_eq!(found_run_reports[0].finished_at, None);
-        assert_eq!(found_run_reports[1].finished_at, None);
+        assert_eq!(found_report_maps.len(), 2);
+        assert_eq!(found_report_maps[0].finished_at, None);
+        assert_eq!(found_report_maps[1].finished_at, None);
     }
 
     #[test]
     fn find_unfinished_success_empty() {
         let conn = get_test_db_connection();
 
-        let _test_run_report = insert_test_run_report_failed(&conn);
+        let _test_report_map = insert_test_report_map_failed(&conn);
 
-        let found_run_reports =
-            RunReportData::find_unfinished(&conn).expect("Failed to find run_reports");
+        let found_report_maps =
+            ReportMapData::find_unfinished(&conn).expect("Failed to find report_maps");
 
-        assert_eq!(found_run_reports.len(), 0);
+        assert_eq!(found_report_maps.len(), 0);
     }
 
     #[test]
     fn create_success() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_failed(&conn);
+        let test_report_map = insert_test_report_map_failed(&conn);
 
-        assert_eq!(test_run_report.status, ReportStatusEnum::Failed);
+        assert_eq!(test_report_map.status, ReportStatusEnum::Failed);
         assert_eq!(
-            test_run_report.created_by,
+            test_report_map.created_by,
             Some(String::from("Kevin@example.com"))
         );
         assert_eq!(
-            test_run_report.cromwell_job_id,
+            test_report_map.cromwell_job_id,
             Some(String::from("testtesttesttest"))
         )
     }
@@ -893,11 +993,12 @@ mod tests {
     fn create_failure_same_report_and_run() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_failed(&conn);
+        let test_report_map = insert_test_report_map_failed(&conn);
 
-        let copy_run_report = NewRunReport {
-            run_id: test_run_report.run_id,
-            report_id: test_run_report.report_id,
+        let copy_report_map = NewReportMap {
+            entity_type: test_report_map.entity_type,
+            entity_id: test_report_map.entity_id,
+            report_id: test_report_map.report_id,
             status: ReportStatusEnum::Created,
             cromwell_job_id: None,
             results: None,
@@ -905,10 +1006,10 @@ mod tests {
             finished_at: None,
         };
 
-        let new_run_report = RunReportData::create(&conn, copy_run_report);
+        let new_report_map = ReportMapData::create(&conn, copy_report_map);
 
         assert!(matches!(
-            new_run_report,
+            new_report_map,
             Err(diesel::result::Error::DatabaseError(
                 diesel::result::DatabaseErrorKind::UniqueViolation,
                 _,
@@ -920,31 +1021,32 @@ mod tests {
     fn update_success() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_failed(&conn);
+        let test_report_map = insert_test_report_map_failed(&conn);
 
-        let changes = RunReportChangeset {
+        let changes = ReportMapChangeset {
             status: Some(ReportStatusEnum::Succeeded),
             cromwell_job_id: Some(String::from("123456asdsdfes")),
             results: Some(json!({"test":"test"})),
             finished_at: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
         };
 
-        let updated_run_report = RunReportData::update(
+        let updated_report_map = ReportMapData::update(
             &conn,
-            test_run_report.run_id,
-            test_run_report.report_id,
+            test_report_map.entity_type,
+            test_report_map.entity_id,
+            test_report_map.report_id,
             changes,
         )
         .expect("Failed to update run");
 
-        assert_eq!(updated_run_report.status, ReportStatusEnum::Succeeded);
+        assert_eq!(updated_report_map.status, ReportStatusEnum::Succeeded);
         assert_eq!(
-            updated_run_report.cromwell_job_id,
+            updated_report_map.cromwell_job_id,
             Some(String::from("123456asdsdfes"))
         );
-        assert_eq!(updated_run_report.results, Some(json!({"test":"test"})));
+        assert_eq!(updated_report_map.results, Some(json!({"test":"test"})));
         assert_eq!(
-            updated_run_report.finished_at.unwrap(),
+            updated_report_map.finished_at.unwrap(),
             "2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()
         );
     }
@@ -953,22 +1055,27 @@ mod tests {
     fn delete_success() {
         let conn = get_test_db_connection();
 
-        let test_run_report = insert_test_run_report_failed(&conn);
+        let test_report_map = insert_test_report_map_failed(&conn);
 
-        let delete_report =
-            RunReportData::delete(&conn, test_run_report.run_id, test_run_report.report_id)
-                .unwrap();
+        let delete_report = ReportMapData::delete(
+            &conn,
+            test_report_map.entity_type,
+            test_report_map.entity_id,
+            test_report_map.report_id,
+        )
+        .unwrap();
 
         assert_eq!(delete_report, 1);
 
-        let deleted_run_report = RunReportData::find_by_run_and_report(
+        let deleted_report_map = ReportMapData::find_by_entity_type_and_id_and_report(
             &conn,
-            test_run_report.run_id,
-            test_run_report.report_id,
+            test_report_map.entity_type,
+            test_report_map.entity_id,
+            test_report_map.report_id,
         );
 
         assert!(matches!(
-            deleted_run_report,
+            deleted_report_map,
             Err(diesel::result::Error::NotFound)
         ));
     }
