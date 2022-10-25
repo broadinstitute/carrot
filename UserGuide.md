@@ -5,7 +5,7 @@
 ## Cromwell Automated Runner for Regression and Optimization Testing (CARROT) User Guide
 
 
-### _v0.5.1_
+### _v0.6.0_
 
 
 ## **Table of Contents**
@@ -49,11 +49,12 @@
                 * [1c. A control block (optional)](#1c-a-control-block-optional)
                 * [1d. Using data from CARROT](#1d-using-data-from-carrot)
             * [2. Define a Report in CARROT](#2-define-a-report-in-carrot)
-            * [3. Map the Report to a Template and define the inputs](#3-map-the-report-to-a-template-and-define-the-inputs)
+            * [3. Map the Report to a Template](#3-map-the-report-to-a-template)
         * [Generating a Report](#generating-a-report)
 * [GitHub Integration](#github-integration)
     * [Adding CARROT Integration to Your GitHub Repository](#adding-carrot-integration-to-your-github-repository)
     * [Starting a Test Run from GitHub](#starting-a-test-run-from-github)
+    * [Starting a PR Comparison Run from Github](#starting-a-pr-comparison-run-from-github)
 * [Appendix](#appendix)
     * [Further Documentation / Links](#further-documentation-links)
 
@@ -69,7 +70,7 @@ This document is only applicable to the following version of CARROT:
 
 
 ```
-v0.5.1
+v0.6.0
 ```
 
 
@@ -418,11 +419,11 @@ If this occurs, you can either wait for the cache to refresh or update the templ
 
 ### <a name="defining-and-generating-reports"/> **Defining and Generating Reports**
 
-Jupyter Notebook reports can be generated from successful runs.  These reports serve as visualizations of the CARROT run results and should be created to display relevant data in a readable, straight-forward manner.  They can be generated either automatically (when a run finishes successfully) or manually.
+Jupyter Notebook reports can be generated from successful runs or [groups of runs from Github PR comparisons](#starting-a-pr-comparison-run-from-github).  These reports serve as visualizations of the CARROT run results and should be created to display relevant data in a readable, straight-forward manner.  They can be generated either automatically (when a run finishes successfully) or manually.
 
 Before a report can be generated, it must be defined by the user.
 
-![Report Structure](images/Report_Structure.png )
+![Report Structure](images/Report_Structure.png)
 
 
 
@@ -466,7 +467,7 @@ When the report is generated, CARROT will supply the data for the run(s) in a se
 If you would like to download these files to use them locally and experiment with your notebook definition before defining the Report in CARROT, you can use the `--zip_csv` option in any of the `find_runs` commands or the `run find_by_id` command in carrot_cli.  For example:
 
 ```
-carrot_cli tempalte find_runs "My cool template" --zip_csv run_data_csvs.zip
+carrot_cli template find_runs "My cool template" --zip_csv run_data_csvs.zip
 ```
 
 
@@ -491,13 +492,13 @@ The `--config <CONFIG_JSON_FILE> `flag allows you to specify (in a JSON file) a 
 The `--created_by email` flag is optional and defaults to the email address in your carrot_cli configuration file.
 
 
-##### <a name="3-map-the-report-to-a-template-and-define-the-inputs"/> **3. Map the Report to a Template and define the inputs**
+##### <a name="3-map-the-report-to-a-template"/> **3. Map the Report to a Template**
 
 A report must be mapped to a template in order for filled reports to be generated from runs of that template.  Mapping a report to a template can be done with the following command:
 
 
 ```
-carrot_cli template map_to_report [--created_by EMAIL] TEMPLATE REPORT
+carrot_cli template map_to_report [--created_by EMAIL] TEMPLATE REPORT [REPORT_TRIGGER]
 ```
 
 
@@ -507,6 +508,8 @@ The `--created_by email` flag is optional and defaults to the email address in y
 
 
 `REPORT` is the ID or name of the report you wish to map.  If you just completed step 2 and created a report, the ID of that report should have been included in the results from that command.  If not, you can find the report using `carrot_cli report find`.
+
+`REPORT_TRIGGER` is an optional argument that corresponds to the event that should trigger the generation of the report.  It defaults to `single`, which means a report will be generated upon successful completion of a single run of a test based on the template.  The other option is `pr`, which means a report will be generated upon successful completion of a [PR Comparison run](#starting-a-pr-comparison-run-from-github).
 
 
 
@@ -592,6 +595,26 @@ Once the GitHub action processes the comment and sends the message, it will be p
 
 ![Example GitHub Comment](images/Example_GitHub_Comment.png)
 
+
+### <a name="starting-a-pr-comparison-run-from-github"/> **Starting a PR Comparison Run from GitHub**
+
+There is another type of run that can be triggered in CARROT from GitHub and that is the PR Comparison Run.  A PR Comparison run triggers two runs of a test, one with a docker image generated from the head commit of the PR and one with a docker image generated from the base commit of the PR.  Triggering it is also exactly the same is triggering a single run:
+
+
+```
+#carrot_pr({test_name},  {test_docker_key}, {eval_docker_key})
+```
+
+
+where
+
+
+
+* `{test_name}` is the name of a test you’ve already defined in CARROT
+* `{test_docker_key}` is the name of an input to your *test* WDL that accepts a Docker image created from your repository
+* `{eval_docker_key}` is the name of an input to your *eval* WDL that accepts a Docker image created from your repository
+
+Once picked up by CARROT, the two runs will be triggered and a comment will be posted to GitHub.  Once the two runs have been completed, another comment with their results will be posted.  It is also possible to map a report to a template so it will trigger based on the completion of a PR Comparison run, so if one has been mapped that way, the report generation will be triggered upon successful completion of the two runs.  Successful generation of the report will prompt CARROT to post another comment to the PR with the results of the reports.
 
 ## <a name="appendix"/> **Appendix**
 
