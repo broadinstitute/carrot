@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "carrot"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "actix-codec",
  "actix-multipart",
