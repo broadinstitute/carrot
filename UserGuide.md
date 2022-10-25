@@ -610,9 +610,9 @@ where
 
 
 
-* `{test_name}` is the name of a test you’ve already defined in CARROT,
-* `{test_docker_key}` is the name of an input to your test WDL that accepts a Docker image created from your repository, and
-* `{eval_docker_key}` is the name of an input to your eval WDL that accepts a Docker image created from your repository
+* `{test_name}` is the name of a test you’ve already defined in CARROT
+* `{test_docker_key}` is the name of an input to your *test* WDL that accepts a Docker image created from your repository
+* `{eval_docker_key}` is the name of an input to your *eval* WDL that accepts a Docker image created from your repository
 
 Once picked up by CARROT, the two runs will be triggered and a comment will be posted to GitHub.  Once the two runs have been completed, another comment with their results will be posted.  It is also possible to map a report to a template so it will trigger based on the completion of a PR Comparison run, so if one has been mapped that way, the report generation will be triggered upon successful completion of the two runs.  Successful generation of the report will prompt CARROT to post another comment to the PR with the results of the reports.
 
