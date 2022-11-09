@@ -272,8 +272,6 @@ impl StatusManager {
     /// Main loop function for this manager. Queries DB for runs, software builds, and report builds
     /// that haven't finished, checks their statuses on cromwell, and updates accordingly
     pub async fn run(&self) -> Result<(), StatusManagerError> {
-        // Track consecutive failures to retrieve runs/builds so we can panic if there are too many
-        let mut consecutive_failures: u32 = 0;
         // Main loop
         loop {
             // Get the time we started this so we can sleep for a specified time between queries
@@ -287,8 +285,6 @@ impl StatusManager {
                 match unfinished_report_maps {
                     // If we got them successfully, check and update their statuses
                     Ok(report_maps) => {
-                        // Reset the consecutive failures counter
-                        consecutive_failures = 0;
                         debug!("Checking status of {} report_maps", report_maps.len());
                         for report_map in report_maps {
                             // Check for message from main thread to exit
@@ -309,10 +305,6 @@ impl StatusManager {
                             {
                                 Err(e) => {
                                     error!("Encountered error while trying to update status for report_map with entity_type {} entity_id {} and report_id {} : {}", report_map.entity_type, report_map.entity_id, report_map.report_id, e);
-                                    self.increment_consecutive_failures(
-                                        &mut consecutive_failures,
-                                        e,
-                                    )?;
                                 }
                                 Ok(_) => {
                                     debug!(
@@ -328,7 +320,6 @@ impl StatusManager {
                     // If we failed, panic if there are too many failures
                     Err(e) => {
                         error!("Failed to retrieve reports for status update due to: {}", e);
-                        self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                     }
                 }
             }
@@ -337,8 +328,6 @@ impl StatusManager {
             match unfinished_runs {
                 // If we got them successfully, check and update their statuses
                 Ok(runs) => {
-                    // Reset the consecutive failures counter
-                    consecutive_failures = 0;
                     debug!("Checking status of {} runs", runs.len());
                     for run in runs {
                         // Check for message from main thread to exit
@@ -357,14 +346,12 @@ impl StatusManager {
                                 run.run_id,
                                 &error_message,
                             );
-                            self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                         }
                     }
                 }
                 // If we failed, panic if there are too many failures
                 Err(e) => {
                     error!("Failed to retrieve runs for status update due to: {}", e);
-                    self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                 }
             }
             // Update build statuses if software building is enabled
@@ -375,8 +362,6 @@ impl StatusManager {
                 match unfinished_builds {
                     // If we got them successfully, check and update their statuses
                     Ok(builds) => {
-                        // Reset the consecutive failures counter
-                        consecutive_failures = 0;
                         debug!("Checking status of {} builds", builds.len());
                         for build in builds {
                             // Check for message from main thread to exit
@@ -394,10 +379,6 @@ impl StatusManager {
                             {
                                 Err(e) => {
                                     error!("Encountered error while trying to update status for build with id {}: {}", build.software_build_id, e);
-                                    self.increment_consecutive_failures(
-                                        &mut consecutive_failures,
-                                        e,
-                                    )?;
                                 }
                                 Ok(_) => {
                                     debug!(
@@ -411,7 +392,6 @@ impl StatusManager {
                     // If we failed, panic if there are too many failures
                     Err(e) => {
                         error!("Failed to retrieve builds for status update due to: {}", e);
-                        self.increment_consecutive_failures(&mut consecutive_failures, e)?;
                     }
                 }
             }
@@ -431,29 +411,6 @@ impl StatusManager {
                 return Ok(());
             }
         }
-    }
-    /// Increments `consecutive failures` by one, logs `e` and returns an error if
-    /// `consecutive_failures` exceeds the allowed consecutive failures specified in `self.config`
-    fn increment_consecutive_failures(
-        &self,
-        consecutive_failures: &mut u32,
-        e: impl Error,
-    ) -> Result<(), StatusManagerError> {
-        *consecutive_failures += 1;
-        error!(
-            "Encountered status update error {} time(s), this time due to: {}",
-            consecutive_failures, e
-        );
-        if *consecutive_failures > self.config.allowed_consecutive_status_check_failures() {
-            let error_message = format!(
-                "Consecutive failures ({}) exceed allowed consecutive failures ({}). Panicking",
-                consecutive_failures,
-                self.config.allowed_consecutive_status_check_failures()
-            );
-            error!("{}", error_message);
-            return Err(StatusManagerError { msg: error_message });
-        }
-        Ok(())
     }
 
     /// Checks current status of `run` and updates if there are any changes to warrant it

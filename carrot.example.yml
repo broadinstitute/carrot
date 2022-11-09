@@ -16,8 +16,6 @@ status_manager:
   # Optional time, in seconds, to wait between updating statuses of running tests
   # Defaults to 5 minutes if not specified
   status_check_wait_time_in_secs: 300
-  # Optional number of consecutive failures to allow when checking run/build statuses before terminating, defaults to 5
-  allowed_consecutive_status_check_failures: 5
 # Where to store WDLs either locally or in gcs (defaults to local with /carrot/wdl for the location)
 wdl_storage:
   # Use local if you want to store in a local directory

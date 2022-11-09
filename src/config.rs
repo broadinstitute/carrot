@@ -270,25 +270,17 @@ pub struct StatusManagerConfig {
     /// Time to wait between status check queries, or default to 5 minutes
     #[serde(default = "status_check_wait_time_in_secs_default")]
     status_check_wait_time_in_secs: u64,
-    /// Number of consecutive status check failures to allow before panicking, or default to 5
-    #[serde(default = "allowed_consecutive_status_check_failures_default")]
-    allowed_consecutive_status_check_failures: u32,
 }
 
 // Functions for providing the default values
 fn status_check_wait_time_in_secs_default() -> u64 {
     300
 }
-fn allowed_consecutive_status_check_failures_default() -> u32 {
-    5
-}
 
 impl Default for StatusManagerConfig {
     fn default() -> Self {
         StatusManagerConfig {
             status_check_wait_time_in_secs: status_check_wait_time_in_secs_default(),
-            allowed_consecutive_status_check_failures:
-                allowed_consecutive_status_check_failures_default(),
         }
     }
 }
@@ -296,18 +288,13 @@ impl Default for StatusManagerConfig {
 impl StatusManagerConfig {
     pub fn new(
         status_check_wait_time_in_secs: u64,
-        allowed_consecutive_status_check_failures: u32,
     ) -> Self {
         StatusManagerConfig {
             status_check_wait_time_in_secs,
-            allowed_consecutive_status_check_failures,
         }
     }
     pub fn status_check_wait_time_in_secs(&self) -> u64 {
         self.status_check_wait_time_in_secs
-    }
-    pub fn allowed_consecutive_status_check_failures(&self) -> u32 {
-        self.allowed_consecutive_status_check_failures
     }
 }
 
