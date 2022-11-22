@@ -1,4 +1,6 @@
-FROM jupyter/datascience-notebook:python-3.8.5
+# Do not update this to a newer version unless you can confirm that https://github.com/jupyter/nbconvert/issues/1863 is
+# fixed
+FROM jupyter/datascience-notebook:lab-3.3.4
 
 USER root
 RUN apt-get update \
@@ -38,16 +40,18 @@ RUN pip install --upgrade pip \
     && pip install plotly==4.9.0 \
     && pip install pygraphviz \
     && pip install parasail \
+    && pip install ipycytoscape \
+    && pip install jupyter_bokeh \
+    && pip install jupyterlab_widgets \
     && pip install ipycytoscape
 
 RUN jupyter serverextension enable --py nbresuse --sys-prefix
 RUN jupyter nbextension install --py nbresuse --sys-prefix
 RUN jupyter nbextension enable --py nbresuse --sys-prefix
 RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False
-RUN jupyter labextension install @bokeh/jupyter_bokeh --minimize=False
-RUN jupyter labextension install jupyterlab-plotly@4.9.0 --minimize=False
-RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager plotlywidget@4.9.0 --minimize=False
-RUN jupyter labextension install @jupyterlab/toc --minimize=False
-RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager jupyter-cytoscape --minimize=False
+RUN jupyter labextension install jupyterlab-plotly --minimize=False
+RUN jupyter labextension install plotlywidget@4.9.0 --minimize=False
+
+RUN R -e "install.packages('ggplot2',dependencies=TRUE, repos='http://cran.rstudio.com/')"
 
 CMD ["start-notebook.sh"]

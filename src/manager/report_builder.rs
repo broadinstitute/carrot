@@ -21,7 +21,7 @@ use crate::util::{run_csv, temp_storage};
 use core::fmt;
 use diesel::PgConnection;
 use log::{debug, error, warn};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::fs::File;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -689,50 +689,42 @@ impl ReportBuilder {
     /// Creates and returns a metadata Jupyter Notebook cell (as a json object) that will print
     /// metadata for `run` along with `test_name` to the jupyter notebook
     fn build_run_metadata_cell(run: &RunWithResultsAndErrorsData, test_name: &str) -> Value {
-        // Make a json string for the cell, filling in the info for the run
-        let json_string = format!(
-            "{{\n\
-                \"cell_type\": \"code\",\n\
-                \"execution_count\": null,\n\
-                \"metadata\": {{}},\n\
-                \"outputs\": [],\n\
-                \"source\": [\n\
-                    \"# Print metadata\\n\",\n\
-                    \"from IPython.display import Markdown\\n\",\n\
-                    \"# Start with name and id\\n\",\n\
-                    \"md_string = \\\"# Test: {}\\\\n### Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
-                    \"# Status\\n\",\n\
-                    \"md_string += \\\"#### Status: {}\\\\n\\\"\\n\",\n\
-                    \"# Start and end time\\n\",\n\
-                    \"md_string += \\\"#### Start time: {}\\\\n#### End time: {}\\\\n\\\"\\n\",\n\
-                    \"# Cromwell ids\\n\",\n\
-                    \"md_string += \\\"#### Test Cromwell ID: {}\\\\n\\\"\\n\",\n\
-                    \"md_string += f\\\"#### Eval Cromwell ID: {}\\\\n\\\"\\n\",\n\
-                    \"# Display the metadata string\\n\",\n\
-                    \"Markdown(md_string)\"\n\
-                ]\n\
-            }}",
-            test_name,
-            run.run_id,
-            run.name,
-            run.status,
-            run.created_at,
-            match &run.finished_at {
-                Some(f) => f.to_string(),
-                None => "None".to_string(),
-            },
-            match &run.test_cromwell_job_id {
-                Some(t) => t,
-                None => "None",
-            },
-            match &run.eval_cromwell_job_id {
-                Some(e) => e,
-                None => "None",
-            },
-        );
-
-        serde_json::from_str(&json_string)
-            .expect("Failed to create run metadata cell json.  This should not happen.")
+        // We'll put the cell contents in a vec so we can insert them into the cell
+        let cell_contents: Vec<String> = vec![
+            format!("# Test: {}\n", test_name),
+            format!("### Run ID: {} | Run Name: {}\n", run.run_id, run.name),
+            format!("#### Status: {}\n", run.status),
+            format!("#### Start time: {}\n", run.created_at),
+            format!(
+                "#### End time: {}\n",
+                match &run.finished_at {
+                    Some(f) => f.to_string(),
+                    None => "None".to_string(),
+                }
+            ),
+            format!(
+                "#### Test Cromwell ID: {}\n",
+                match &run.test_cromwell_job_id {
+                    Some(t) => t,
+                    None => "None",
+                }
+            ),
+            format!(
+                "#### Eval Cromwell ID: {}",
+                match &run.eval_cromwell_job_id {
+                    Some(e) => e,
+                    None => "None",
+                },
+            )
+        ];
+        // Return a new cell with the contents
+        json!(
+            {
+               "cell_type": "markdown",
+               "metadata": {},
+               "source": cell_contents
+            }
+        )
     }
 
     /// Creates and returns a metadata Jupyter Notebook cell (as a json object) that will print
@@ -742,6 +734,7 @@ impl ReportBuilder {
         head_run: &RunWithResultsAndErrorsData,
         test_name: &str,
     ) -> Value {
+        /*
         // Make a json string for the cell, filling in the info for the run
         let json_string = format!(
             "{{\n\
@@ -780,7 +773,38 @@ impl ReportBuilder {
         );
 
         serde_json::from_str(&json_string)
-            .expect("Failed to create run metadata cell json.  This should not happen.")
+            .expect("Failed to create run metadata cell json.  This should not happen.")*/
+
+        // We'll put the cell contents in a vec so we can insert them into the cell
+        let cell_contents: Vec<String> = vec![
+            format!("# Test: {}\n", test_name),
+            format!("### Base Run ID: {} | Run Name: {}\n", base_run.run_id, base_run.name),
+            format!("### Head Run ID: {} | Run Name: {}\n", head_run.run_id, head_run.name),
+            format!(
+                "#### Base start time: {} | End time: {}\n",
+                base_run.created_at,
+                match &base_run.finished_at {
+                    Some(f) => f.to_string(),
+                    None => "None".to_string(),
+                }
+            ),
+            format!(
+                "#### Head start time: {} | End time: {}\n",
+                head_run.created_at,
+                match &head_run.finished_at {
+                    Some(f) => f.to_string(),
+                    None => "None".to_string(),
+                }
+            ),
+        ];
+        // Return a new cell with the contents
+        json!(
+            {
+               "cell_type": "markdown",
+               "metadata": {},
+               "source": cell_contents
+            }
+        )
     }
 
     /// Extracts and returns the "cells" array from `notebook`
@@ -1900,47 +1924,30 @@ mod tests {
         )
         .unwrap();
 
-        let metadata_cell: Value = serde_json::from_str(&format!(
-            "{{\n\
-                \"cell_type\": \"code\",\n\
-                \"execution_count\": null,\n\
-                \"metadata\": {{}},\n\
-                \"outputs\": [],\n\
-                \"source\": [\n\
-                    \"# Print metadata\\n\",\n\
-                    \"from IPython.display import Markdown\\n\",\n\
-                    \"# Start with name and id\\n\",\n\
-                    \"md_string = \\\"# Test: {}\\\\n### Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
-                    \"# Status\\n\",\n\
-                    \"md_string += \\\"#### Status: {}\\\\n\\\"\\n\",\n\
-                    \"# Start and end time\\n\",\n\
-                    \"md_string += \\\"#### Start time: {}\\\\n#### End time: {}\\\\n\\\"\\n\",\n\
-                    \"# Cromwell ids\\n\",\n\
-                    \"md_string += \\\"#### Test Cromwell ID: {}\\\\n\\\"\\n\",\n\
-                    \"md_string += f\\\"#### Eval Cromwell ID: {}\\\\n\\\"\\n\",\n\
-                    \"# Display the metadata string\\n\",\n\
-                    \"Markdown(md_string)\"\n\
-                ]\n\
-            }}",
-            test_test.name,
-            test_run.run_id,
-            test_run.name,
-            test_run.status,
-            test_run.created_at,
-            match &test_run.finished_at {
-                Some(f) => f.to_string(),
-                None => "None".to_string(),
-            },
-            match &test_run.test_cromwell_job_id {
-                Some(t) => t,
-                None => "None",
-            },
-            match &test_run.eval_cromwell_job_id {
-                Some(e) => e,
-                None => "None",
-            },
-        ))
-        .unwrap();
+        let metadata_cell: Value = {
+            let cell_contents: Vec<String> = vec![
+                String::from("# Test: Kevin's Test\n"),
+                format!("### Run ID: {} | Run Name: Kevin's test run\n", test_run.run_id),
+                String::from("#### Status: succeeded\n"),
+                format!("#### Start time: {}\n", test_run.created_at),
+                format!(
+                    "#### End time: {}\n",
+                    match &test_run.finished_at {
+                        Some(f) => f.to_string(),
+                        None => "None".to_string(),
+                    }
+                ),
+                String::from("#### Test Cromwell ID: 123456789\n"),
+                String::from("#### Eval Cromwell ID: 12345678902")
+            ];
+            json!(
+                {
+                   "cell_type": "markdown",
+                   "metadata": {},
+                   "source": cell_contents
+                }
+            )
+        };
 
         let expected_report = json!({
             "metadata": {
@@ -2028,42 +2035,36 @@ mod tests {
         )
         .unwrap();
 
-        let metadata_cell: Value = serde_json::from_str(&format!(
-            "{{\n\
-                \"cell_type\": \"code\",\n\
-                \"execution_count\": null,\n\
-                \"metadata\": {{}},\n\
-                \"outputs\": [],\n\
-                \"source\": [\n\
-                    \"# Print metadata\\n\",\n\
-                    \"from IPython.display import Markdown\\n\",\n\
-                    \"# Start with name and id\\n\",\n\
-                    \"md_string = \\\"# Test: {}\\\\n### Base Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
-                    \"md_string += \\\"### Head Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
-                    \"# Start and end time\\n\",\n\
-                    \"md_string += \\\"#### Base start time: {} | End time: {}\\\\n\\\"\\n\",\n\
-                    \"md_string += \\\"#### Head start time: {} | End time: {}\\\\n\\\"\\n\",\n\
-                    \"# Display the metadata string\\n\",\n\
-                    \"Markdown(md_string)\"\n\
-                ]\n\
-            }}",
-            test_test.name,
-            test_runs_with_results.get(0).unwrap().run_id,
-            test_runs_with_results.get(0).unwrap().name,
-            test_runs_with_results.get(1).unwrap().run_id,
-            test_runs_with_results.get(1).unwrap().name,
-            test_runs_with_results.get(0).unwrap().created_at,
-            match test_runs_with_results.get(0).unwrap().finished_at {
-                Some(f) => f.to_string(),
-                None => "None".to_string(),
-            },
-            test_runs_with_results.get(1).unwrap().created_at,
-            match test_runs_with_results.get(1).unwrap().finished_at {
-                Some(f) => f.to_string(),
-                None => "None".to_string(),
-            },
-        ))
-            .unwrap();
+        let metadata_cell: Value = {
+            let cell_contents: Vec<String> = vec![
+                String::from("# Test: Kevin's Test\n"),
+                format!("### Base Run ID: {} | Run Name: Kevin's test run\n", test_runs_with_results.get(0).unwrap().run_id),
+                format!("### Head Run ID: {} | Run Name: Kevin's test run2\n", test_runs_with_results.get(1).unwrap().run_id),
+                format!(
+                    "#### Base start time: {} | End time: {}\n",
+                    test_runs_with_results.get(0).unwrap().created_at,
+                    match test_runs_with_results.get(0).unwrap().finished_at {
+                        Some(f) => f.to_string(),
+                        None => "None".to_string(),
+                    }
+                ),
+                format!(
+                    "#### Head start time: {} | End time: {}\n",
+                    test_runs_with_results.get(1).unwrap().created_at,
+                    match test_runs_with_results.get(1).unwrap().finished_at {
+                        Some(f) => f.to_string(),
+                        None => "None".to_string(),
+                    }
+                ),
+            ];
+            json!(
+                {
+                   "cell_type": "markdown",
+                   "metadata": {},
+                   "source": cell_contents
+                }
+            )
+        };
 
         let expected_report = json!({
             "metadata": {
