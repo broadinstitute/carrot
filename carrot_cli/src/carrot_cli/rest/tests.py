@@ -72,7 +72,7 @@ def create(
     ]
     # Start with None of query params and add copy is specified
     query_params = None
-    if copy != "":
+    if copy is not None:
         query_params = [("copy", copy)]
     return request_handler.create("tests", params, query_params=query_params)
 

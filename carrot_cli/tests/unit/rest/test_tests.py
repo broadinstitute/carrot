@@ -169,7 +169,7 @@ def test_find(find_data):
                 ("eval_option_defaults", {"option": "value"}),
                 ("created_by", "hordeprime@example.com"),
             ],
-            "copy": "",
+            "copy": None,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:08.371563",
@@ -227,7 +227,7 @@ def test_find(find_data):
                 ("eval_option_defaults", {"option": "value"}),
                 ("created_by", "hordeprime@example.com"),
             ],
-            "copy": "",
+            "copy": None,
             "return": json.dumps(
                 {
                     "title": "Server error",
@@ -245,7 +245,7 @@ def create_data(request):
     mockito.when(request_handler).create(...).thenReturn(None)
     # Mock up request response
     query_params = None
-    if request.param["copy"] != "":
+    if request.param["copy"] is not None:
         query_params = [("copy", request.param["copy"])]
     mockito.when(request_handler).create("tests", request.param["params"], query_params=query_params).thenReturn(
         request.param["return"]

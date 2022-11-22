@@ -334,7 +334,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
-                ""
+                None
             ],
             "return": json.dumps(
                 {
@@ -347,6 +347,45 @@ def test_find(find_data):
                     "eval_option_defaults": {"option": "value"},
                     "name": "Sword of Protection test",
                     "template_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "args": [
+                "test",
+                "create",
+                "--name",
+                "Sword of Protection test2",
+                "--created_by",
+                "adora@example.com",
+                "--copy",
+                "550e8400-e29b-41d4-a716-446655440000"
+            ],
+            "params": [
+                "Sword of Protection test2",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "adora@example.com",
+                "550e8400-e29b-41d4-a716-446655440000"
+            ],
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:06.371563",
+                    "created_by": "adora@example.com",
+                    "description": "This test will save Etheria",
+                    "test_input_defaults": {"in_greeted": "Cool Person"},
+                    "test_option_defaults": {"option": "other_value"},
+                    "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                    "eval_option_defaults": {"option": "value"},
+                    "name": "Sword of Protection test2",
+                    "template_id": "662e8400-e29b-41d4-a716-446655440000",
                     "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,
@@ -383,7 +422,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
-                ""
+                None
             ],
             "from_name": {
                 "name": "Sword of Protection template",

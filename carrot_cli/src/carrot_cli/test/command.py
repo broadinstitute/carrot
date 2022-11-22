@@ -177,7 +177,7 @@ def find(
 )
 @click.option(
     "--copy",
-    default="",
+    default=None,
     help="Name or ID of a test you'd like to copy.  If this is specified, a new test will be created with all the "
          "attributes of the copied test, except any attributes that you have specified.  If a name is not specified, "
          "the new test will be named in the format '{old_test_name}_copy'."
@@ -197,10 +197,10 @@ def create(
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
     # If copy is specified, get if it's a name
-    if copy != "":
+    if copy is not None:
         copy = dependency_util.get_id_from_id_or_name_and_handle_error(copy, tests, "test_id", "copy")
     # If copy is not specified, make sure name and template have been specified
-    if copy == "" and (name == "" or template == ""):
+    if copy is None and (name == "" or template == ""):
         LOGGER.error(
             "If a value is not specified for '--copy', then '--name' and '--template' are required."
         )
