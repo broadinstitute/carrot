@@ -55,7 +55,8 @@ def create(
     test_option_defaults,
     eval_input_defaults,
     eval_option_defaults,
-    created_by
+    created_by,
+    copy
 ):
     """Submits a request to CARROT's tests create mapping"""
     # Create parameter list
@@ -69,7 +70,11 @@ def create(
         ("eval_option_defaults", eval_option_defaults),
         ("created_by", created_by),
     ]
-    return request_handler.create("tests", params)
+    # Start with None of query params and add copy is specified
+    query_params = None
+    if copy is not None:
+        query_params = [("copy", copy)]
+    return request_handler.create("tests", params, query_params=query_params)
 
 
 def update(

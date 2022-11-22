@@ -43,7 +43,7 @@ def find(entity, params, expected_format=ResponseFormat.JSON):
     return send_request("GET", address, params=params, expected_format=expected_format)
 
 
-def create(entity, params, files=None):
+def create(entity, params, query_params=None, files=None):
     """
     Submits a request to create mapping for the specified entity with the specified params.
     If a value is specified for files, the request body will be multipart/form-data. If not, the
@@ -63,7 +63,7 @@ def create(entity, params, files=None):
         return send_request("POST", address, body=body, files=files)
     # Otherwise, send json
     else:
-        return send_request("POST", address, json=body)
+        return send_request("POST", address, json=body, params=query_params)
 
 
 def update(entity, id, params, files=None):

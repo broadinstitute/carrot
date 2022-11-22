@@ -334,6 +334,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
+                None
             ],
             "return": json.dumps(
                 {
@@ -346,6 +347,45 @@ def test_find(find_data):
                     "eval_option_defaults": {"option": "value"},
                     "name": "Sword of Protection test",
                     "template_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "args": [
+                "test",
+                "create",
+                "--name",
+                "Sword of Protection test2",
+                "--created_by",
+                "adora@example.com",
+                "--copy",
+                "550e8400-e29b-41d4-a716-446655440000"
+            ],
+            "params": [
+                "Sword of Protection test2",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "adora@example.com",
+                "550e8400-e29b-41d4-a716-446655440000"
+            ],
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:06.371563",
+                    "created_by": "adora@example.com",
+                    "description": "This test will save Etheria",
+                    "test_input_defaults": {"in_greeted": "Cool Person"},
+                    "test_option_defaults": {"option": "other_value"},
+                    "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                    "eval_option_defaults": {"option": "value"},
+                    "name": "Sword of Protection test2",
+                    "template_id": "662e8400-e29b-41d4-a716-446655440000",
                     "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,
@@ -382,6 +422,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
+                None
             ],
             "from_name": {
                 "name": "Sword of Protection template",
@@ -443,12 +484,9 @@ def test_find(find_data):
             "there must be a value set for email.",
         },
         {
-            "args": ["test", "create"],
+            "args": ["test", "create", "--created_by", "kevin@example.com"],
             "params": [],
-            "return": "Usage: carrot_cli test create [OPTIONS]\n"
-            "Try 'carrot_cli test create -h' for help.\n"
-            "\n"
-            "Error: Missing option '--name'.",
+            "logging": "If a value is not specified for '--copy', then '--name' and '--template' are required.",
         },
     ]
 )
@@ -473,6 +511,7 @@ def create_data(request):
             request.param["params"][5],
             request.param["params"][6],
             request.param["params"][7],
+            request.param["params"][8],
         ).thenReturn(request.param["return"])
     return request.param
 
