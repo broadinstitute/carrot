@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-current_version="0.6.1"
+current_version="0.6.2"
 new_version=$current_version
 
 __set_new_version()
