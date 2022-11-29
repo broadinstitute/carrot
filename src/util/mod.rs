@@ -6,4 +6,6 @@ pub mod json_parsing;
 pub mod run_csv;
 pub mod sort_string;
 pub mod temp_storage;
+pub mod uri_conversion;
 pub mod wdl_storage;
+pub mod wdl_type;

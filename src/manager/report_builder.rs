@@ -17,6 +17,7 @@ use crate::models::test::TestData;
 use crate::requests::cromwell_requests::{CromwellClient, CromwellRequestError};
 use crate::requests::gcloud_storage;
 use crate::requests::gcloud_storage::GCloudClient;
+use crate::util::uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors;
 use crate::util::{run_csv, temp_storage};
 use core::fmt;
 use diesel::PgConnection;
@@ -33,6 +34,7 @@ pub struct ReportBuilder {
     cromwell_client: CromwellClient,
     gcloud_client: GCloudClient,
     config: ReportingConfig,
+    domain: String,
 }
 
 /// Error type for possible errors returned by generating a report_map
@@ -138,11 +140,13 @@ impl ReportBuilder {
         cromwell_client: CromwellClient,
         gcloud_client: GCloudClient,
         config: &ReportingConfig,
+        domain: String,
     ) -> ReportBuilder {
         ReportBuilder {
             cromwell_client,
             gcloud_client,
             config: config.clone(),
+            domain,
         }
     }
 
@@ -174,7 +178,10 @@ impl ReportBuilder {
         )?;
         // If we have reports to build, get the run info so we can include it in reports
         let run_info: RunWithResultsAndErrorsData = if !template_reports.is_empty() {
-            RunWithResultsAndErrorsData::find_by_id(conn, run.run_id)?
+            let mut run = RunWithResultsAndErrorsData::find_by_id(conn, run.run_id)?;
+            // Replace wdl locations in run with uris we want to expose to the user
+            fill_uris_for_wdl_locations_run_with_results_and_errors(&self.domain, &mut run);
+            run
         }
         // If we didn't get any, just return our empty vec
         else {
@@ -272,11 +279,16 @@ impl ReportBuilder {
                 }
                 if pr_comparison_finished {
                     // Get the runs ordered base and then head
-                    let ordered_runs: [RunWithResultsAndErrorsData; 2] =
+                    let mut ordered_runs: [RunWithResultsAndErrorsData; 2] =
                         ReportBuilder::get_github_pr_runs_base_then_head(
                             &run_group_is_from_github,
                             &runs,
                         )?;
+                    // Replace wdl locations in run with uris we want to expose to the user
+                    for run in &mut ordered_runs {
+                        fill_uris_for_wdl_locations_run_with_results_and_errors(&self.domain, run);
+                    }
+
                     // Write data to csvs and upload so the reports can use them
                     let run_csv_zip_location: String = self
                         .create_and_upload_run_csvs(&ordered_runs, Some(&run_group_is_from_github))
@@ -715,7 +727,7 @@ impl ReportBuilder {
                     Some(e) => e,
                     None => "None",
                 },
-            )
+            ),
         ];
         // Return a new cell with the contents
         json!(
@@ -734,52 +746,17 @@ impl ReportBuilder {
         head_run: &RunWithResultsAndErrorsData,
         test_name: &str,
     ) -> Value {
-        /*
-        // Make a json string for the cell, filling in the info for the run
-        let json_string = format!(
-            "{{\n\
-                \"cell_type\": \"code\",\n\
-                \"execution_count\": null,\n\
-                \"metadata\": {{}},\n\
-                \"outputs\": [],\n\
-                \"source\": [\n\
-                    \"# Print metadata\\n\",\n\
-                    \"from IPython.display import Markdown\\n\",\n\
-                    \"# Start with name and id\\n\",\n\
-                    \"md_string = \\\"# Test: {}\\\\n### Base Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
-                    \"md_string += \\\"### Head Run ID: {} | Run Name: {}\\\\n\\\"\\n\",\n\
-                    \"# Start and end time\\n\",\n\
-                    \"md_string += \\\"#### Base start time: {} | End time: {}\\\\n\\\"\\n\",\n\
-                    \"md_string += \\\"#### Head start time: {} | End time: {}\\\\n\\\"\\n\",\n\
-                    \"# Display the metadata string\\n\",\n\
-                    \"Markdown(md_string)\"\n\
-                ]\n\
-            }}",
-            test_name,
-            base_run.run_id,
-            base_run.name,
-            head_run.run_id,
-            head_run.name,
-            base_run.created_at,
-            match &base_run.finished_at {
-                Some(f) => f.to_string(),
-                None => "None".to_string(),
-            },
-            head_run.created_at,
-            match &head_run.finished_at {
-                Some(f) => f.to_string(),
-                None => "None".to_string(),
-            },
-        );
-
-        serde_json::from_str(&json_string)
-            .expect("Failed to create run metadata cell json.  This should not happen.")*/
-
         // We'll put the cell contents in a vec so we can insert them into the cell
         let cell_contents: Vec<String> = vec![
             format!("# Test: {}\n", test_name),
-            format!("### Base Run ID: {} | Run Name: {}\n", base_run.run_id, base_run.name),
-            format!("### Head Run ID: {} | Run Name: {}\n", head_run.run_id, head_run.name),
+            format!(
+                "### Base Run ID: {} | Run Name: {}\n",
+                base_run.run_id, base_run.name
+            ),
+            format!(
+                "### Head Run ID: {} | Run Name: {}\n",
+                head_run.run_id, head_run.name
+            ),
             format!(
                 "#### Base start time: {} | End time: {}\n",
                 base_run.created_at,
@@ -1078,6 +1055,10 @@ mod tests {
             run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({
                 "greeting_workflow.in_greeting": "Yo",
                 "greeting_workflow.in_greeted": "Jean-Paul Gasse"
@@ -1223,6 +1204,10 @@ mod tests {
             run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({
                 "greeting_workflow.in_greeting": "Yo",
                 "greeting_workflow.in_greeted": "Jean-Paul Gasse",
@@ -1247,6 +1232,10 @@ mod tests {
             run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run2"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({
                 "greeting_workflow.in_greeting": "Yo",
                 "greeting_workflow.in_greeted": "me",
@@ -1530,7 +1519,12 @@ mod tests {
             },
         ));
         // Create and return the report builder
-        ReportBuilder::new(cromwell_client, gcloud_client, config.reporting().unwrap())
+        ReportBuilder::new(
+            cromwell_client,
+            gcloud_client,
+            config.reporting().unwrap(),
+            config.api().domain().to_owned(),
+        )
     }
 
     #[actix_rt::test]
@@ -1927,7 +1921,10 @@ mod tests {
         let metadata_cell: Value = {
             let cell_contents: Vec<String> = vec![
                 String::from("# Test: Kevin's Test\n"),
-                format!("### Run ID: {} | Run Name: Kevin's test run\n", test_run.run_id),
+                format!(
+                    "### Run ID: {} | Run Name: Kevin's test run\n",
+                    test_run.run_id
+                ),
                 String::from("#### Status: succeeded\n"),
                 format!("#### Start time: {}\n", test_run.created_at),
                 format!(
@@ -1938,7 +1935,7 @@ mod tests {
                     }
                 ),
                 String::from("#### Test Cromwell ID: 123456789\n"),
-                String::from("#### Eval Cromwell ID: 12345678902")
+                String::from("#### Eval Cromwell ID: 12345678902"),
             ];
             json!(
                 {
@@ -2038,8 +2035,14 @@ mod tests {
         let metadata_cell: Value = {
             let cell_contents: Vec<String> = vec![
                 String::from("# Test: Kevin's Test\n"),
-                format!("### Base Run ID: {} | Run Name: Kevin's test run\n", test_runs_with_results.get(0).unwrap().run_id),
-                format!("### Head Run ID: {} | Run Name: Kevin's test run2\n", test_runs_with_results.get(1).unwrap().run_id),
+                format!(
+                    "### Base Run ID: {} | Run Name: Kevin's test run\n",
+                    test_runs_with_results.get(0).unwrap().run_id
+                ),
+                format!(
+                    "### Head Run ID: {} | Run Name: Kevin's test run2\n",
+                    test_runs_with_results.get(1).unwrap().run_id
+                ),
                 format!(
                     "#### Base start time: {} | End time: {}\n",
                     test_runs_with_results.get(0).unwrap().created_at,
@@ -2197,6 +2200,14 @@ mod tests {
             run_group_id: None,
             name: "Test run".to_string(),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("ab87d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({
                 "test_workflow.number": 4,
                 "test_workflow.file": "gs://bucket/file.txt",

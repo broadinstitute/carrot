@@ -194,8 +194,11 @@ pub async fn init_and_run(
     });
     let github_commenter: Option<GithubCommenter> = github_client.map(GithubCommenter::new);
     // Create a notification handler
-    let notification_handler: NotificationHandler =
-        NotificationHandler::new(emailer, github_commenter);
+    let notification_handler: NotificationHandler = NotificationHandler::new(
+        emailer,
+        github_commenter,
+        carrot_config.api().domain().to_owned(),
+    );
     // Create a test resource client and cromwell client for the test runner
     let test_resource_client: TestResourceClient =
         TestResourceClient::new(http_client.clone(), gcloud_client.clone());
@@ -240,6 +243,7 @@ pub async fn init_and_run(
                 "Failed to unwrap gcloud_client to create report builder.  This should not happen",
             ),
             reporting_config,
+            carrot_config.api().domain().to_owned(),
         )
     });
     // Create a status manager and start it managing in its own thread
@@ -687,15 +691,8 @@ impl StatusManager {
                     finished_at: None,
                 },
             };
-            // Update
-            if let Err(e) = RunData::update(conn, run.run_id, run_update) {
-                return Err(UpdateStatusError::DB(format!(
-                    "Updating run in DB failed with error {}",
-                    e
-                )));
-            }
 
-            // If it succeeded, fill results in DB also, and start generating reports
+            // If it succeeded, fill results in DB
             if status == RunStatusEnum::Succeeded {
                 let outputs = match metadata.get("outputs") {
                     Some(outputs) => outputs.as_object().unwrap().clone(),
@@ -724,6 +721,16 @@ impl StatusManager {
                         .await?;
                     return Err(e);
                 }
+            }
+            // Update
+            if let Err(e) = RunData::update(conn, run.run_id, run_update) {
+                return Err(UpdateStatusError::DB(format!(
+                    "Updating run in DB failed with error {}",
+                    e
+                )));
+            }
+            // If it succeeded, start generating reports
+            if status == RunStatusEnum::Succeeded {
                 // Start report generation if reporting is enabled
                 if let Some(report_builder) = &self.report_builder {
                     debug!("Starting report generation for run with id: {}", run.run_id);
@@ -1501,6 +1508,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
+            test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
             test_input: json!({"greeting_workflow.in_greeted": "Cool Person", "greeting_workflow.in_greeting": "Yo"}),
             test_options: None,
             eval_input: json!({"greeting_file_workflow.in_output_filename": "test_greeting.txt", "greeting_file_workflow.in_output_file": "test_output:greeting_workflow.TestKey"}),
@@ -1523,6 +1534,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::EvalSubmitted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({"greeting_workflow.in_greeted": "Cool Person", "greeting_workflow.in_greeting": "Yo"}),
             test_options: None,
             eval_input: json!({"greeting_file_workflow.in_output_filename": "test_greeting.txt", "greeting_file_workflow.in_output_file": "test_output:greeting_workflow.TestKey"}),
@@ -1546,6 +1561,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status,
+            test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             test_options: None,
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
@@ -1684,6 +1703,10 @@ mod tests {
             run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -1824,8 +1847,11 @@ mod tests {
             None => None,
         };
         // Create a notification handler
-        let notification_handler: NotificationHandler =
-            NotificationHandler::new(emailer, github_commenter);
+        let notification_handler: NotificationHandler = NotificationHandler::new(
+            emailer,
+            github_commenter,
+            carrot_config.api().domain().to_owned(),
+        );
         // Create a test resource client and cromwell client for the test runner
         let test_resource_client: TestResourceClient =
             TestResourceClient::new(http_client.clone(), gcloud_client.clone());
@@ -1848,7 +1874,7 @@ mod tests {
         let report_builder: Option<ReportBuilder> = match carrot_config.reporting() {
             Some(reporting_config) => {
                 // We can unwrap gcloud_client because reporting won't work without it
-                Some(ReportBuilder::new(cromwell_client.clone(), gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen").clone(), reporting_config))
+                Some(ReportBuilder::new(cromwell_client.clone(), gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen").clone(), reporting_config, carrot_config.api().domain().to_owned()))
             }
             None => None,
         };

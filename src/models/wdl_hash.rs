@@ -83,6 +83,26 @@ impl WdlHashData {
             .values(&new_wdl_hash)
             .get_result(conn)
     }
+
+    /// Inserts a new wdl_hash into the DB for params
+    ///
+    /// This will only be included in test builds because we only really need it for inserting test
+    /// data
+    #[cfg(test)]
+    pub fn create_with_hash(
+        conn: &PgConnection,
+        new_location: String,
+        new_hash: Vec<u8>,
+    ) -> Result<Self, diesel::result::Error> {
+        let new_wdl_hash = NewWdlHash {
+            location: new_location,
+            hash: new_hash,
+        };
+
+        diesel::insert_into(wdl_hash)
+            .values(&new_wdl_hash)
+            .get_result(conn)
+    }
 }
 
 #[cfg(test)]

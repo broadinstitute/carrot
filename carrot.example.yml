@@ -1,8 +1,12 @@
 # API Config
 # The host and port which carrot will listen on for requests to its REST API
 api:
+  # The local IP address and port to register carrot to
   host: 127.0.0.1
   port: 8080
+  # The base domain or IP address + port that carrot will assume is the domain for its server when
+  # constructing URIs that will be exposed to users
+  domain: example.com
 # DB Config
 # The database in which carrot will store test configurations and results
 database:

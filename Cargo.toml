@@ -73,6 +73,8 @@ clap = "2.33"
 zip = "0.5"
 # For generating csv files from model data
 csv = "^1.1"
+# For displaying hashed data as hex
+hex = "0.4.3"
 
 [dev-dependencies]
 # For generating random values in test data

@@ -1,6 +1,7 @@
 api:
   host: 127.0.0.1
   port: 8080
+  domain: example.com
 database:
   url: postgres://test_framework_user:test@localhost:5432/test_framework_db_test
   threads: 4

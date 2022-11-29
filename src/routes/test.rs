@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// Query parameters for the create mapping
 #[derive(Deserialize)]
 struct CreateQueryParams {
-    copy: Option<Uuid>
+    copy: Option<Uuid>,
 }
 
 /// Body for requests to the create mapping. Is exactly `models::test::NewTest` except everything
@@ -149,7 +149,6 @@ async fn create(
     web::Query(query): web::Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
-
     // If this it not a copy and either the name or template id is missing, return an error response
     if query.copy.is_none() && (create_body.name.is_none() || create_body.template_id.is_none()) {
         return HttpResponse::BadRequest().json(ErrorBody{
@@ -285,7 +284,7 @@ async fn update(
                     HttpResponse::Forbidden().json(ErrorBody {
                         title: "Update params not allowed".to_string(),
                         status: 403,
-                        detail: "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded".to_string(),
+                        detail: "Updating test_input_defaults, eval_input_defaults, test_option_defaults, or eval_option_defaults is not allowed if there is a run tied to this test that is running".to_string(),
                     })
                 },
                 _ => default_500(&e)
@@ -458,6 +457,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -479,6 +482,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -496,6 +503,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: Some(serde_json::from_str("{\"test_option\":\"1\"}").unwrap()),
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -513,6 +524,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -530,6 +545,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -547,6 +566,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -564,6 +587,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -920,7 +947,10 @@ mod tests {
 
         assert_eq!(error_body.title, "Invalid request body");
         assert_eq!(error_body.status, 400);
-        assert_eq!(error_body.detail, "Fields 'name' and 'template_id' are required if not copying from an existing test.");
+        assert_eq!(
+            error_body.detail,
+            "Fields 'name' and 'template_id' are required if not copying from an existing test."
+        );
     }
 
     #[actix_rt::test]
@@ -1053,7 +1083,7 @@ mod tests {
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Updating test_input_defaults or eval_input_defaults is not allowed if there is a run tied to this test that is running or has succeeded"
+            "Updating test_input_defaults, eval_input_defaults, test_option_defaults, or eval_option_defaults is not allowed if there is a run tied to this test that is running"
         );
     }
 

@@ -3,7 +3,7 @@
 //! A test is for running a specific pipeline, with a specific test WDL and eval WDL, with
 //! specific inputs set beforehand for those WDLs. Represented in the database by the TEST table.
 
-use crate::custom_sql_types::RUN_FAILURE_STATUSES;
+use crate::custom_sql_types::RUN_TERMINAL_STATUSES;
 use crate::models::template::TemplateData;
 use crate::schema::run;
 use crate::schema::template;
@@ -335,7 +335,7 @@ impl TestData {
         id: Uuid,
         params: TestChangeset,
     ) -> Result<Self, UpdateError> {
-        // If trying to update the inputs or options, verify that no non-failed runs exist for
+        // If trying to update the inputs or options, verify that no non-terminal runs exist for
         // this test
         if matches!(params.test_input_defaults, Some(_))
             || matches!(params.eval_input_defaults, Some(_))
@@ -344,14 +344,14 @@ impl TestData {
         {
             // Query the run table
             let non_failed_runs_count = run::dsl::run
-                .filter(run::dsl::status.ne(all(RUN_FAILURE_STATUSES.to_vec())))
+                .filter(run::dsl::status.ne(all(RUN_TERMINAL_STATUSES.to_vec())))
                 .filter(run::dsl::test_id.eq(id))
                 .select(run::dsl::run_id)
                 .first::<Uuid>(conn);
             match non_failed_runs_count {
                 // If there is a result returned by the run query, return an error
                 Ok(_) => {
-                    let err = UpdateError::Prohibited(String::from("Attempted to update test_input_defaults and/or eval_input_defaults when a non-failed run already exists for this test.  Doing so is prohibited"));
+                    let err = UpdateError::Prohibited(String::from("Attempted to update test_input_defaults, eval_input_defaults, test_option_defaults, and/or eval_option_defaults when a processing run exists for this test.  Doing so is prohibited"));
                     error!("Failed to update due to error: {}", err);
                     return Err(err);
                 }
@@ -527,6 +527,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -544,6 +548,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -561,6 +569,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -578,6 +590,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -595,6 +611,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -612,6 +632,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -627,12 +651,16 @@ mod tests {
         runs
     }
 
-    fn insert_non_failed_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_non_terminal_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
             test_id: id,
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -1202,7 +1230,7 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_test = insert_test_test(&conn);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TestChangeset {
             name: Some(String::from("TestTestTestTest")),
@@ -1255,7 +1283,7 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_test = insert_test_test(&conn);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TestChangeset {
             name: None,
@@ -1276,7 +1304,7 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_test = insert_test_test(&conn);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TestChangeset {
             name: None,
@@ -1299,7 +1327,7 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_test = insert_test_test(&conn);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TestChangeset {
             name: None,
@@ -1320,7 +1348,7 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_test = insert_test_test(&conn);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TestChangeset {
             name: None,
@@ -1358,7 +1386,7 @@ mod tests {
         let conn = get_test_db_connection();
 
         let test_test = insert_test_test(&conn);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let delete_result = TestData::delete(&conn, test_test.test_id);
 

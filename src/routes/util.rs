@@ -1,8 +1,9 @@
 //! Contains utility functions shared by multiple of the modules within the `routes` module
 
+use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes::error_handling::ErrorBody;
 use actix_web::HttpResponse;
-use log::error;
+use log::{debug, error};
 use uuid::Uuid;
 
 /// Attempts to parse `id` as a Uuid
@@ -21,6 +22,32 @@ pub fn parse_id(id: &str) -> Result<Uuid, HttpResponse> {
                 status: 400,
                 detail: "ID must be formatted as a Uuid".to_string(),
             }))
+        }
+    }
+}
+
+/// Wrapper function for retrieving a resource from a specific location with the added functionality
+/// that it will return an http error response in place of an error
+pub async fn retrieve_resource(
+    test_resource_client: &TestResourceClient,
+    location: &str,
+) -> Result<Vec<u8>, HttpResponse> {
+    match test_resource_client.get_resource_as_bytes(location).await {
+        Ok(wdl_bytes) => Ok(wdl_bytes),
+        // If we failed to get it, return an error response
+        Err(e) => {
+            debug!(
+                "Encountered error trying to retrieve at {}: {}",
+                location, e
+            );
+            return Err(HttpResponse::InternalServerError().json(ErrorBody {
+                title: "Failed to retrieve resource".to_string(),
+                status: 500,
+                detail: format!(
+                    "Attempt to retrieve resource at {} resulted in error: {}",
+                    location, e
+                ),
+            }));
         }
     }
 }

@@ -3,7 +3,7 @@
 //! posting it
 
 use crate::models::report_map::ReportMapData;
-use crate::models::run::{RunData, RunWithResultsAndErrorsData};
+use crate::models::run::RunWithResultsAndErrorsData;
 use crate::requests::gcloud_storage;
 use crate::requests::github_requests;
 use crate::util::gs_uri_parsing;
@@ -68,7 +68,7 @@ impl GithubCommenter {
         owner: &str,
         repo: &str,
         issue_number: i32,
-        run: &RunData,
+        run: &RunWithResultsAndErrorsData,
         test_name: &str,
     ) -> Result<(), Error> {
         let run_as_string = serde_json::to_string_pretty(run)?;
@@ -95,8 +95,8 @@ impl GithubCommenter {
         owner: &str,
         repo: &str,
         issue_number: i32,
-        base_run: &RunData,
-        head_run: &RunData,
+        base_run: &RunWithResultsAndErrorsData,
+        head_run: &RunWithResultsAndErrorsData,
         test_name: &str,
     ) -> Result<(), Error> {
         let base_run_as_string = serde_json::to_string_pretty(base_run)?;
@@ -485,12 +485,20 @@ mod tests {
         let github_commenter = GithubCommenter::new(github_client);
 
         // Create a run to test with
-        let test_run = RunData {
+        let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
             run_group_id: None,
             name: String::from("TestRun"),
             status: RunStatusEnum::Created,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("abcdd8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({"test":"input"}),
             test_options: None,
             eval_input: json!({"eval":"input"}),
@@ -500,6 +508,8 @@ mod tests {
             created_at: Utc::now().naive_utc(),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: None,
+            results: None,
+            errors: None
         };
         let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
 
@@ -541,12 +551,20 @@ mod tests {
         let run_group_id = Some(Uuid::new_v4());
 
         // Create runs to test with
-        let head_run = RunData {
+        let head_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
             run_group_id,
             name: String::from("HeadRun"),
             status: RunStatusEnum::Created,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("abcdd8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({"test":"input"}),
             test_options: None,
             eval_input: json!({"eval":"input"}),
@@ -556,15 +574,25 @@ mod tests {
             created_at: Utc::now().naive_utc(),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: None,
+            results: None,
+            errors: None
         };
         let head_run_string = serde_json::to_string_pretty(&head_run).unwrap();
 
-        let base_run = RunData {
+        let base_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
             run_group_id,
             name: String::from("BaseRun"),
             status: RunStatusEnum::Building,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("abcdd8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({"test":"input2"}),
             test_options: None,
             eval_input: json!({"eval":"input2"}),
@@ -574,6 +602,8 @@ mod tests {
             created_at: Utc::now().naive_utc(),
             created_by: Some(String::from("Kevin@example.com")),
             finished_at: None,
+            results: None,
+            errors: None
         };
         let base_run_string = serde_json::to_string_pretty(&base_run).unwrap();
 
@@ -703,6 +733,14 @@ mod tests {
             run_group_id: None,
             name: String::from("TestRun"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("ab87d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({"test":"input"}),
             test_options: None,
             eval_input: json!({"eval":"input"}),
@@ -783,6 +821,14 @@ mod tests {
             run_group_id: Some(run_group_id),
             name: String::from("BaseRun"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("ab87d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({"test":"input"}),
             test_options: None,
             eval_input: json!({"eval":"input"}),
@@ -806,6 +852,14 @@ mod tests {
             run_group_id: Some(run_group_id),
             name: String::from("HeadRun"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_hash: Some(hex::decode("ab87d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: json!({"test":"different_input"}),
             test_options: None,
             eval_input: json!({"eval":"different_input"}),
