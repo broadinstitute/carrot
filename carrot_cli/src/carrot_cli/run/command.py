@@ -54,7 +54,7 @@ def delete(run, yes):
 @main.command(name="create_report")
 @click.argument("run")
 @click.argument("report")
-@click.option("--created_by", default="", help="Email of the creator of the mapping")
+@click.option("--created_by", default=None, type=str, help="Email of the creator of the mapping")
 @click.option(
     "--delete_failed",
     is_flag=True,
@@ -92,48 +92,56 @@ def find_report_by_ids(run, report):
 
 @main.command(name="find_reports")
 @click.argument("run")
-@click.option("--report", "--report_id", default="", help="The id or name of the report")
+@click.option("--report", "--report_id", default=None, type=str, help="The id or name of the report")
 @click.option(
-    "--status", default="", help="The status of the job generating the report"
+    "--status", default=None, type=str, help="The status of the job generating the report"
 )
 @click.option(
     "--cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The id for the cromwell job for generating the filled report",
 )
 @click.option(
     "--results",
-    default="",
+    default=None,
+    type=str,
     help="A json file containing the results of the report job",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for report record's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for report record's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the report record, case sensitive",
 )
 @click.option(
     "--finished_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for report record's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--finished_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for report record's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(input_map),desc(report_id)",
 )
@@ -175,7 +183,7 @@ def find_reports(
     if report:
         report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
     else:
-        report_id = ""
+        report_id = None
     print(
         report_maps.find_maps(
             "runs",

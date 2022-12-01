@@ -25,31 +25,36 @@ def find_by_id(id):
 @main.command(name="find")
 @click.option(
     "--software_version_id",
-    default="",
+    default=None,
+    type=str,
     help="The ID of the software version record",
 )
 @click.option(
     "--software",
     "--software_id",
-    default="",
+    default=None,
+    type=str,
     help="The ID or name of the software to find version records of",
 )
-@click.option("--commit", default="", help="The commit hash for the version")
+@click.option("--commit", default=None, type=str, help="The commit hash for the version")
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for software version's created_at value, in the format "
     "YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for software version's created_at value, in the format "
     "YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(software_name),desc(created_at)",
 )
@@ -82,7 +87,7 @@ def find(
     if software:
         software_id = dependency_util.get_id_from_id_or_name_and_handle_error(software, software_rest, "software_id", "software")
     else:
-        software_id = ""
+        software_id = None
     print(
         software_versions.find(
             software_version_id,

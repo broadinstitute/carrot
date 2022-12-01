@@ -27,48 +27,55 @@ def find_by_id(id):
 
 
 @main.command(name="find")
-@click.option("--template_id", default="", help="The template's ID")
+@click.option("--template_id", default=None, type=str, help="The template's ID")
 @click.option(
     "--pipeline",
     "--pipeline_id",
     "--pipeline_name",
-    default="",
+    default=None,
+    type=str,
     help="The ID or name of the pipeline that is the template's parent",
 )
-@click.option("--name", default="", help="The name of the template, case-sensitive")
+@click.option("--name", default=None, type=str, help="The name of the template, case-sensitive")
 @click.option(
-    "--description", default="", help="The description of the template, case-sensitive"
+    "--description", default=None, type=str, help="The description of the template, case-sensitive"
 )
 @click.option(
     "--test_wdl",
-    default="",
+    default=None,
+    type=str,
     help="The location where the test WDL for the template is hosted, either in the form of a "
     "http/https/gs uri",
 )
 @click.option(
     "--eval_wdl",
-    default="",
+    default=None,
+    type=str,
     help="The location where the eval WDL for the template is hosted, either in the form of a "
     "http/https/gs uri",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for template's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for template's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the template, case sensitive",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(name),desc(created_at)",
 )
@@ -105,7 +112,7 @@ def find(
     if pipeline:
         pipeline_id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
     else:
-        pipeline_id = ""
+        pipeline_id = None
     print(
         templates.find(
             template_id,
@@ -129,42 +136,49 @@ def find(
     "--pipeline",
     "--pipeline_id",
     help="The ID or name of the pipeline that will be this template's parent",
-    default=""
+    default=None,
+    type=str
 )
-@click.option("--name", help="The name of the template", default="")
-@click.option("--description", default="", help="The description of the template")
+@click.option("--name", help="The name of the template", default=None, type=str)
+@click.option("--description", default=None, type=str, help="The description of the template")
 @click.option(
     "--test_wdl",
     help="The location where the test WDL for this template is hosted, or its local file path. The"
     "test WDL is the WDL which defines the thing the be tested",
-    default=""
+    default=None,
+    type=str
 )
 @click.option(
     "--test_wdl_dependencies",
     help="The location where the test WDL dependencies zip for this template is hosted, or its"
     "local file path. The zip should be formatted the same as it would be for cromwell",
-    default=""
+    default=None,
+    type=str
 )
 @click.option(
     "--eval_wdl",
     help="The location where the eval WDL for ths template is hosted.  The eval WDL is the WDL "
     "which takes the outputs from the test WDL and evaluates them",
-    default=""
+    default=None,
+    type=str
 )
 @click.option(
     "--eval_wdl_dependencies",
     help="The location where the eval WDL dependencies zip for this template is hosted, or its"
     "local file path. The zip should be formatted the same as it would be for cromwell",
-    default=""
+    default=None,
+    type=str
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the template.  Defaults to email config variable",
 )
 @click.option(
     "--copy",
-    default="",
+    default=None,
+    type=str,
     help="Name or ID of a template you'd like to copy.  If this is specified, a new template will be created with all "
          "the attributes of the copied template, except any attributes that you have specified.  If a name is not"
          " specified, the new template will be named in the format '{old_template_name}_copy'."
@@ -182,10 +196,10 @@ def create(
 ):
     """Create template with the specified parameters"""
     # If copy is specified, get if it's a name
-    if copy != "":
+    if copy is not None:
         copy = dependency_util.get_id_from_id_or_name_and_handle_error(copy, templates, "template_id", "copy")
     # If copy is not specified, make sure name, pipeline, test_wdl, and eval_Wdl have been specified
-    if copy == "" and (name == "" or pipeline == "" or test_wdl == "" or eval_wdl == ""):
+    if copy is None and (name is None or pipeline is None or test_wdl is None or eval_wdl is None):
         LOGGER.error(
             "If a value is not specified for '--copy', then '--name', '--pipeline', '--test_wdl', and '--eval_wdl are"
             " required."
@@ -194,10 +208,10 @@ def create(
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
     # Process pipeline to get id if it's a name
-    if pipeline != "":
+    if pipeline is not None:
         pipeline_id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
     else:
-        pipeline_id = ""
+        pipeline_id = None
 
     print(
         templates.create(
@@ -216,32 +230,36 @@ def create(
 
 @main.command(name="update")
 @click.argument("template")
-@click.option("--name", default="", help="The new name of the template")
-@click.option("--description", default="", help="The new description of the template")
+@click.option("--name", default=None, type=str, help="The new name of the template")
+@click.option("--description", default=None, type=str, help="The new description of the template")
 @click.option(
     "--test_wdl",
-    default="",
+    default=None,
+    type=str,
     help="The location where the new test WDL for the template is hosted or a local file path.  "
     "Updating this parameter is allowed only if the specified template has no non-failed "
     "(i.e. successful or currently running) runs associated with it",
 )
 @click.option(
     "--test_wdl_dependencies",
-    default="",
+    default=None,
+    type=str,
     help="The location where the new test WDL dependencies zip for the template is hosted or a "
     "local file path.  Updating this parameter is allowed only if the specified template has no "
     "non-failed (i.e. successful or currently running) runs associated with it",
 )
 @click.option(
     "--eval_wdl",
-    default="",
+    default=None,
+    type=str,
     help="The location where the new eval WDL for the template is hosted or a local file path.  "
     "Updating this parameter is allowed only if the specified template has no non-failed (i.e. "
     "successful or currently running) runs associated with it",
 )
 @click.option(
     "--eval_wdl_dependencies",
-    default="",
+    default=None,
+    type=str,
     help="The location where the new eval WDL dependencies zip for the template is hosted or a "
     "local file path.  Updating this parameter is allowed only if the specified template has no "
     "non-failed (i.e. successful or currently running) runs associated with it",
@@ -275,68 +293,80 @@ def delete(template, yes):
 
 @main.command(name="find_runs")
 @click.argument("template")
-@click.option("--run_group_id", default="", help="The id of the run group to which the run belongs")
-@click.option("--name", default="", help="The name of the run")
+@click.option("--run_group_id", default=None, type=str, help="The id of the run group to which the run belongs")
+@click.option("--name", default=None, type=str, help="The name of the run")
 @click.option(
     "--status",
-    default="",
+    default=None,
+    type=str,
     help="The status of the run. Status include: aborted, building, created, failed, "
     "queued_in_cromwell, running, starting, submitted, succeeded, waiting_for_queue_space",
 )
 @click.option(
     "--test_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the test WDL for the run",
 )
 @click.option(
     "--test_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the test WDL for the run",
 )
 @click.option(
     "--eval_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the eval WDL for the run",
 )
 @click.option(
     "--eval_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the eval WDL for the run",
 )
 @click.option(
     "--test_cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The unique ID assigned to the Cromwell job in which the test WDL ran",
 )
 @click.option(
     "--eval_cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The unique ID assigned to the Cromwell job in which the eval WDL ran",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--created_by", default="", help="Email of the creator of the run")
+@click.option("--created_by", default=None, type=str, help="Email of the creator of the run")
 @click.option(
     "--finished_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for run's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--finished_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for run's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(status),desc(created_at)",
 )
@@ -424,14 +454,15 @@ def find_runs(
 @click.argument("template")
 @click.option(
     "--email",
-    default="",
+    default=None,
+    type=str,
     help="The email address to receive notifications. If set, takes priority over email config "
     "variable",
 )
 def subscribe(template, email):
     """Subscribe to receive notifications about the template specified by TEMPLATE (id or name)"""
     # If email is not set and there is an email config variable, fill with that
-    if email == "":
+    if email is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             email = email_config_val
@@ -452,14 +483,15 @@ def subscribe(template, email):
 @click.argument("template")
 @click.option(
     "--email",
-    default="",
+    default=None,
+    type=str,
     help="The email address to stop receiving notifications. If set, takes priority over email "
     "config variable",
 )
 def unsubscribe(template, email):
     """Delete subscription to the template specified by TEMPLATE (id or name) and email"""
     # If email is not set and there is an email config variable, fill with that
-    if email == "":
+    if email is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             email = email_config_val
@@ -480,7 +512,7 @@ def unsubscribe(template, email):
 @click.argument("template")
 @click.argument("result")
 @click.argument("result_key")
-@click.option("--created_by", default="", help="Email of the creator of the mapping")
+@click.option("--created_by", default=None, type=str, help="Email of the creator of the mapping")
 def map_to_result(template, result, result_key, created_by):
     """
     Map the template specified by TEMPLATE (id or name) to the result specified by RESULT (id or
@@ -512,28 +544,32 @@ def find_result_map_by_id(template, result):
 
 @main.command(name="find_result_maps")
 @click.argument("template")
-@click.option("--result", "--result_id", default="", help="The id or name of the result")
+@click.option("--result", "--result_id", default=None, type=str, help="The id or name of the result")
 @click.option(
     "--result_key",
-    default="",
+    default=None,
+    type=str,
     help="The key used to name the result within the output of the template",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for map's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for map's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
-    "--created_by", default="", help="Email of the creator of the map, case sensitive"
+    "--created_by", default=None, type=str, help="Email of the creator of the map, case sensitive"
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(result_key),desc(result_id)",
 )
@@ -572,7 +608,7 @@ def find_result_maps(
     if result:
         result_id = dependency_util.get_id_from_id_or_name_and_handle_error(result, results, "result_id", "result")
     else:
-        result_id = ""
+        result_id = None
     print(
         template_results.find_maps(
             id,
@@ -620,7 +656,7 @@ def delete_result_map_by_id(template, result, yes):
     default="single",
     type=click.Choice(["single", "pr"], case_sensitive=False)
 )
-@click.option("--created_by", default="", help="Email of the creator of the mapping")
+@click.option("--created_by", default=None, type=str, help="Email of the creator of the mapping")
 def map_to_report(template, report, report_trigger, created_by):
     """
     Map the template specified by TEMPLATE (id or name) to the report specified by REPORT (id or
@@ -653,7 +689,7 @@ def find_report_map_by_id(template, report, report_trigger):
 
 @main.command(name="find_report_maps")
 @click.argument("template")
-@click.option("--report", "--report_id", default="", help="The id of the report")
+@click.option("--report", "--report_id", default=None, type=str, help="The id of the report")
 @click.option(
     "--report_trigger",
     default="",
@@ -664,20 +700,23 @@ def find_report_map_by_id(template, report, report_trigger):
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for map's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for map's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
-    "--created_by", default="", help="Email of the creator of the map, case sensitive"
+    "--created_by", default=None, type=str, help="Email of the creator of the map, case sensitive"
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(input_map),desc(report_id)",
 )
@@ -716,7 +755,9 @@ def find_report_maps(
     if report:
         report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
     else:
-        report_id = ""
+        report_id = None
+    if report_trigger == "":
+        report_trigger = None
     print(
         template_reports.find_maps(
             id,

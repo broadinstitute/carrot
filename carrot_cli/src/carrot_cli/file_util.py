@@ -10,7 +10,7 @@ def read_file_to_json(filename):
     Opens the file specified by filename to read and returns its contents parsed as JSON if
     successful, empty string if filename is empty, or exits if it fails
     """
-    if filename != "":
+    if filename is not None:
         try:
             with open(filename, "r") as input_file:
                 return json.load(input_file)
@@ -27,7 +27,7 @@ def read_file_to_json(filename):
             )
             sys.exit(1)
     else:
-        return ""
+        return None
 
 def write_data_to_file(data, filename):
     """

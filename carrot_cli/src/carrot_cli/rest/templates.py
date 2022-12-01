@@ -73,7 +73,7 @@ def create(
     __process_maybe_file_field(params, files, "eval_wdl_dependencies", eval_wdl_dependencies)
     # Start with None for query params and add copy if specified
     query_params = None
-    if copy != "":
+    if copy is not None:
         query_params = [("copy", copy)]
     # Make the request
     return request_handler.create("templates", params, files=(files if files else None), query_params=query_params)
