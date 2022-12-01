@@ -29,40 +29,46 @@ def find_by_id(id):
 
 
 @main.command(name="find")
-@click.option("--report_id", default="", help="The report's ID")
-@click.option("--name", default="", help="The name of the report, case-sensitive")
+@click.option("--report_id", default=None, type=str, help="The report's ID")
+@click.option("--name", default=None, type=str, help="The name of the report, case-sensitive")
 @click.option(
-    "--description", default="", help="The description of the report, case-sensitive"
+    "--description", default=None, type=str, help="The description of the report, case-sensitive"
 )
 @click.option(
     "--notebook",
-    default="",
+    default=None,
+    type=str,
     help="The ipynb file containing the notebook for the report.",
 )
 @click.option(
     "--config",
-    default="",
+    default=None,
+    type=str,
     help="A json file containing values for runtime attributes for the Cromwell job that runs "
     "the report.",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for report's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for report's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the report, case sensitive",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(name),desc(created_at)",
 )
@@ -113,23 +119,26 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the report", required=True)
-@click.option("--description", default="", help="The description of the report")
+@click.option("--description", default=None, type=str, help="The description of the report")
 @click.option(
     "--notebook",
-    default="",
+    default=None,
+    type=str,
     required=True,
     help="The ipynb file containing the notebook which will serve as a template for this report.",
 )
 @click.option(
     "--config",
-    default="",
+    default=None,
+    type=str,
     help="A json file containing values for runtime attributes for the Cromwell job that will "
     "generate the report.  The allowed attributes are: cpu, memory, disks, docker, maxRetries, "
     "continueOnReturnCode, failOnStderr, preemptible, and bootDiskSizeGb.",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the report.  Defaults to email config variable",
 )
 def create(name, description, notebook, config, created_by):
@@ -149,16 +158,18 @@ def create(name, description, notebook, config, created_by):
 
 @main.command(name="update")
 @click.argument("report")
-@click.option("--name", default="", help="The name of the report")
-@click.option("--description", default="", help="The description of the report")
+@click.option("--name", default=None, type=str, help="The name of the report")
+@click.option("--description", default=None, type=str, help="The description of the report")
 @click.option(
     "--notebook",
-    default="",
+    default=None,
+    type=str,
     help="The ipynb file containing the notebook which will serve as a template for this report.",
 )
 @click.option(
     "--config",
-    default="",
+    default=None,
+    type=str,
     help="A json file containing values for runtime attributes for the Cromwell job that will "
     "generate the report.  The allowed attributes are: cpu, memory, disks, docker, maxRetries, "
     "continueOnReturnCode, failOnStderr, preemptible, and bootDiskSizeGb.",

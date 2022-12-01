@@ -64,18 +64,18 @@ def test_find_by_id(find_by_id_data):
     params=[
         {
             "params": [
-                ("template_id", ""),
-                ("pipeline_id", ""),
+                ("template_id", None),
+                ("pipeline_id", None),
                 ("name", "Queen of Bright Moon template"),
-                ("description", ""),
-                ("test_wdl", ""),
-                ("eval_wdl", ""),
-                ("created_by", ""),
-                ("created_before", ""),
-                ("created_after", ""),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("description", None),
+                ("test_wdl", None),
+                ("eval_wdl", None),
+                ("created_by", None),
+                ("created_before", None),
+                ("created_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
             ],
             "return": json.dumps(
                 [
@@ -97,17 +97,17 @@ def test_find_by_id(find_by_id_data):
         {
             "params": [
                 ("template_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
-                ("pipeline_id", ""),
-                ("name", ""),
-                ("description", ""),
-                ("test_wdl", ""),
-                ("eval_wdl", ""),
-                ("created_by", ""),
-                ("created_before", ""),
-                ("created_after", ""),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("pipeline_id", None),
+                ("name", None),
+                ("description", None),
+                ("test_wdl", None),
+                ("eval_wdl", None),
+                ("created_by", None),
+                ("created_before", None),
+                ("created_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
             ],
             "return": json.dumps(
                 {
@@ -163,6 +163,7 @@ def test_find(find_data):
                 ("eval_wdl_dependencies", "http://example.com/horde_eval_dependencies.zip"),
             ],
             "has_files": False,
+            "copy": None,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:08.371563",
@@ -192,6 +193,7 @@ def test_find(find_data):
                 ("eval_wdl_dependencies", "tests/data/eval_dep.zip"),
             ],
             "has_files": True,
+            "copy": None,
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:08.371563",
@@ -221,6 +223,7 @@ def test_find(find_data):
                 ("eval_wdl_dependencies", "http://example.com/horde_eval_dependencies.zip"),
             ],
             "has_files": False,
+            "copy": None,
             "return": json.dumps(
                 {
                     "title": "Server error",
@@ -231,9 +234,42 @@ def test_find(find_data):
                 sort_keys=True,
             ),
         },
+        {
+            "params": [
+                ("name", "Horde Emperor template copy"),
+                ("pipeline_id", None),
+                ("description", None),
+                ("created_by", "hordeprime@example.com"),
+                ("test_wdl", "http://example.com/horde_test.wdl"),
+                ("test_wdl_dependencies", "http://example.com/horde_test_dependencies.zip"),
+                ("eval_wdl", "http://example.com/horde_eval.wdl"),
+                ("eval_wdl_dependencies", None),
+            ],
+            "has_files": False,
+            "copy": "550e8400-e29b-41d4-a716-446655440000",
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:08.371563",
+                    "created_by": "hordeprime@example.com",
+                    "test_wdl": "http://example.com/horde_test.wdl",
+                    "test_wdl_dependencies": "http://example.com/horde_test_dependencies.zip",
+                    "eval_wdl": "http://example.com/horde_eval.wdl",
+                    "eval_wdl_dependencies": "http://example.com/horde_eval_dependencies.zip",
+                    "description": "This template rules the known universe",
+                    "name": "Horde Emperor template copy",
+                    "pipeline_id": "9d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "template_id": "bd132568-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
     ]
 )
 def create_data(request):
+    query_params = None
+    if request.param["copy"] is not None:
+        query_params = [("copy", request.param["copy"])]
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).create(...).thenReturn(None)
     # If we're testing files, put dummy values for them in a dict
@@ -254,13 +290,17 @@ def create_data(request):
             files['eval_wdl_dependencies_file'] = request.param["params"][7][1]
         # Mock up request response
         mockito.when(request_handler).create(
-            "templates", params, files=files
+            "templates", params, files=files, query_params=query_params
         ).thenReturn(request.param["return"])
     # Otherwise, don't pass any files
     else:
+        params = request.param["params"].copy()
+        for i in range(7, 3, -1):
+            if request.param["params"][i] is None:
+                params.remove(request.param["params"][i])
         # Mock up request response
         mockito.when(request_handler).create(
-            "templates", request.param["params"], files=None
+            "templates", request.param["params"], files=None, query_params=query_params
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -275,6 +315,7 @@ def test_create(create_data):
         create_data["params"][6][1],
         create_data["params"][7][1],
         create_data["params"][3][1],
+        create_data["copy"],
     )
     assert result == create_data["return"]
 

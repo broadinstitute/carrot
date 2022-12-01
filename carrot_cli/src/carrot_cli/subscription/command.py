@@ -23,28 +23,32 @@ def find_by_id(id):
 
 @main.command(name="find")
 @click.option(
-    "--subscription_id", default="", help="The subscription's ID"
+    "--subscription_id", default=None, type=str, help="The subscription's ID"
 )
 @click.option(
     "--entity_type",
-    default="",
+    default=None,
+    type=str,
     help="The type of the entity subscribed to (pipeline, template, or test)",
 )
-@click.option("--entity", "--entity_id", default="", help="The entity's ID or name")
+@click.option("--entity", "--entity_id", default=None, type=str, help="The entity's ID or name")
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for subscription's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for subscription's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--email", default="", help="Email of the subscriber, case sensitive")
+@click.option("--email", default=None, type=str, help="Email of the subscriber, case sensitive")
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(entity_type),desc(entity_id)",
 )

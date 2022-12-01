@@ -28,7 +28,7 @@ def find_by_id(entity, id, params=None, expected_format=ResponseFormat.JSON):
     address = f"http://{server_address}/api/v1/{entity}/{id}"
     # Filter out params that are not set
     if params:
-        params = list(filter(lambda param: param[1] != "", params))
+        params = list(filter(lambda param: param[1] is not None, params))
     return send_request("GET", address, params=params, expected_format=expected_format)
 
 
@@ -38,7 +38,7 @@ def find(entity, params, expected_format=ResponseFormat.JSON):
     server_address = config.load_var("carrot_server_address")
     address = f"http://{server_address}/api/v1/{entity}"
     # Filter out params that are not set
-    params = list(filter(lambda param: param[1] != "", params))
+    params = list(filter(lambda param: param[1] is not None, params))
     # Create and send request
     return send_request("GET", address, params=params, expected_format=expected_format)
 
@@ -55,7 +55,7 @@ def create(entity, params, query_params=None, files=None):
     # Build request body from params, filtering out empty ones
     body = {}
     for param in params:
-        if param[1] != "":
+        if param[1] is not None:
             body[param[0]] = param[1]
     # Build and send request
     # If we have files, send multipart
@@ -78,7 +78,7 @@ def update(entity, id, params, files=None):
     # Build request json body from params, filtering out empty ones
     body = {}
     for param in params:
-        if param[1] != "":
+        if param[1] is not None:
             body[param[0]] = param[1]
     # Build and send request
     # If we have files, send multipart
@@ -137,7 +137,7 @@ def run(test_id, params):
     # Build request json body from params, filtering out empty ones
     body = {}
     for param in params:
-        if param[1] != "":
+        if param[1] is not None:
             body[param[0]] = param[1]
     # Build and send request
     return send_request("POST", address, json=body)
@@ -152,7 +152,7 @@ def find_runs(entity, id, params, expected_format=ResponseFormat.JSON):
     server_address = config.load_var("carrot_server_address")
     address = f"http://{server_address}/api/v1/{entity}/{id}/runs"
     # Filter out params that are not set
-    params = list(filter(lambda param: param[1] != "", params))
+    params = list(filter(lambda param: param[1] is not None, params))
     # Create and send request
     return send_request("GET", address, params=params, expected_format=expected_format)
 
@@ -170,7 +170,7 @@ def create_map(entity1, entity1_id, entity2, entity2_id, params, query_params=No
     # Build request json body from params, filtering out empty ones
     body = {}
     for param in params:
-        if param[1] != "":
+        if param[1] is not None:
             body[param[0]] = param[1]
     # Create and send request
     return send_request("POST", address, json=body, params=query_params)
@@ -199,7 +199,7 @@ def find_maps(entity1, entity1_id, entity2, params):
     server_address = config.load_var("carrot_server_address")
     address = f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}"
     # Filter out params that are not set
-    params = list(filter(lambda param: param[1] != "", params))
+    params = list(filter(lambda param: param[1] is not None, params))
     # Create and send request
     return send_request("GET", address, params=params)
 
@@ -230,7 +230,7 @@ def create_map_with_target(entity1, entity1_id, entity2, entity2_id, target, par
     # Build request json body from params, filtering out empty ones
     body = {}
     for param in params:
-        if param[1] != "":
+        if param[1] is not None:
             body[param[0]] = param[1]
     # Create and send request
     return send_request("POST", address, json=body, params=query_params)

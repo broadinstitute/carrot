@@ -26,32 +26,36 @@ def find_by_id(id):
 
 
 @main.command(name="find")
-@click.option("--result_id", default="", help="The result's ID")
-@click.option("--name", default="", help="The name of the result, case-sensitive")
+@click.option("--result_id", default=None, type=str, help="The result's ID")
+@click.option("--name", default=None, type=str, help="The name of the result, case-sensitive")
 @click.option(
-    "--description", default="", help="The description of the result, case-sensitive"
+    "--description", default=None, type=str, help="The description of the result, case-sensitive"
 )
 @click.option(
-    "--result_type", default="", help="The type of the result: numeric, file, or text"
+    "--result_type", default=None, type=str, help="The type of the result: numeric, file, or text"
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for result's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for result's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the result, case-sensitive",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(name),desc(created_at)",
 )
@@ -100,7 +104,7 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the result", required=True)
-@click.option("--description", default="", help="The description of the result")
+@click.option("--description", default=None, type=str, help="The description of the result")
 @click.option(
     "--result_type",
     help="The type of the result: numeric, file, or text",
@@ -108,7 +112,8 @@ def find(
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the result.  Defaults to email config variable",
 )
 def create(name, description, result_type, created_by):
@@ -120,8 +125,8 @@ def create(name, description, result_type, created_by):
 
 @main.command(name="update")
 @click.argument("result")
-@click.option("--name", default="", help="The name of the result")
-@click.option("--description", default="", help="The description of the result")
+@click.option("--name", default=None, type=str, help="The name of the result")
+@click.option("--description", default=None, type=str, help="The description of the result")
 def update(result, name, description):
     """Update result for RESULT (id or name) with the specified parameters"""
     # Process result to get id if it's a name
@@ -155,7 +160,8 @@ def delete(result, yes):
 @click.argument("result_key")
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the mapping.  Defaults to email config variable",
 )
 def map_to_template(result, template, result_key, created_by):

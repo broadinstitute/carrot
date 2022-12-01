@@ -27,29 +27,33 @@ def find_by_id(id):
 
 
 @main.command(name="find")
-@click.option("--pipeline_id", default="", help="The pipeline's ID")
-@click.option("--name", default="", help="The name of the pipeline, case-sensitive")
+@click.option("--pipeline_id", default=None, type=str, help="The pipeline's ID")
+@click.option("--name", default=None, type=str, help="The name of the pipeline, case-sensitive")
 @click.option(
-    "--description", default="", help="The description of the pipeline, case-sensitive"
+    "--description", default=None, type=str, help="The description of the pipeline, case-sensitive"
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for pipeline's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for pipeline's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the pipeline, case sensitive",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(name),desc(created_at)",
 )
@@ -96,10 +100,11 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the pipeline", required=True)
-@click.option("--description", default="", help="The description of the pipeline")
+@click.option("--description", default=None, type=str, help="The description of the pipeline")
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the pipeline.  Defaults to email config variable",
 )
 def create(name, description, created_by):
@@ -111,8 +116,8 @@ def create(name, description, created_by):
 
 @main.command(name="update")
 @click.argument("pipeline")
-@click.option("--name", default="", help="The name of the pipeline")
-@click.option("--description", default="", help="The description of the pipeline")
+@click.option("--name", default=None, type=str, help="The name of the pipeline")
+@click.option("--description", default=None, type=str, help="The description of the pipeline")
 def update(pipeline, name, description):
     """Update pipeline specified by PIPELINE (id or name) with the specified parameters"""
     # Process pipeline to get id if it's a name
@@ -139,68 +144,80 @@ def delete(pipeline, yes):
 
 @main.command(name="find_runs")
 @click.argument("pipeline")
-@click.option("--run_group_id", default="", help="The id of the run group to which the run belongs")
-@click.option("--name", default="", help="The name of the run")
+@click.option("--run_group_id", default=None, type=str, help="The id of the run group to which the run belongs")
+@click.option("--name", default=None, type=str, help="The name of the run")
 @click.option(
     "--status",
-    default="",
+    default=None,
+    type=str,
     help="The status of the run. Status include: aborted, building, created, failed, "
     "queued_in_cromwell, running, starting, submitted, succeeded, waiting_for_queue_space",
 )
 @click.option(
     "--test_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the test WDL for the run",
 )
 @click.option(
     "--test_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the test WDL for the run",
 )
 @click.option(
     "--eval_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the eval WDL for the run",
 )
 @click.option(
     "--eval_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the eval WDL for the run",
 )
 @click.option(
     "--test_cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The unique ID assigned to the Cromwell job in which the test WDL ran",
 )
 @click.option(
     "--eval_cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The unique ID assigned to the Cromwell job in which the eval WDL ran",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--created_by", default="", help="Email of the creator of the run")
+@click.option("--created_by", default=None, type=str, help="Email of the creator of the run")
 @click.option(
     "--finished_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for run's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--finished_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for run's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(status),desc(created_at)",
 )
@@ -286,14 +303,15 @@ def find_runs(
 @click.argument("pipeline")
 @click.option(
     "--email",
-    default="",
+    default=None,
+    type=str,
     help="The email address to receive notifications. If set, takes priority over email config "
     "variable",
 )
 def subscribe(pipeline, email):
     """Subscribe to receive notifications about the pipeline specified by PIPELINE (name or id)"""
     # If email is not set and there is an email config variable, fill with that
-    if email == "":
+    if email is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             email = email_config_val
@@ -313,14 +331,15 @@ def subscribe(pipeline, email):
 @click.argument("pipeline")
 @click.option(
     "--email",
-    default="",
+    default=None,
+    type=str,
     help="The email address to stop receiving notifications. If set, takes priority over email "
     "config variable",
 )
 def unsubscribe(pipeline, email):
     """Delete subscription to the pipeline with the specified by PIPELINE (id or name) and email"""
     # If email is not set and there is an email config variable, fill with that
-    if email == "":
+    if email is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             email = email_config_val

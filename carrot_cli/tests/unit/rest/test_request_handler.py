@@ -125,7 +125,7 @@ def test_find_by_id(find_by_id_data):
         },
         {
             "entity": "pipelines",
-            "params": [("id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"), ("name", "")],
+            "params": [("id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"), ("name", None)],
             "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 {
@@ -147,7 +147,7 @@ def find_data(request):
     # Mock up request response
     address = "http://%s/api/v1/%s" % ("example.com", request.param["entity"])
     # Get params filtered to remove empty ones since the empty ones won't be passed to request
-    params = list(filter(lambda param: param[1] != "", request.param["params"]))
+    params = list(filter(lambda param: param[1] is not None, request.param["params"]))
     mockito.when(request_handler).send_request(
         "GET", address, params=params, expected_format=request.param["expected_format"]
     ).thenReturn(request.param["return"])
@@ -558,7 +558,7 @@ def test_run(run_data):
         {
             "entity": "templates",
             "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-            "params": [("id", ""), ("name", "Mara's Test Run")],
+            "params": [("id", None), ("name", "Mara's Test Run")],
             "expected_format": request_handler.ResponseFormat.JSON,
             "return": json.dumps(
                 {
@@ -591,7 +591,7 @@ def find_runs_data(request):
         request.param["id"],
     )
     # Get params filtered to remove empty ones since the empty ones won't be passed to request
-    params = list(filter(lambda param: param[1] != "", request.param["params"]))
+    params = list(filter(lambda param: param[1] is not None, request.param["params"]))
     mockito.when(request_handler).send_request(
         "GET", address, params=params, expected_format=request.param["expected_format"]
     ).thenReturn(request.param["return"])
@@ -1021,12 +1021,12 @@ def test_delete_map_by_ids_and_other_thing(delete_map_by_ids_and_other_thing_dat
             "params": [
                 ("result_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
                 ("result_key", "out_horde_tanks"),
-                ("created_before", ""),
-                ("created_after", ""),
+                ("created_before", None),
+                ("created_after", None),
                 ("created_by", "rogelio@example.com"),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
             ],
             "return": json.dumps(
                 {
@@ -1047,12 +1047,12 @@ def test_delete_map_by_ids_and_other_thing(delete_map_by_ids_and_other_thing_dat
             "params": [
                 ("result_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
                 ("result_key", "out_horde_tanks"),
-                ("created_before", ""),
-                ("created_after", ""),
-                ("created_by", ""),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
             ],
             "return": json.dumps(
                 {
@@ -1079,7 +1079,7 @@ def find_maps_data(request):
         request.param["entity2"],
     )
     # Get params filtered to remove empty ones since the empty ones won't be passed to request
-    params = list(filter(lambda param: param[1] != "", request.param["params"]))
+    params = list(filter(lambda param: param[1] is not None, request.param["params"]))
     mockito.when(request_handler).send_request(
         "GET", address, params=params
     ).thenReturn(request.param["return"])
@@ -1152,7 +1152,7 @@ def send_request_data(request):
             "text": request.param["text"],
         }
         response = mockito.mock(result, spec=requests.Response)
-        if request.param["text"] != "":
+        if request.param["text"] is not None:
             mockito.when(response).json().thenReturn(json.loads(request.param["text"]))
         mockito.when(requests).request(
             "POST", "http://example.com/api/v1/pipelines", params=params, json=json_body, data=None, files=None

@@ -18,7 +18,7 @@ def check_created_by(created_by):
     there is no value for the email config variable, prints an error and exits.  If created_by has a value, verifies it
     is an email and returns it if so or prints an error and exits if not
     """
-    if created_by == "":
+    if created_by is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             return email_config_val

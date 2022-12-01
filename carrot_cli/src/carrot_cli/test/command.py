@@ -27,54 +27,62 @@ def find_by_id(id):
 
 
 @main.command(name="find")
-@click.option("--test_id", default="", help="The test's ID")
+@click.option("--test_id", default=None, type=str, help="The test's ID")
 @click.option(
     "--template",
     "--template_id",
     "--template_name",
-    default="",
+    default=None,
+    type=str,
     help="The ID or name of the template that is the test's parent",
 )
-@click.option("--name", default="", help="The name of the test, case-sensitive")
+@click.option("--name", default=None, type=str, help="The name of the test, case-sensitive")
 @click.option(
-    "--description", default="", help="The description of the test, case-sensitive"
+    "--description", default=None, type=str, help="The description of the test, case-sensitive"
 )
 @click.option(
     "--test_input_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default inputs to the test WDL for the test",
 )
 @click.option(
     "--test_option_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default workflow options for the test WDL for the test",
 )
 @click.option(
     "--eval_input_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default inputs to the eval WDL for the test",
 )
 @click.option(
     "--eval_option_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default workflow options for the eval WDL for the test",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for test's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for test's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
-    "--created_by", default="", help="Email of the creator of the test, case sensitive"
+    "--created_by", default=None, type=str, help="Email of the creator of the test, case sensitive"
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(name),desc(created_at)",
 )
@@ -113,7 +121,7 @@ def find(
     if template:
         template_id = dependency_util.get_id_from_id_or_name_and_handle_error(template, templates, "template_id", "template")
     else:
-        template_id = ""
+        template_id = None
     # Load data from files for test_input_defaults, test_option_defaults, eval_input_defaults and eval_option_defaults,
     # if set
     test_input_defaults = file_util.read_file_to_json(test_input_defaults)
@@ -142,37 +150,43 @@ def find(
 
 
 @main.command(name="create")
-@click.option("--name", help="The name of the test. Required unless copying.", default="")
+@click.option("--name", help="The name of the test. Required unless copying.", default=None, type=str)
 @click.option(
     "--template",
     "--template_id",
-    default="",
+    default=None,
+    type=str,
     help="The ID or name of the template that will be the test's parent. Required unless copying.",
 )
-@click.option("--description", default="", help="The description of the test")
+@click.option("--description", default=None, type=str, help="The description of the test")
 @click.option(
     "--test_input_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default inputs to the test WDL for the test",
 )
 @click.option(
     "--test_option_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default workflow options for the test WDL for the test",
 )
 @click.option(
     "--eval_input_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default inputs to the eval WDL for the test",
 )
 @click.option(
     "--eval_option_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default workflow options for the eval WDL for the test",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the test.  Defaults to email config variable",
 )
 @click.option(
@@ -200,13 +214,13 @@ def create(
     if copy is not None:
         copy = dependency_util.get_id_from_id_or_name_and_handle_error(copy, tests, "test_id", "copy")
     # If copy is not specified, make sure name and template have been specified
-    if copy is None and (name == "" or template == ""):
+    if copy is None and (name is None or template is None):
         LOGGER.error(
             "If a value is not specified for '--copy', then '--name' and '--template' are required."
         )
         sys.exit(1)
     # Process template to get id if it's a name
-    if template != "":
+    if template is not None:
         template = dependency_util.get_id_from_id_or_name_and_handle_error(template, templates, "template_id", "template")
     # Load data from files for test_input_defaults, test_option_defaults, eval_input_defaults and eval_option_defaults,
     # if set
@@ -231,32 +245,36 @@ def create(
 
 @main.command(name="update")
 @click.argument("test")
-@click.option("--name", default="", help="The name of the test")
-@click.option("--description", default="", help="The description of the test")
+@click.option("--name", default=None, type=str, help="The name of the test")
+@click.option("--description", default=None, type=str, help="The description of the test")
 @click.option(
     "--test_input_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default inputs to the test WDL for the test. Updating this "
     "parameter is allowed only if the specified test has no non-failed (i.e. successful or "
     "currently running) runs associated with it",
 )
 @click.option(
     "--test_option_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default workflow options for the test WDL for the test. Updating this "
     "parameter is allowed only if the specified test has no non-failed (i.e. successful or "
     "currently running) runs associated with it",
 )
 @click.option(
     "--eval_input_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default inputs to the eval WDL for the test. Updating this "
     "parameter is allowed only if the specified test has no non-failed (i.e. successful or "
     "currently running) runs associated with it",
 )
 @click.option(
     "--eval_option_defaults",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the default workflow options for the eval WDL for the test. Updating this "
     "parameter is allowed only if the specified test has no non-failed (i.e. successful or "
     "currently running) runs associated with it",
@@ -297,32 +315,38 @@ def delete(test, yes):
 @click.argument("test")
 @click.option(
     "--name",
-    default="",
+    default=None,
+    type=str,
     help="The name of the run.  Will be autogenerated if not specified",
 )
 @click.option(
     "--test_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the test WDL for the run",
 )
 @click.option(
     "--test_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the test WDL for the run",
 )
 @click.option(
     "--eval_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the eval WDL for the run",
 )
 @click.option(
     "--eval_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the eval WDL for the run",
 )
 @click.option(
     "--created_by",
-    default="",
+    default=None,
+    type=str,
     help="Email of the creator of the run.  Defaults to email config variable",
 )
 def run(test, name, test_input, test_options, eval_input, eval_options, created_by):
@@ -341,68 +365,80 @@ def run(test, name, test_input, test_options, eval_input, eval_options, created_
 
 @main.command(name="find_runs")
 @click.argument("test")
-@click.option("--run_group_id", default="", help="The id of the run group to which the run belongs")
-@click.option("--name", default="", help="The name of the run")
+@click.option("--run_group_id", default=None, type=str, help="The id of the run group to which the run belongs")
+@click.option("--name", default=None, type=str, help="The name of the run")
 @click.option(
     "--status",
-    default="",
+    default=None,
+    type=str,
     help="The status of the run. Status include: aborted, building, created, failed, "
     "queued_in_cromwell, running, starting, submitted, succeeded, waiting_for_queue_space",
 )
 @click.option(
     "--test_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the test WDL for the run",
 )
 @click.option(
     "--test_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the test WDL for the run",
 )
 @click.option(
     "--eval_input",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the inputs to the eval WDL for the run",
 )
 @click.option(
     "--eval_options",
-    default="",
+    default=None,
+    type=str,
     help="A JSON file containing the workflow options to the eval WDL for the run",
 )
 @click.option(
     "--test_cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The unique ID assigned to the Cromwell job in which the test WDL ran",
 )
 @click.option(
     "--eval_cromwell_job_id",
-    default="",
+    default=None,
+    type=str,
     help="The unique ID assigned to the Cromwell job in which the eval WDL ran",
 )
 @click.option(
     "--created_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--created_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--created_by", default="", help="Email of the creator of the run")
+@click.option("--created_by", default=None, type=str, help="Email of the creator of the run")
 @click.option(
     "--finished_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for run's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--finished_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for run's finished_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--sort",
-    default="",
+    default=None,
+    type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
     "descending.  Ex. asc(status),desc(created_at)",
 )
@@ -485,14 +521,15 @@ def find_runs(
 @click.argument("test")
 @click.option(
     "--email",
-    default="",
+    default=None,
+    type=str,
     help="The email address to receive notifications. If set, takes priority over email config "
     "variable",
 )
 def subscribe(test, email):
     """Subscribe to receive notifications about the test specified by TEST (id or name)"""
     # If email is not set and there is an email config variable, fill with that
-    if email == "":
+    if email is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             email = email_config_val
@@ -512,14 +549,15 @@ def subscribe(test, email):
 @click.argument("test")
 @click.option(
     "--email",
-    default="",
+    default=None,
+    type=str,
     help="The email address to stop receiving notifications. If set, takes priority over email "
     "config variable",
 )
 def unsubscribe(test, email):
     """Delete subscription to the test with the specified by TEST (id or name) and email"""
     # If email is not set and there is an email config variable, fill with that
-    if email == "":
+    if email is None:
         email_config_val = config.load_var_no_error("email")
         if email_config_val is not None:
             email = email_config_val

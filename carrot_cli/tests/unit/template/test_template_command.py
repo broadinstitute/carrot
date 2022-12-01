@@ -217,15 +217,15 @@ def test_find_by_id(find_by_id_data):
             ],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 20,
                 0,
             ],
@@ -307,6 +307,7 @@ def test_find(find_data):
                 "example.com/she-ra_eval.wdl",
                 "example.com/she-ra_eval_dep.zip",
                 "adora@example.com",
+                None
             ],
             "return": json.dumps(
                 {
@@ -355,6 +356,7 @@ def test_find(find_data):
                 "example.com/she-ra_eval.wdl",
                 "example.com/she-ra_eval_dep.zip",
                 "adora@example.com",
+                None
             ],
             "from_name": {
                 "name": "Sword of Protection pipeline",
@@ -393,6 +395,72 @@ def test_find(find_data):
             "args": [
                 "template",
                 "create",
+                "--name",
+                "Sword of Protection template copy",
+                "--description",
+                "This template will save Etheria again",
+                "--test_wdl",
+                "example.com/she-ra_test2.wdl",
+                "--test_wdl_dependencies",
+                "example.com/she-ra_test_dep2.zip",
+                "--created_by",
+                "adora2@example.com",
+                "--copy",
+                "Sword of Protection template"
+            ],
+            "params": [
+                "Sword of Protection template copy",
+                None,
+                "This template will save Etheria again",
+                "example.com/she-ra_test2.wdl",
+                "example.com/she-ra_test_dep2.zip",
+                None,
+                None,
+                "adora2@example.com",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819"
+            ],
+            "copy": {
+                "name": "Sword of Protection template",
+                "return": json.dumps(
+                    [
+                        {
+                            "created_at": "2020-09-16T18:48:06.371563",
+                            "created_by": "adora@example.com",
+                            "description": "This template will save Etheria",
+                            "test_wdl": "example.com/she-ra_test.wdl",
+                            "test_wdl_dependencies": "example.com/she-ra_test_dep.zip",
+                            "eval_wdl": "example.com/she-ra_eval.wdl",
+                            "eval_wdl_dependencies": "example.com/she-ra_eval_dep.zip",
+                            "name": "Sword of Protection template",
+                            "pipeline_id": "550e8400-e29b-41d4-a716-446655440000",
+                            "template_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                        }
+                    ],
+                    indent=4,
+                    sort_keys=True,
+                )
+            },
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-18T18:48:06.371563",
+                    "created_by": "adora2@example.com",
+                    "description": "This template will save Etheria again",
+                    "test_wdl": "example.com/she-ra_test2.wdl",
+                    "test_wdl_dependencies": "example.com/she-ra_test_dep2.zip",
+                    "eval_wdl": "example.com/she-ra_eval.wdl",
+                    "eval_wdl_dependencies": "example.com/she-ra_eval_dep.zip",
+                    "name": "Sword of Protection template copy",
+                    "pipeline_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "template_id": "abc87859-06fe-4b1a-9e96-47d4f36bf819",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "args": [
+                "template",
+                "create",
                 "--pipeline_id",
                 "550e8400-e29b-41d4-a716-446655440000",
                 "--name",
@@ -415,10 +483,8 @@ def test_find(find_data):
         {
             "args": ["template", "create"],
             "params": [],
-            "return": "Usage: carrot_cli template create [OPTIONS]\n"
-            "Try 'carrot_cli template create -h' for help.\n"
-            "\n"
-            "Error: Missing option '--pipeline' / '--pipeline_id'.",
+            "logging": "If a value is not specified for '--copy', then '--name', '--pipeline', '--test_wdl', and "
+                       "'--eval_wdl are required."
         },
     ]
 )
@@ -432,6 +498,11 @@ def create_data(request):
             name=request.param["from_name"]["name"],
             limit=2
         ).thenReturn(request.param["from_name"]["return"])
+    if "copy" in request.param:
+        mockito.when(templates).find(
+            name=request.param["copy"]["name"],
+            limit=2
+        ).thenReturn(request.param["copy"]["return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
         mockito.when(templates).create(
@@ -443,6 +514,7 @@ def create_data(request):
             request.param["params"][5],
             request.param["params"][6],
             request.param["params"][7],
+            request.param["params"][8],
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -1080,21 +1152,21 @@ def test_delete(delete_data, caplog):
             "args": ["template", "find_runs", "986325ba-06fe-4b1a-9e96-47d4f36bf819"],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 20,
                 0,
                 None,
@@ -1803,12 +1875,12 @@ def test_find_result_map_by_id(find_result_map_by_id_data):
             ],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 20,
                 0,
             ],
@@ -2714,12 +2786,12 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
             ],
             "params": [
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 20,
                 0,
             ],

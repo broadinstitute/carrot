@@ -1,0 +1,25 @@
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="name"
+
+Test template copy
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="created_by"
+
+Kevin2@example.com
+-----------------------------974767299852498929531610575
+Content-Disposition: form-data; name="test_wdl_file"; filename="test.wdl"
+Content-Type: text/plain; charset=UTF-8
+
+workflow myWorkflow {
+    call myTask
+}
+
+task myTask {
+    command {
+        echo "hello world"
+    }
+    output {
+        String out = read_string(stdout())
+    }
+}
+-----------------------------974767299852498929531610575--
