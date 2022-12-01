@@ -196,7 +196,10 @@ mod tests {
     use crate::requests::cromwell_requests::CromwellClient;
     use crate::requests::github_requests::GithubClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::unit_test_util::get_test_db_connection;
+    use crate::unit_test_util::{
+        get_test_db_connection, get_test_remote_github_repo, get_test_test_runner_building_enabled,
+        insert_test_software_with_repo,
+    };
     use actix_web::client::Client;
     use diesel::PgConnection;
     use mailparse::MailHeaderMap;
@@ -290,28 +293,6 @@ mod tests {
         TestData::create(&conn, new_test).expect("Failed to insert test")
     }
 
-    fn insert_test_software(conn: &PgConnection) -> SoftwareData {
-        let new_software = NewSoftware {
-            name: String::from("TestSoftware"),
-            description: Some(String::from("Kevin made this software for testing")),
-            repository_url: String::from("https://example.com/organization/project"),
-            machine_type: Some(MachineTypeEnum::Standard),
-            created_by: Some(String::from("Kevin@example.com")),
-        };
-
-        SoftwareData::create(conn, new_software).unwrap()
-    }
-
-    fn create_test_test_runner() -> TestRunner {
-        let cromwell_client = CromwellClient::new(Client::default(), &mockito::server_url());
-        let test_resource_client = TestResourceClient::new(Client::default(), None);
-        TestRunner::new(
-            cromwell_client,
-            test_resource_client,
-            Some("https://example.com"),
-        )
-    }
-
     fn create_test_notification_handler() -> NotificationHandler {
         // Create an emailer
         let test_email_config =
@@ -330,7 +311,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_process_success() {
         let conn = get_test_db_connection();
-        let test_test_runner = create_test_test_runner();
+        let test_test_runner = get_test_test_runner_building_enabled();
         let test_notification_handler = create_test_notification_handler();
 
         let test_test = insert_test_test_with_subscriptions_with_entities(
@@ -338,14 +319,15 @@ mod tests {
             "test_process_request_success",
         );
 
-        let test_software = insert_test_software(&conn);
+        let (test_repo, commit1, _, _, _) = get_test_remote_github_repo();
+        let test_software = insert_test_software_with_repo(&conn, test_repo.to_str().unwrap());
 
         let test_request = GithubRunRequest {
             test_name: test_test.name,
             test_input_key: Some(String::from("in_test_image")),
             eval_input_key: Some(String::from("in_eval_image")),
             software_name: test_software.name,
-            commit: String::from("764a00442ddb412eed331655cfd90e151f580518"),
+            commit: commit1.clone(),
             owner: String::from("ExampleOwner"),
             repo: String::from("ExampleRepo"),
             issue_number: 4,
@@ -358,8 +340,10 @@ mod tests {
             .with_status(201)
             .create();
 
-        let test_params = json!({"in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
-        let eval_params = json!({"in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let test_params =
+            json!({ "in_test_image": format!("image_build:TestSoftware|{}", &commit1) });
+        let eval_params =
+            json!({ "in_eval_image": format!("image_build:TestSoftware|{}", &commit1) });
 
         // Make temporary directory for the email
         let email_path = tempfile::Builder::new()
@@ -419,10 +403,12 @@ mod tests {
         let software_version_q = SoftwareVersionQuery {
             software_version_id: None,
             software_id: Some(test_software.software_id),
-            commit: Some(String::from("764a00442ddb412eed331655cfd90e151f580518")),
+            commit: Some(commit1),
             software_name: None,
             created_before: None,
             created_after: None,
+            committed_before: None,
+            committed_after: None,
             sort: None,
             limit: None,
             offset: None,
@@ -471,7 +457,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_process_failure_no_software() {
         let conn = get_test_db_connection();
-        let test_test_runner = create_test_test_runner();
+        let test_test_runner = get_test_test_runner_building_enabled();
         let test_notification_handler = create_test_notification_handler();
         let test_test = insert_test_test_with_subscriptions_with_entities(
             &conn,

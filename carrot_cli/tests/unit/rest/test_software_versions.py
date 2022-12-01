@@ -19,8 +19,10 @@ def unstub():
                 {
                     "created_at": "2020-09-16T18:48:06.371563",
                     "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                    "commit_date": "2020-09-10T18:48:06.371563",
                     "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "tags": []
                 },
                 indent=4,
                 sort_keys=True,
@@ -64,6 +66,8 @@ def test_find_by_id(find_by_id_data):
                 ("commit", "ca82a6dff817ec66f44342007202690a93763949"),
                 ("created_before", ""),
                 ("created_after", ""),
+                ("committed_before", ""),
+                ("committed_after", ""),
                 ("sort", ""),
                 ("limit", ""),
                 ("offset", ""),
@@ -73,8 +77,10 @@ def test_find_by_id(find_by_id_data):
                     {
                         "created_at": "2020-09-16T18:48:06.371563",
                         "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                        "commit_date": "2020-09-10T18:48:06.371563",
                         "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                        "tags": []
                     }
                 ],
                 indent=4,
@@ -88,6 +94,8 @@ def test_find_by_id(find_by_id_data):
                 ("commit", "ca82a6dff817ec66f44342007202690a93763949"),
                 ("created_before", ""),
                 ("created_after", ""),
+                ("committed_before", ""),
+                ("committed_after", ""),
                 ("sort", ""),
                 ("limit", ""),
                 ("offset", ""),
@@ -124,5 +132,52 @@ def test_find(find_data):
         find_data["params"][5][1],
         find_data["params"][6][1],
         find_data["params"][7][1],
+        find_data["params"][8][1],
+        find_data["params"][9][1],
     )
     assert result == find_data["return"]
+
+@pytest.fixture(
+    params=[
+        {
+            "id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "return": json.dumps(
+                {
+                    "created_at": "2020-09-16T18:48:06.371563",
+                    "commit": "ca82a6dff817ec66f44342007202690a93763949",
+                    "commit_date": "2020-09-10T18:48:06.371563",
+                    "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "tags": ["tag1", "tag2"]
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+            "return": json.dumps(
+                {
+                    "title": "No software_version found",
+                    "status": 404,
+                    "detail": "No software_version found with the specified ID",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+    ]
+)
+def update_data(request):
+    # Set all requests to return None so only the one we expect will return a value
+    mockito.when(request_handler).update(...).thenReturn(None)
+    # Mock up request response
+    mockito.when(request_handler).update(
+        "software_versions", request.param["id"], []
+    ).thenReturn(request.param["return"])
+    return request.param
+
+
+def test_update(update_data):
+    result = software_versions.update(update_data["id"])
+    assert result == update_data["return"]

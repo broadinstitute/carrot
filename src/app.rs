@@ -8,7 +8,7 @@ use crate::requests::cromwell_requests::CromwellClient;
 use crate::requests::gcloud_storage::GCloudClient;
 use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes;
-use crate::util::git_repos::GitRepoChecker;
+use crate::util::git_repos::GitRepoManager;
 use crate::util::wdl_storage::WdlStorageClient;
 use crate::validation::womtool::WomtoolRunner;
 use actix_rt::System;
@@ -46,16 +46,25 @@ pub fn run_app(
         let http_client: Client = Client::default();
         // Make a gcloud client for interacting with gcs
         let gcloud_client: Option<GCloudClient> = carrot_config.gcloud().map(|gcloud_config| GCloudClient::new(gcloud_config.gcloud_sa_key_file()));
-        // Create a test resource client and cromwell client for the test runner
+        // Create a git repo manager
+        let git_repo_manager: Option<GitRepoManager> = match carrot_config.custom_image_build() {
+            Some(image_build_config) => {
+                // Get the private github config, if there is one, and make it owned (so it'll either be
+                // None or a clone of the PrivateGithubAccessConfig instance)
+                Some(GitRepoManager::new(image_build_config.private_github_access().map(PrivateGithubAccessConfig::to_owned), image_build_config.repo_cache_location().to_owned()))
+            },
+            None => None
+        };
+        // Create a test resource client, cromwell client, and git repo manager for the test runner
         let test_resource_client: TestResourceClient = TestResourceClient::new(http_client.clone(), gcloud_client.clone());
         let cromwell_client: CromwellClient = CromwellClient::new(http_client, carrot_config.cromwell().address());
         // Create a test runner
         let test_runner: TestRunner = match carrot_config.custom_image_build() {
             Some(image_build_config) => {
-                TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), Some(image_build_config.image_registry_host()))
+                TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), Some(image_build_config.image_registry_host()), git_repo_manager.clone())
             },
             None => {
-                TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), None)
+                TestRunner::new(cromwell_client.clone(), test_resource_client.clone(), None, None)
             }
         };
         // Create report builder
@@ -63,15 +72,6 @@ pub fn run_app(
             // We can unwrap gcloud_client because reporting won't work without it
             ReportBuilder::new(cromwell_client, gcloud_client.clone().expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config)
         });
-        // Create a git repo checker
-        let git_repo_checker: GitRepoChecker = match carrot_config.custom_image_build() {
-            Some(image_build_config) => {
-                // Get the private github config, if there is one, and make it owned (so it'll either be
-                // None or a clone of the PrivateGithubAccessConfig instance)
-                GitRepoChecker::new(image_build_config.private_github_access().map(PrivateGithubAccessConfig::to_owned))
-            },
-            None => GitRepoChecker::new(None)
-        };
         // Create a womtool runner
         let womtool_runner: WomtoolRunner = WomtoolRunner::new(carrot_config.validation().womtool_location());
         // Create a wdl storage client according to the wdl storage config
@@ -87,19 +87,24 @@ pub fn run_app(
             }
         };
 
-        App::new()
+        let mut new_app = App::new()
             .wrap(Logger::default()) // Use default logger as configured in .env file
             .data(pool.clone()) // Give app access to clone of DB pool so other threads can use it
-            .data(git_repo_checker) // For verifying github repos for software routes
             .data(test_runner) // For starting test runs in the run routes
             .data(report_builder) // For starting report builds in the run_report routes
             .data(womtool_runner) // For validating wdls in the template routes
             .data(test_resource_client) // For retrieving WDLs in the template routes
             .data(wdl_storage_client) // For storing wdls in the template routes
-            .data(carrot_config.clone())// Allow worker threads to access config variables
-            .service(web::scope("/api/v1/").configure(move |cfg: &mut web::ServiceConfig| {
-                routes_config(cfg, enable_reporting, enable_custom_image_builds)
-            })) //Get route mappings for v1 api
+            .data(carrot_config.clone());// Allow worker threads to access config variables
+
+        // For verifying github repos for software routes and managing local cached copies of repos
+        if git_repo_manager.is_some() {
+            new_app = new_app.data(git_repo_manager.unwrap());
+        };
+
+        new_app.service(web::scope("/api/v1/").configure(move |cfg: &mut web::ServiceConfig| {
+            routes_config(cfg, enable_reporting, enable_custom_image_builds)
+        })) //Get route mappings for v1 api
     })
     .bind(format!("{}:{}", host, port))?
     .run();

@@ -16,6 +16,8 @@ def find(
     commit,
     created_before,
     created_after,
+    committed_before,
+    committed_after,
     sort,
     limit,
     offset,
@@ -28,8 +30,16 @@ def find(
         ("commit", commit),
         ("created_before", created_before),
         ("created_after", created_after),
+        ("committed_before", committed_before),
+        ("committed_after", committed_after),
         ("sort", sort),
         ("limit", limit),
         ("offset", offset),
     ]
     return request_handler.find("software_versions", params)
+
+def update(
+    software_version_id
+):
+    """Submits a request to CARROT's software_versions update mapping"""
+    return request_handler.update("software_versions", software_version_id, [])

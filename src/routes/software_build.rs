@@ -153,6 +153,7 @@ mod tests {
     use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
     use crate::unit_test_util::*;
     use actix_web::{http, test, App};
+    use chrono::NaiveDateTime;
     use diesel::PgConnection;
     use uuid::Uuid;
 
@@ -170,6 +171,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
+            commit_date: "2021-06-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         let new_software_version = SoftwareVersionData::create(conn, new_software_version).unwrap();

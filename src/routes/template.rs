@@ -2525,9 +2525,6 @@ mod tests {
         let result = test::read_body(resp).await;
 
         let result_json: Value = serde_json::from_slice(&result).unwrap();
-
-        println!("Result: {}", result_json.to_string());
-
         let test_template: TemplateData = serde_json::from_slice(&result).unwrap();
 
         // Verify that what's returned is the template we expect

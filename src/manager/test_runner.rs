@@ -16,8 +16,9 @@ use crate::requests::cromwell_requests::{
     CromwellClient, CromwellRequestError, WorkflowIdAndStatus,
 };
 use crate::requests::test_resource_requests;
-use crate::util::temp_storage;
-use chrono::Utc;
+use crate::util::git_repos::GitRepoManager;
+use crate::util::{git_repos, temp_storage};
+use chrono::{NaiveDateTime, Utc};
 use diesel::PgConnection;
 use log::error;
 use regex::Regex;
@@ -59,6 +60,7 @@ pub enum Error {
     Build(software_builder::Error),
     MissingOutputKey(String),
     ResourceRequest(test_resource_requests::Error),
+    Git(git_repos::Error),
 }
 
 impl std::error::Error for Error {}
@@ -80,6 +82,7 @@ impl fmt::Display for Error {
                 k
             ),
             Error::ResourceRequest(e) => write!(f, "Error ResourceRequest: {}", e),
+            Error::Git(e) => write!(f, "Error Git: {}", e),
         }
     }
 }
@@ -109,6 +112,11 @@ impl From<test_resource_requests::Error> for Error {
         Error::ResourceRequest(e)
     }
 }
+impl From<git_repos::Error> for Error {
+    fn from(e: git_repos::Error) -> Error {
+        Error::Git(e)
+    }
+}
 
 /// Struct for operations related to running tests.
 #[derive(Clone)]
@@ -116,6 +124,7 @@ pub struct TestRunner {
     cromwell_client: CromwellClient,
     test_resource_client: test_resource_requests::TestResourceClient,
     image_registry_host: Option<String>,
+    git_repo_manager: Option<GitRepoManager>,
 }
 
 impl TestRunner {
@@ -126,11 +135,13 @@ impl TestRunner {
         cromwell_client: CromwellClient,
         test_resource_client: test_resource_requests::TestResourceClient,
         image_registry_host: Option<&str>,
+        git_repo_manager: Option<GitRepoManager>,
     ) -> TestRunner {
         TestRunner {
             cromwell_client,
             test_resource_client,
             image_registry_host: image_registry_host.map(String::from),
+            git_repo_manager,
         }
     }
     /// Creates a new run and inserts it into the DB
@@ -230,9 +241,10 @@ impl TestRunner {
 
         // Process software image build parameters in the run's input if software building is enabled
         let mut version_map: HashMap<String, SoftwareVersionData> = HashMap::new();
-        if self.image_registry_host.is_some() {
+        if let Some(git_repo_manager) = &self.git_repo_manager {
             version_map.extend(
                 match TestRunner::process_software_version_mappings(
+                    git_repo_manager,
                     conn,
                     run.run_id,
                     &run.test_input,
@@ -247,6 +259,7 @@ impl TestRunner {
             );
             version_map.extend(
                 match TestRunner::process_software_version_mappings(
+                    git_repo_manager,
                     conn,
                     run.run_id,
                     &run.eval_input,
@@ -334,7 +347,7 @@ impl TestRunner {
         let template = TestRunner::get_template(conn, template_id)?;
 
         // Format json so it's ready to submit
-        let input_json_to_submit = self.format_test_json_for_cromwell(&run.test_input)?;
+        let input_json_to_submit = self.format_test_json_for_cromwell(conn, &run.test_input)?;
 
         // Write json to temp file so it can be submitted to cromwell
         let input_json_file =
@@ -460,7 +473,7 @@ impl TestRunner {
 
         // Format json so it's ready to submit
         let input_json_to_submit =
-            self.format_eval_json_for_cromwell(&run.eval_input, test_outputs)?;
+            self.format_eval_json_for_cromwell(conn, &run.eval_input, test_outputs)?;
 
         // Write json to temp file so it can be submitted to cromwell
         let input_json_file =
@@ -547,6 +560,7 @@ impl TestRunner {
     /// in the database connecting `run_id` to the created software versions. Returns a map from the
     /// keys to the SoftwareVersionData objects created/retrieved for those keys
     fn process_software_version_mappings(
+        git_repo_manager: &GitRepoManager,
         conn: &PgConnection,
         run_id: Uuid,
         inputs_json: &Value,
@@ -575,20 +589,23 @@ impl TestRunner {
             };
             // If it's specifying a custom build, get the software version and add it to the version map
             if IMAGE_BUILD_REGEX.is_match(value) {
-                // Pull software name and commit from value
-                let name_and_commit: Vec<&str> = value
+                // Pull software name and commit/tag from value
+                let name_and_commit_or_tag: Vec<&str> = value
                     .trim_start_matches("image_build:")
                     .split('|')
                     .collect();
                 // Try to get software, return error if unsuccessful
                 let software =
-                    match SoftwareData::find_by_name_ignore_case(conn, name_and_commit[0]) {
+                    match SoftwareData::find_by_name_ignore_case(conn, name_and_commit_or_tag[0]) {
                         Ok(software) => software,
                         Err(e) => match e {
                             diesel::result::Error::NotFound => {
-                                error!("Failed to find software with name: {}", name_and_commit[0]);
+                                error!(
+                                    "Failed to find software with name: {}",
+                                    name_and_commit_or_tag[0]
+                                );
                                 return Err(Error::SoftwareNotFound(String::from(
-                                    name_and_commit[0],
+                                    name_and_commit_or_tag[0],
                                 )));
                             }
                             _ => {
@@ -600,11 +617,38 @@ impl TestRunner {
                             }
                         },
                     };
+                // Get commit, tags, and commit date from commit_or_tag
+                let (commit, tags, commit_date): (String, Vec<String>, NaiveDateTime) =
+                    match git_repo_manager.get_commit_and_tags_and_date_from_commit_or_tag(
+                        software.software_id,
+                        name_and_commit_or_tag[1],
+                    ) {
+                        Ok(commit_and_tags_and_date) => commit_and_tags_and_date,
+                        Err(git_repos::Error::IO(e)) => {
+                            // If we get an IO NotFound error, that indicates we almost definitely haven't
+                            // cloned the repo yet, so we'll clone and try again
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                git_repo_manager.download_git_repo(
+                                    software.software_id,
+                                    &software.repository_url,
+                                )?;
+                                git_repo_manager.get_commit_and_tags_and_date_from_commit_or_tag(
+                                    software.software_id,
+                                    name_and_commit_or_tag[1],
+                                )?
+                            } else {
+                                return Err(Error::Git(git_repos::Error::IO(e)));
+                            }
+                        }
+                        Err(e) => return Err(Error::Git(e)),
+                    };
                 // Get or create software version for this software&commit and add to map
-                let software_version = software_builder::get_or_create_software_version(
+                let software_version = software_builder::get_or_create_software_version_with_tags(
                     conn,
                     software.software_id,
-                    name_and_commit[1],
+                    &commit,
+                    &tags,
+                    &commit_date,
                 )?;
 
                 version_map.insert(String::from(key), software_version);
@@ -772,7 +816,11 @@ impl TestRunner {
     /// Necessary changes for test input:
     ///  1. Convert `image_build:` inputs to their corresponding `gs://` uris where the docker images
     ///     will be
-    fn format_test_json_for_cromwell(&self, inputs: &Value) -> Result<Value, Error> {
+    fn format_test_json_for_cromwell(
+        &self,
+        conn: &PgConnection,
+        inputs: &Value,
+    ) -> Result<Value, Error> {
         // Get inputs as map
         let object_map = match inputs.as_object() {
             Some(map) => map,
@@ -797,12 +845,19 @@ impl TestRunner {
                 // software version and add it to the version map
                 if IMAGE_BUILD_REGEX.is_match(val) {
                     if let Some(image_registry_host) = &self.image_registry_host {
-                        // Pull software name and commit from value
-                        let name_and_commit: Vec<&str> =
+                        // Pull software name and commit/tag from value
+                        let name_and_commit_or_tag: Vec<&str> =
                             val.trim_start_matches("image_build:").split('|').collect();
+                        // Get commit from commit_or_tag
+                        let commit: String =
+                            SoftwareVersionData::find_commit_by_name_and_commit_or_tag(
+                                conn,
+                                name_and_commit_or_tag[0],
+                                name_and_commit_or_tag[1],
+                            )?;
                         new_val = json!(util::get_formatted_image_url(
-                            name_and_commit[0],
-                            name_and_commit[1],
+                            name_and_commit_or_tag[0],
+                            &commit,
                             image_registry_host
                         ));
                     }
@@ -825,6 +880,7 @@ impl TestRunner {
     ///     inputs in `inputs`
     fn format_eval_json_for_cromwell(
         &self,
+        conn: &PgConnection,
         inputs: &Value,
         test_outputs: &Map<String, Value>,
     ) -> Result<Value, Error> {
@@ -853,11 +909,18 @@ impl TestRunner {
                 if IMAGE_BUILD_REGEX.is_match(val) {
                     if let Some(image_registry_host) = &self.image_registry_host {
                         // Pull software name and commit from value
-                        let name_and_commit: Vec<&str> =
+                        let name_and_commit_or_tag: Vec<&str> =
                             val.trim_start_matches("image_build:").split('|').collect();
+                        // Get commit from commit_or_tag
+                        let commit: String =
+                            SoftwareVersionData::find_commit_by_name_and_commit_or_tag(
+                                conn,
+                                name_and_commit_or_tag[0],
+                                name_and_commit_or_tag[1],
+                            )?;
                         new_val = json!(util::get_formatted_image_url(
-                            name_and_commit[0],
-                            name_and_commit[1],
+                            name_and_commit_or_tag[0],
+                            &commit,
                             image_registry_host
                         ));
                     }
@@ -1042,14 +1105,19 @@ mod tests {
     use crate::models::software_version::{
         NewSoftwareVersion, SoftwareVersionData, SoftwareVersionQuery,
     };
+    use crate::models::software_version_tag::{NewSoftwareVersionTag, SoftwareVersionTagData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
     use crate::requests::cromwell_requests::CromwellClient;
     use crate::requests::gcloud_storage::GCloudClient;
     use crate::requests::test_resource_requests::TestResourceClient;
-    use crate::unit_test_util::get_test_db_connection;
+    use crate::unit_test_util::{
+        get_test_db_connection, get_test_remote_github_repo,
+        get_test_test_runner_building_disabled, get_test_test_runner_building_enabled,
+        insert_test_software_with_repo,
+    };
     use actix_web::client::Client;
-    use chrono::Utc;
+    use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
     use serde_json::json;
     use std::fs::read_to_string;
@@ -1207,6 +1275,7 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id: new_software.software_id,
             commit: String::from("9aac5e85f34921b2642beded8b3891b97c5a6dc7"),
+            commit_date: "2021-07-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         SoftwareVersionData::create(conn, new_software_version)
@@ -1221,10 +1290,25 @@ mod tests {
         let new_software_version = NewSoftwareVersion {
             software_id,
             commit,
+            commit_date: "2021-06-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
         };
 
         SoftwareVersionData::create(conn, new_software_version)
             .expect("Failed inserting test software_version")
+    }
+
+    fn insert_test_software_version_tag_for_software_version_with_tag(
+        conn: &PgConnection,
+        software_version_id: Uuid,
+        tag: String,
+    ) -> SoftwareVersionTagData {
+        let new_software_version_tag = NewSoftwareVersionTag {
+            software_version_id,
+            tag,
+        };
+
+        SoftwareVersionTagData::create(conn, new_software_version_tag)
+            .expect("Failed inserting test software_version_tag")
     }
 
     fn insert_test_software_build_for_version_with_status(
@@ -1248,22 +1332,6 @@ mod tests {
         RunGroupData::create(conn).expect("Failed inserting test run group")
     }
 
-    fn initialize_test_runner_without_registry_host() -> TestRunner {
-        let cromwell_client = CromwellClient::new(Client::default(), &mockito::server_url());
-        let test_resource_client = TestResourceClient::new(Client::default(), None);
-        TestRunner::new(cromwell_client, test_resource_client, None)
-    }
-
-    fn initialize_test_runner_with_registry_host() -> TestRunner {
-        let cromwell_client = CromwellClient::new(Client::default(), &mockito::server_url());
-        let test_resource_client = TestResourceClient::new(Client::default(), None);
-        TestRunner::new(
-            cromwell_client,
-            test_resource_client,
-            Some("https://example.com"),
-        )
-    }
-
     fn map_run_to_version(conn: &PgConnection, run_id: Uuid, software_version_id: Uuid) {
         let map = NewRunSoftwareVersion {
             run_id,
@@ -1276,7 +1344,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_create_run_no_software_params() {
         let conn = get_test_db_connection();
-        let test_test_runner: TestRunner = initialize_test_runner_without_registry_host();
+        let test_test_runner: TestRunner = get_test_test_runner_building_disabled();
 
         let test_template = insert_test_template_no_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
@@ -1348,16 +1416,17 @@ mod tests {
     #[actix_rt::test]
     async fn test_create_run_software_params() {
         let conn = get_test_db_connection();
-        let test_test_runner: TestRunner = initialize_test_runner_with_registry_host();
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
 
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
-        let test_software = insert_test_software(&conn);
+        let (test_repo, commit1, _, _, _) = get_test_remote_github_repo();
+        let test_software = insert_test_software_with_repo(&conn, test_repo.to_str().unwrap());
 
-        let test_params = json!({"in_user_name":"Kevin", "in_test_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let test_params = json!({"in_user_name":"Kevin", "in_test_image":format!("image_build:TestSoftware|{}", &commit1)});
         let test_options = None;
-        let eval_params = json!({"in_user":"Jonn", "in_eval_image":"image_build:TestSoftware|764a00442ddb412eed331655cfd90e151f580518"});
+        let eval_params = json!({"in_user":"Jonn", "in_eval_image":format!("image_build:TestSoftware|{}", &commit1)});
         let eval_options = Some(json!({"option": true}));
         // Define mockito mapping for cromwell response
         let mock_response_body = json!({
@@ -1407,10 +1476,12 @@ mod tests {
         let software_version_q = SoftwareVersionQuery {
             software_version_id: None,
             software_id: Some(test_software.software_id),
-            commit: Some(String::from("764a00442ddb412eed331655cfd90e151f580518")),
+            commit: Some(commit1),
             software_name: None,
             created_before: None,
             created_after: None,
+            committed_before: None,
+            committed_after: None,
             sort: None,
             limit: None,
             offset: None,
@@ -1448,7 +1519,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_start_run_test() {
         let conn = get_test_db_connection();
-        let test_test_runner: TestRunner = initialize_test_runner_without_registry_host();
+        let test_test_runner: TestRunner = get_test_test_runner_building_disabled();
 
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
@@ -1490,7 +1561,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_start_run_eval() {
         let conn = get_test_db_connection();
-        let test_test_runner: TestRunner = initialize_test_runner_without_registry_host();
+        let test_test_runner: TestRunner = get_test_test_runner_building_disabled();
 
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
@@ -1539,7 +1610,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_start_run_eval_missing_test_output() {
         let conn = get_test_db_connection();
-        let test_test_runner: TestRunner = initialize_test_runner_without_registry_host();
+        let test_test_runner: TestRunner = get_test_test_runner_building_disabled();
 
         let test_template = insert_test_template_software_params(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
@@ -1588,30 +1659,115 @@ mod tests {
 
     #[test]
     fn test_format_test_json_for_cromwell_success() {
-        let test_test_runner: TestRunner = initialize_test_runner_with_registry_host();
+        let conn = get_test_db_connection();
 
-        let test_json = json!({"test_workflow.test":"1","test_workflow.image":"image_build:example_project|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
+
+        let test_software: SoftwareData = insert_test_software(&conn);
+        let test_software_version: SoftwareVersionData =
+            insert_test_software_version_for_software_with_commit(
+                &conn,
+                test_software.software_id,
+                String::from("1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"),
+            );
+
+        let test_json = json!({"test_workflow.test":"1","test_workflow.image":"image_build:TestSoftware|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 
         let formatted_json = test_test_runner
-            .format_test_json_for_cromwell(&test_json)
+            .format_test_json_for_cromwell(&conn, &test_json)
             .expect("Failed to format test json");
 
-        let expected_json = json!({"test_workflow.test":"1","test_workflow.image":"https://example.com/example_project:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
+        let expected_json = json!({"test_workflow.test":"1","test_workflow.image":"https://example.com/TestSoftware:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
+
+        assert_eq!(formatted_json, expected_json);
+    }
+
+    #[test]
+    fn test_format_test_json_for_cromwell_success_tag() {
+        let conn = get_test_db_connection();
+
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
+
+        let test_software: SoftwareData = insert_test_software(&conn);
+        let test_software_version: SoftwareVersionData =
+            insert_test_software_version_for_software_with_commit(
+                &conn,
+                test_software.software_id,
+                String::from("1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"),
+            );
+        let test_software_version_tag: SoftwareVersionTagData =
+            insert_test_software_version_tag_for_software_version_with_tag(
+                &conn,
+                test_software_version.software_version_id,
+                String::from("tag1"),
+            );
+
+        let test_json =
+            json!({"test_workflow.test":"1","test_workflow.image":"image_build:TestSoftware|tag1"});
+
+        let formatted_json = test_test_runner
+            .format_test_json_for_cromwell(&conn, &test_json)
+            .expect("Failed to format test json");
+
+        let expected_json = json!({"test_workflow.test":"1","test_workflow.image":"https://example.com/TestSoftware:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 
         assert_eq!(formatted_json, expected_json);
     }
 
     #[test]
     fn test_format_eval_json_for_cromwell_success() {
-        let test_test_runner: TestRunner = initialize_test_runner_with_registry_host();
-        let test_json = json!({"eval_workflow.test":"test_output:test_workflow.test","eval_workflow.image":"image_build:example_project|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
+        let conn = get_test_db_connection();
+
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
+
+        let test_software: SoftwareData = insert_test_software(&conn);
+        let test_software_version: SoftwareVersionData =
+            insert_test_software_version_for_software_with_commit(
+                &conn,
+                test_software.software_id,
+                String::from("1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"),
+            );
+
+        let test_json = json!({"eval_workflow.test":"test_output:test_workflow.test","eval_workflow.image":"image_build:TestSoftware|1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
         let test_output = json!({"test_workflow.test":"2"});
 
         let formatted_json = test_test_runner
-            .format_eval_json_for_cromwell(&test_json, test_output.as_object().unwrap())
+            .format_eval_json_for_cromwell(&conn, &test_json, test_output.as_object().unwrap())
             .expect("Failed to format test json");
 
-        let expected_json = json!({"eval_workflow.test":"2","eval_workflow.image":"https://example.com/example_project:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
+        let expected_json = json!({"eval_workflow.test":"2","eval_workflow.image":"https://example.com/TestSoftware:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
+
+        assert_eq!(formatted_json, expected_json);
+    }
+
+    #[test]
+    fn test_format_eval_json_for_cromwell_success_tag() {
+        let conn = get_test_db_connection();
+
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
+
+        let test_software: SoftwareData = insert_test_software(&conn);
+        let test_software_version: SoftwareVersionData =
+            insert_test_software_version_for_software_with_commit(
+                &conn,
+                test_software.software_id,
+                String::from("1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"),
+            );
+        let test_software_version_tag: SoftwareVersionTagData =
+            insert_test_software_version_tag_for_software_version_with_tag(
+                &conn,
+                test_software_version.software_version_id,
+                String::from("tag1"),
+            );
+
+        let test_json = json!({"eval_workflow.test":"test_output:test_workflow.test","eval_workflow.image":"image_build:TestSoftware|tag1"});
+        let test_output = json!({"test_workflow.test":"2"});
+
+        let formatted_json = test_test_runner
+            .format_eval_json_for_cromwell(&conn, &test_json, test_output.as_object().unwrap())
+            .expect("Failed to format test json");
+
+        let expected_json = json!({"eval_workflow.test":"2","eval_workflow.image":"https://example.com/TestSoftware:1a4c5eb5fc4921b2642b6ded863894b3745a5dc7"});
 
         assert_eq!(formatted_json, expected_json);
     }
@@ -1640,11 +1796,13 @@ mod tests {
 
     #[test]
     fn test_format_test_json_for_cromwell_failure() {
-        let test_test_runner: TestRunner = initialize_test_runner_with_registry_host();
+        let conn = get_test_db_connection();
+
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
 
         let test_json = json!(["test", "1"]);
 
-        let formatted_json = test_test_runner.format_test_json_for_cromwell(&test_json);
+        let formatted_json = test_test_runner.format_test_json_for_cromwell(&conn, &test_json);
 
         assert!(matches!(formatted_json, Err(Error::Json)));
     }

@@ -132,7 +132,7 @@ impl TestData {
 
     /// Queries the DB for test matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve tests matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve tests matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved tests as TestData
     /// instances or an error if the query fails for some reason
     pub fn find(

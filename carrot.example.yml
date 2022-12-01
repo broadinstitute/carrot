@@ -20,7 +20,7 @@ status_manager:
 wdl_storage:
   # Use local if you want to store in a local directory
   local:
-    wdl_location: ~/carrot/wdl
+    wdl_location: ~/.carrot/wdl
   # Use gcs if you want to store in a gcs location
   # gcs:
     # wdl_location: gs://example.com/example/dir
@@ -76,6 +76,8 @@ custom_image_build:
     kms_keyring: example-key-ring
     # The GCloud KMS key for decrypting `client_pass_uri`
     kms_key: example-key
+  # The local directory where metadata-only clones of software repos will be kept for keeping track of tags and commits
+  repo_cache_location: ~/.carrot/repos
 # Config for validating parts of a test
 validation:
   # The location of the womtool jar to use to validate WDLs

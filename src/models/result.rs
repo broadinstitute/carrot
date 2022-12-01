@@ -82,7 +82,7 @@ impl ResultData {
 
     /// Queries the DB for result matching the specified query criteria
     ///
-    /// Queries the DB using `conn` to retrieve results matching the crieria in `params`
+    /// Queries the DB using `conn` to retrieve results matching the criteria in `params`
     /// Returns a result containing either a vector of the retrieved results as ResultData
     /// instances or an error if the query fails for some reason
     pub fn find(

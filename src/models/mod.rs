@@ -15,6 +15,7 @@ pub mod run_software_version;
 pub mod software;
 pub mod software_build;
 pub mod software_version;
+pub mod software_version_tag;
 pub mod subscription;
 pub mod template;
 pub mod template_report;
