@@ -53,13 +53,15 @@ def find_by_id(id):
 )
 @click.option(
     "--committed_before",
-    default="",
+    default=None,
+    type=str,
     help="Upper bound for software version's commit_date value, in the format "
          "YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--committed_after",
-    default="",
+    default=None,
+    type=str,
     help="Lower bound for software version's commit_date value, in the format "
          "YYYY-MM-DDThh:mm:ss.ssssss",
 )
