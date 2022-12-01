@@ -476,7 +476,7 @@ impl LocalWdlStorageConfig {
 fn wdl_location_default() -> String {
     let mut current_dir =
         std::env::current_dir().expect("Failed to get current directory for wdl directory default");
-    current_dir.push("carrot");
+    current_dir.push(".carrot");
     current_dir.push("wdl");
     current_dir
         .to_str()
@@ -607,7 +607,7 @@ impl CustomImageBuildConfig {
 fn repo_cache_location_default() -> String {
     let mut current_dir = std::env::current_dir()
         .expect("Failed to get current directory for git repo cache directory default");
-    current_dir.push("carrot");
+    current_dir.push(".carrot");
     current_dir.push("repos");
     current_dir
         .to_str()
