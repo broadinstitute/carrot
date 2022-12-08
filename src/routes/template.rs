@@ -2594,28 +2594,28 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.test_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                "example.com/api/v1/templates/{}/test_wdl_dependencies",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
+                "example.com/api/v1/templates/{}/eval_wdl_dependencies",
                 test_template.template_id
             )
         );
@@ -2801,14 +2801,14 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
