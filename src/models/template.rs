@@ -471,7 +471,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
             test_wdl: String::from("testtest"),
@@ -492,7 +491,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
             test_wdl: String::from("testtest"),
@@ -513,7 +511,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
             test_wdl: String::from("testtest"),
@@ -534,7 +531,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
             test_wdl: String::from("testtest"),
@@ -555,7 +551,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
             test_wdl: String::from("testtest"),
@@ -576,7 +571,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
             test_wdl: String::from("testtest"),
@@ -601,7 +595,6 @@ mod tests {
     fn insert_non_terminal_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("Name1"),
             status: RunStatusEnum::EvalRunning,
             test_wdl: String::from("testtest"),

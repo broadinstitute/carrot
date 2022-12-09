@@ -671,6 +671,7 @@ impl NotificationHandler {
                                 eval_options: None,
                                 test_cromwell_job_id: None,
                                 eval_cromwell_job_id: None,
+                                software_versions: None,
                                 created_before: None,
                                 created_after: None,
                                 created_by: None,
@@ -885,6 +886,7 @@ mod tests {
     use std::fs::{read_dir, read_to_string, DirEntry};
     use tempfile::Builder;
     use uuid::Uuid;
+    use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
 
     #[derive(Deserialize)]
     struct ParsedEmailFile {
@@ -986,7 +988,6 @@ mod tests {
         email_base_name: &str,
     ) -> RunData {
         let new_run = NewRun {
-            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
@@ -1015,7 +1016,6 @@ mod tests {
         let run_group = RunGroupData::create(conn).unwrap();
 
         let base_run = NewRun {
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Base Run"),
             test_id: id,
             status: RunStatusEnum::Succeeded,
@@ -1034,8 +1034,12 @@ mod tests {
         };
         let base_run = RunData::create(conn, base_run).expect("Failed inserting test run");
 
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: base_run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
         let head_run = NewRun {
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Head Run"),
             test_id: id,
             status: RunStatusEnum::Succeeded,
@@ -1053,6 +1057,11 @@ mod tests {
             finished_at: None,
         };
         let head_run = RunData::create(conn, head_run).expect("Failed inserting test run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: head_run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
 
         (base_run, head_run, run_group)
     }

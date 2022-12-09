@@ -1,3 +1,4 @@
+import json
 import logging
 
 from . import request_handler
@@ -21,29 +22,30 @@ def find_by_id(run_id, csv=None):
 
 
 def find(
-    parent_entity="",
-    parent_entity_id="",
-    run_group_id="",
-    name="",
-    status="",
-    test_input="",
-    test_options="",
-    eval_input="",
-    eval_options="",
-    test_cromwell_job_id="",
-    eval_cromwell_job_id="",
-    created_before="",
-    created_after="",
-    created_by="",
-    finished_before="",
-    finished_after="",
-    sort="",
-    limit="",
-    offset="",
+    parent_entity=None,
+    parent_entity_id=None,
+    run_group_id=None,
+    name=None,
+    status=None,
+    test_input=None,
+    test_options=None,
+    eval_input=None,
+    eval_options=None,
+    test_cromwell_job_id=None,
+    eval_cromwell_job_id=None,
+    software_versions=None,
+    created_before=None,
+    created_after=None,
+    created_by=None,
+    finished_before=None,
+    finished_after=None,
+    sort=None,
+    limit=None,
+    offset=None,
     csv=None
 ):
     """
-    Submits a request to CARROT's find runs mapping for the specfied parent_entity (pipeline,
+    Submits a request to CARROT's find runs mapping for the specified parent_entity (pipeline,
     template, or test) with the specified id, filtering by the other parameters
     """
     # Create parameter list
@@ -57,6 +59,7 @@ def find(
         ("eval_options", eval_options),
         ("test_cromwell_job_id", test_cromwell_job_id),
         ("eval_cromwell_job_id", eval_cromwell_job_id),
+        ("software_versions", json.dumps(software_versions) if software_versions else None),
         ("created_before", created_before),
         ("created_after", created_after),
         ("created_by", created_by),

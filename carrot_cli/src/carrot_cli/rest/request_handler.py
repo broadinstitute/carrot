@@ -175,6 +175,26 @@ def create_map(entity1, entity1_id, entity2, entity2_id, params, query_params=No
     # Create and send request
     return send_request("POST", address, json=body, params=query_params)
 
+def create_report_map_from_run_query(report_id, parent_entity, parent_entity_id, body_params, query_params):
+    """
+    Submits a request for creating a run report mapping for the report specified by report_id, querying for runs
+    belonging to the parent specified by parent_entity and parent_id
+    """
+    # Build request address
+    server_address = config.load_var("carrot_server_address")
+    address = (
+        f"http://{server_address}/api/v1/{parent_entity}/{parent_entity_id}/runs/reports/{report_id}"
+    )
+    # Build request json body from params, filtering out empty ones
+    body = {}
+    for param in body_params:
+        if param[1] is not None:
+            body[param[0]] = param[1]
+    # Filter out params that are not set
+    query_params = list(filter(lambda param: param[1] is not None, query_params))
+    # Create and send request
+    return send_request("POST", address, json=body, params=query_params)
+
 
 def find_map_by_ids(entity1, entity1_id, entity2, entity2_id):
     """

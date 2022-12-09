@@ -3,7 +3,7 @@
 //! Contains functions for processing requests to find pipelines, along with their URI mappings
 
 use crate::db;
-use crate::models::run_group::{RunGroupData, RunGroupWithGithubData, RunGroupWithGithubQuery};
+use crate::models::run_group::{RunGroupData, RunGroupWithMetadataData, RunGroupWithMetadataQuery};
 use crate::models::run_group_is_from_github::RunGroupIsFromGithubData;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::util::parse_id;
@@ -34,7 +34,7 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunGroupWithGithubData::find_by_id(&conn, id) {
+        match RunGroupWithMetadataData::find_by_id(&conn, id) {
             Ok(run_group) => Ok(run_group),
             Err(e) => Err(e),
         }
@@ -71,14 +71,14 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn find(
-    web::Query(query): web::Query<RunGroupWithGithubQuery>,
+    web::Query(query): web::Query<RunGroupWithMetadataQuery>,
     pool: web::Data<db::DbPool>,
 ) -> HttpResponse {
     // Query DB for results in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
-        match RunGroupWithGithubData::find(&conn, query) {
+        match RunGroupWithMetadataData::find(&conn, query) {
             Ok(val) => Ok(val),
             Err(e) => {
                 error!("{}", e);
@@ -211,8 +211,10 @@ mod tests {
     use diesel::PgConnection;
     use serde_json::Value;
     use uuid::Uuid;
+    use crate::models::run_group::RunGroupMetadata;
+    use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
 
-    fn create_test_run_group_with_github(conn: &PgConnection) -> RunGroupWithGithubData {
+    fn create_test_run_group_with_github(conn: &PgConnection) -> RunGroupWithMetadataData {
         let run_group = RunGroupData::create(conn).expect("Failed to create run_group");
 
         let new_run_group_is_from_github = NewRunGroupIsFromGithub {
@@ -231,17 +233,10 @@ mod tests {
             RunGroupIsFromGithubData::create(conn, new_run_group_is_from_github)
                 .expect("Failed inserting test run_group_is_from_github");
 
-        RunGroupWithGithubData {
+        RunGroupWithMetadataData {
             run_group_id: run_group.run_group_id,
-            owner: Some(run_group_is_from_github.owner),
-            repo: Some(run_group_is_from_github.repo),
-            issue_number: Some(run_group_is_from_github.issue_number),
-            author: Some(run_group_is_from_github.author),
-            base_commit: Some(run_group_is_from_github.base_commit),
-            head_commit: Some(run_group_is_from_github.head_commit),
-            test_input_key: run_group_is_from_github.test_input_key,
-            eval_input_key: run_group_is_from_github.eval_input_key,
             created_at: run_group.created_at,
+            metadata: Some(RunGroupMetadata::Github(run_group_is_from_github))
         }
     }
 
@@ -284,7 +279,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: Some(run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -301,7 +295,14 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunData::create(&conn, new_run).expect("Failed to insert run")
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run.run_id,
+            run_group_id
+        }).unwrap();
+
+        run
     }
 
     #[actix_rt::test]
@@ -320,7 +321,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_run_group: RunGroupWithGithubData = serde_json::from_slice(&result).unwrap();
+        let test_run_group: RunGroupWithMetadataData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run_group, new_run_group);
     }
@@ -391,7 +392,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_run_groups: Vec<RunGroupWithGithubData> = serde_json::from_slice(&result).unwrap();
+        let test_run_groups: Vec<RunGroupWithMetadataData> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run_groups.len(), 1);
         assert_eq!(test_run_groups[0], new_run_group);

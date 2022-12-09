@@ -12,6 +12,7 @@ use log::{debug, error};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
+use crate::models::run_in_group::RunInGroupData;
 
 /// Represents the data received from a GitHub Actions request to start two runs of the same test on
 /// separate branches (the PR use case)
@@ -117,8 +118,11 @@ impl GithubPrRequest {
                 e
             );
         }
-        // Delete the empty run group, if id is provided
+        // Delete the run group, if id is provided
         if let Some(run_group_id) = empty_run_group_id {
+            if let Err(e) = RunInGroupData::delete_by_run_group_id(conn, run_group_id) {
+                error!("Failed to delete run_group mappings for run_group {} left over after failure to start PR run: {}", run_group_id, e);
+            }
             if let Err(e) = RunGroupData::delete(conn, run_group_id) {
                 error!("Failed to delete empty run_group {} left over after failure to start PR run: {}", run_group_id, e);
             }
@@ -450,6 +454,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_process_success() {
+        let logger = simple_logger::SimpleLogger::new();
         let conn = get_test_db_connection();
         let test_test_runner = get_test_test_runner_building_enabled();
         let test_notification_handler = create_test_notification_handler();
@@ -554,6 +559,7 @@ mod tests {
                 eval_options: None,
                 test_cromwell_job_id: None,
                 eval_cromwell_job_id: None,
+                software_versions: None,
                 created_before: None,
                 created_after: None,
                 created_by: None,

@@ -1,5 +1,6 @@
 import json
 
+import copy
 import mockito
 import pytest
 from carrot_cli.rest import request_handler, report_maps
@@ -77,6 +78,133 @@ def test_create_map(create_map_data):
         create_map_data["delete_failed"],
     )
     assert report == create_map_data["return"]
+
+
+@pytest.fixture(
+    params=[
+        {
+            "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "parent_entity": "runs",
+            "parent_entity_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+            "created_by": "rogelio@example.com",
+            "params": [
+                ("run_group_id", None),
+                ("name", None),
+                ("status", None),
+                ("test_input", None),
+                ("test_options", None),
+                ("eval_input", None),
+                ("eval_options", None),
+                ("test_cromwell_job_id", None),
+                ("eval_cromwell_job_id", None),
+                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("finished_before", None),
+                ("finished_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
+            ],
+            "return": json.dumps(
+                {
+                    "entity_id": "128abc85-06fe-4b1a-9e96-47d4f36bf819",
+                    "entity_type": "run_group",
+                    "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    "status": "created",
+                    "results": {},
+                    "cromwell_job_id": "8f1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                    "created_at": "2020-09-24T19:07:59.311462",
+                    "created_by": "rogelio@example.com",
+                    "finished_at": None,
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+            "parent_entity": "runs",
+            "parent_entity_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+            "created_by": "rogelio@example.com",
+            "params": [
+                ("run_group_id", None),
+                ("name", None),
+                ("status", None),
+                ("test_input", None),
+                ("test_options", None),
+                ("eval_input", None),
+                ("eval_options", None),
+                ("test_cromwell_job_id", None),
+                ("eval_cromwell_job_id", None),
+                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("finished_before", None),
+                ("finished_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
+            ],
+            "return": json.dumps(
+                {
+                    "title": "Server error",
+                    "status": 500,
+                    "detail": "Error while attempting to insert new run report mapping",
+                },
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+    ]
+)
+def create_map_from_run_query_data(request):
+    # Set all requests to return None so only the one we expect will return a value
+    mockito.when(request_handler).create_report_map_from_run_query(...).thenReturn(None)
+    # Mock up request response
+    body_params = [
+        ("created_by", request.param["created_by"]),
+    ]
+    params_for_mock = copy.deepcopy(request.param["params"])
+    params_for_mock[9] = ("software_versions", json.dumps(params_for_mock[9][1]) if params_for_mock[9][1] else None)
+    mockito.when(request_handler).create_report_map_from_run_query(
+        request.param["report_id"],
+        request.param["parent_entity"],
+        request.param["parent_entity_id"],
+        body_params,
+        params_for_mock,
+    ).thenReturn(request.param["return"])
+    return request.param
+
+
+def test_create_map_from_run_query(create_map_from_run_query_data):
+    report = report_maps.create_map_from_run_query(
+        create_map_from_run_query_data["report_id"],
+        create_map_from_run_query_data["created_by"],
+        create_map_from_run_query_data["parent_entity"],
+        create_map_from_run_query_data["parent_entity_id"],
+        create_map_from_run_query_data["params"][0][1],
+        create_map_from_run_query_data["params"][1][1],
+        create_map_from_run_query_data["params"][2][1],
+        create_map_from_run_query_data["params"][3][1],
+        create_map_from_run_query_data["params"][4][1],
+        create_map_from_run_query_data["params"][5][1],
+        create_map_from_run_query_data["params"][6][1],
+        create_map_from_run_query_data["params"][7][1],
+        create_map_from_run_query_data["params"][8][1],
+        create_map_from_run_query_data["params"][9][1],
+        create_map_from_run_query_data["params"][10][1],
+        create_map_from_run_query_data["params"][11][1],
+        create_map_from_run_query_data["params"][12][1],
+        create_map_from_run_query_data["params"][13][1],
+        create_map_from_run_query_data["params"][14][1],
+        create_map_from_run_query_data["params"][15][1],
+        create_map_from_run_query_data["params"][16][1],
+        create_map_from_run_query_data["params"][17][1],
+    )
+    assert report == create_map_from_run_query_data["return"]
 
 
 @pytest.fixture(

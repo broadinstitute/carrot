@@ -4,14 +4,13 @@
 //! their URI mappings
 
 use crate::config::Config;
-use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
 use crate::manager::test_runner::TestRunner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultsAndErrorsData};
 use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use crate::routes::util::parse_id;
+use crate::routes::util::{get_run_query_from_run_query_incomplete, parse_id, RunQueryIncomplete};
 use crate::util::run_csv;
 use crate::util::uri_conversion::{
     fill_uris_for_wdl_locations_run, fill_uris_for_wdl_locations_run_with_results_and_errors,
@@ -20,7 +19,6 @@ use crate::util::wdl_type::WdlType;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
-use chrono::NaiveDateTime;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -28,71 +26,14 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use uuid::Uuid;
+use crate::util::git_repos::GitRepoManager;
 
 /// Optional query parameters for the find_by_id mapping
 #[derive(Deserialize, Debug)]
-struct FindByIdQueryParams {
+struct FindQueryParams {
     /// For the user to specify they want the returned data in csv form
     #[serde(default)]
     pub csv: bool,
-}
-
-/// Represents the part of a run query that is received as a request body
-///
-/// The mapping for querying runs has pipeline_id, template_id, or test_id as path params
-/// and the other parameters are expected as part of the request body.  A RunQuery
-/// cannot be deserialized from the request body, so this is used instead, and then a
-/// RunQuery can be built from the instance of this and the id from the path
-#[derive(Deserialize, Debug)]
-pub struct RunQueryIncomplete {
-    pub run_group_id: Option<Uuid>,
-    pub name: Option<String>,
-    pub status: Option<RunStatusEnum>,
-    pub test_input: Option<Value>,
-    pub test_options: Option<Value>,
-    pub eval_input: Option<Value>,
-    pub eval_options: Option<Value>,
-    pub test_cromwell_job_id: Option<String>,
-    pub eval_cromwell_job_id: Option<String>,
-    pub created_before: Option<NaiveDateTime>,
-    pub created_after: Option<NaiveDateTime>,
-    pub created_by: Option<String>,
-    pub finished_before: Option<NaiveDateTime>,
-    pub finished_after: Option<NaiveDateTime>,
-    pub sort: Option<String>,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-    /// For the user to specify they want the returned data in csv form
-    #[serde(default)]
-    pub csv: bool,
-}
-
-impl From<RunQueryIncomplete> for RunQuery {
-    fn from(query: RunQueryIncomplete) -> Self {
-        RunQuery {
-            pipeline_id: None,
-            template_id: None,
-            test_id: None,
-            run_group_id: query.run_group_id,
-            name: query.name,
-            status: query.status,
-            test_input: query.test_input,
-            test_options: query.test_options,
-            eval_input: query.eval_input,
-            eval_options: query.eval_options,
-            test_cromwell_job_id: query.test_cromwell_job_id,
-            eval_cromwell_job_id: query.eval_cromwell_job_id,
-            created_before: query.created_before,
-            created_after: query.created_after,
-            created_by: query.created_by,
-            finished_before: query.finished_before,
-            finished_after: query.finished_after,
-            sort: query.sort,
-            limit: query.limit,
-            offset: query.offset,
-        }
-    }
 }
 
 /// Represents the part of a new run that is received as a request body
@@ -121,7 +62,7 @@ pub struct NewRunIncomplete {
 /// Panics if attempting to connect to the database results in an error
 async fn find_by_id(
     req: HttpRequest,
-    web::Query(query): web::Query<FindByIdQueryParams>,
+    web::Query(query): web::Query<FindQueryParams>,
     pool: web::Data<db::DbPool>,
     config: web::Data<Config>,
 ) -> HttpResponse {
@@ -200,7 +141,9 @@ async fn find_by_id(
 async fn find_for_test(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
+    web::Query(options): web::Query<FindQueryParams>,
     pool: web::Data<db::DbPool>,
+    git_repo_manager: web::Data<GitRepoManager>,
     config: web::Data<Config>,
 ) -> HttpResponse {
     // Parse ID into Uuid
@@ -209,11 +152,22 @@ async fn find_for_test(
         Err(error_response) => return error_response,
     };
 
-    let return_csvs: bool = query.csv;
+    let return_csvs: bool = options.csv;
 
     // Create RunQuery based on id and query
-    let mut processed_query = RunQuery::from(query);
-    processed_query.test_id = Some(id);
+    let processed_query = match get_run_query_from_run_query_incomplete(
+        &pool.get().expect("Failed to get DB connection from pool"),
+        &git_repo_manager,
+        query,
+        None,
+        None,
+        Some(id)
+    ) {
+        Ok(run_query) => run_query,
+        Err(e) => {
+            return default_500(&e);
+        }
+    };
 
     // Use our processed query to find the run data
     find(processed_query, return_csvs, pool, config).await
@@ -233,7 +187,9 @@ async fn find_for_test(
 async fn find_for_template(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
+    web::Query(options): web::Query<FindQueryParams>,
     pool: web::Data<db::DbPool>,
+    git_repo_manager: web::Data<GitRepoManager>,
     config: web::Data<Config>,
 ) -> HttpResponse {
     // Parse ID into Uuid
@@ -242,11 +198,22 @@ async fn find_for_template(
         Err(error_response) => return error_response,
     };
 
-    let return_csvs: bool = query.csv;
+    let return_csvs: bool = options.csv;
 
     // Create RunQuery based on id and query
-    let mut processed_query = RunQuery::from(query);
-    processed_query.template_id = Some(id);
+    let processed_query = match get_run_query_from_run_query_incomplete(
+        &pool.get().expect("Failed to get DB connection from pool"),
+        &git_repo_manager,
+        query,
+        None,
+        Some(id),
+        None
+    ) {
+        Ok(run_query) => run_query,
+        Err(e) => {
+            return default_500(&e);
+        }
+    };
 
     // Use our processed query to find the run data
     find(processed_query, return_csvs, pool, config).await
@@ -266,7 +233,9 @@ async fn find_for_template(
 async fn find_for_pipeline(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
+    web::Query(options): web::Query<FindQueryParams>,
     pool: web::Data<db::DbPool>,
+    git_repo_manager: web::Data<GitRepoManager>,
     config: web::Data<Config>,
 ) -> HttpResponse {
     // Parse ID into Uuid
@@ -275,11 +244,22 @@ async fn find_for_pipeline(
         Err(error_response) => return error_response,
     };
 
-    let return_csvs: bool = query.csv;
+    let return_csvs: bool = options.csv;
 
     // Create RunQuery based on id and query
-    let mut processed_query = RunQuery::from(query);
-    processed_query.pipeline_id = Some(id);
+    let processed_query = match get_run_query_from_run_query_incomplete(
+        &pool.get().expect("Failed to get DB connection from pool"),
+        &git_repo_manager,
+        query,
+        Some(id),
+        None,
+        None
+    ) {
+        Ok(run_query) => run_query,
+        Err(e) => {
+            return default_500(&e);
+        }
+    };
 
     // Use our processed query to find the run data
     find(processed_query, return_csvs, pool, config).await
@@ -843,7 +823,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::custom_sql_types::ResultTypeEnum;
+    use crate::custom_sql_types::{ResultTypeEnum, RunStatusEnum};
     use crate::models::pipeline::{NewPipeline, PipelineData};
     use crate::models::result::{NewResult, ResultData};
     use crate::models::run::{NewRun, RunData};
@@ -864,7 +844,15 @@ mod tests {
     use rand::prelude::*;
     use serde_json::json;
     use std::fs::read_to_string;
+    use chrono::NaiveDateTime;
+    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
     use uuid::Uuid;
+    use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
+    use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::models::software_version_tag::{NewSoftwareVersionTag, SoftwareVersionTagData};
+    use crate::routes::software_version_query_for_run::SoftwareVersionQueryForRun;
 
     /// A variation on RunWithResultsAndErrorsData that deserializes properly from what a
     /// RunWithResultsAndErrorsData serializes to (with hex strings for hashes instead of byte
@@ -873,7 +861,7 @@ mod tests {
     pub struct TestRunWithResultsAndErrorsData {
         pub run_id: Uuid,
         pub test_id: Uuid,
-        pub run_group_id: Option<Uuid>,
+        pub run_group_ids: Vec<Uuid>,
         pub name: String,
         pub status: RunStatusEnum,
         pub test_wdl: String,
@@ -902,7 +890,7 @@ mod tests {
             TestRunWithResultsAndErrorsData {
                 run_id: r.run_id,
                 test_id: r.test_id,
-                run_group_id: r.run_group_id,
+                run_group_ids: r.run_group_ids,
                 name: r.name,
                 status: r.status,
                 test_wdl: r.test_wdl,
@@ -1003,7 +991,7 @@ mod tests {
         let run_to_return = RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
-            run_group_id: test_run.run_group_id,
+            run_group_ids: vec![],
             name: test_run.name,
             status: test_run.status,
             test_wdl: test_wdl_hash.location.clone(),
@@ -1025,6 +1013,63 @@ mod tests {
             finished_at: test_run.finished_at,
             results: Some(test_results),
             errors: Some(test_errors),
+        };
+
+        run_to_return
+    }
+
+    fn create_test_run_with_test_id_and_commit(
+        conn: &PgConnection,
+        test_id: Uuid,
+        commit: &str
+    ) -> RunWithResultsAndErrorsData {
+        let test_run = {
+            let new_run = NewRun {
+                name: String::from("Kevin's Run 2"),
+                test_id,
+                status: RunStatusEnum::TestSubmitted,
+                test_wdl: String::from("~/.carrot/wdl/f65b7c37-5458-4dee-8434-04198af3af72/test.wdl"),
+                test_wdl_dependencies: None,
+                eval_wdl: String::from("~/.carrot/wdl/592c6531-3e71-4c40-b190-0155be959f28/eval.wdl"),
+                eval_wdl_dependencies: None,
+                test_input: json!({"in_greeted": "Cool Person2", "in_greeting": "Hey", "docker":format!("image_build:TestSoftware|{}", commit)}),
+                test_options: Some(json!({"test": "test"})),
+                eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
+                eval_options: None,
+                test_cromwell_job_id: Some(String::from("213945321097593")),
+                eval_cromwell_job_id: None,
+                created_by: Some(String::from("Kevin@example.com")),
+                finished_at: None,
+            };
+
+            RunData::create(conn, new_run).expect("Failed inserting test run")
+        };
+
+        let run_to_return = RunWithResultsAndErrorsData {
+            run_id: test_run.run_id,
+            test_id: test_run.test_id,
+            run_group_ids: vec![],
+            name: test_run.name,
+            status: test_run.status,
+            test_wdl: test_run.test_wdl.clone(),
+            test_wdl_hash: Some(hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: test_run.eval_wdl.clone(),
+            eval_wdl_hash: Some(hex::decode("abc7d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
+            test_input: test_run.test_input,
+            test_options: test_run.test_options,
+            eval_input: test_run.eval_input,
+            eval_options: test_run.eval_options,
+            test_cromwell_job_id: test_run.test_cromwell_job_id,
+            eval_cromwell_job_id: test_run.eval_cromwell_job_id,
+            created_at: test_run.created_at,
+            created_by: test_run.created_by,
+            finished_at: test_run.finished_at,
+            results: None,
+            errors: None,
         };
 
         run_to_return
@@ -1188,7 +1233,6 @@ mod tests {
 
     fn create_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
-            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
@@ -1196,7 +1240,7 @@ mod tests {
             test_wdl_dependencies: None,
             eval_wdl: String::from("~/.carrot/wdl/592c6531-3e71-4c40-b190-0155be959f28/eval.wdl"),
             eval_wdl_dependencies: None,
-            test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
+            test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo", "docker":"image_build:TestSoftware|first"}),
             test_options: Some(json!({"test": "test"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
             eval_options: None,
@@ -1248,7 +1292,6 @@ mod tests {
         let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
 
         let new_run = NewRun {
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's Run"),
             test_id: test.test_id,
             status: RunStatusEnum::TestSubmitted,
@@ -1266,7 +1309,14 @@ mod tests {
             finished_at: None,
         };
 
-        RunData::create(conn, new_run).expect("Failed inserting test run")
+        let run = RunData::create(conn, new_run).expect("Failed inserting test run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        run
     }
 
     fn create_test_run_with_failed_state(conn: &PgConnection) -> RunData {
@@ -1309,7 +1359,6 @@ mod tests {
         let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
 
         let new_run = NewRun {
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's Run"),
             test_id: test.test_id,
             status: RunStatusEnum::TestFailed,
@@ -1327,7 +1376,14 @@ mod tests {
             finished_at: None,
         };
 
-        RunData::create(conn, new_run).expect("Failed inserting test run")
+        let run = RunData::create(conn, new_run).expect("Failed inserting test run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        run
     }
 
     fn get_csv_zip_bytes_for_test_runs(runs: &Vec<RunWithResultsAndErrorsData>) -> Vec<u8> {
@@ -1337,6 +1393,41 @@ mod tests {
         let mut zip_file_path: PathBuf = PathBuf::from(run_csvs_dir.path());
         zip_file_path.push("run_csvs.zip");
         fs::read(zip_file_path).unwrap()
+    }
+
+    fn create_test_git_repo_manager(repo_path: &str) -> GitRepoManager {
+        GitRepoManager::new(None, repo_path.to_owned())
+    }
+
+    fn create_test_software_with_versions(conn: &PgConnection) -> (SoftwareData, SoftwareVersionData, SoftwareVersionData) {
+        let (test_repo_dir, commit1, commit2, commit1_date, commit2_date) = get_test_remote_github_repo();
+        let test_software = SoftwareData::create(conn, NewSoftware {
+            name: "TestSoftware".to_string(),
+            description: None,
+            repository_url: String::from(test_repo_dir.as_path().to_str().unwrap()),
+            machine_type: None,
+            created_by: None
+        }).unwrap();
+        let test_software_version = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: commit1.clone(),
+            software_id: test_software.software_id,
+            commit_date: commit1_date.clone()
+        }).unwrap();
+        let test_software_version2 = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: commit2.clone(),
+            software_id: test_software.software_id,
+            commit_date: commit2_date.clone()
+        }).unwrap();
+        SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: test_software_version.software_version_id,
+            tag: "first".to_string()
+        }).unwrap();
+        SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: test_software_version.software_version_id,
+            tag: "beginning".to_string()
+        }).unwrap();
+
+        (test_software, test_software_version, test_software_version2)
     }
 
     #[actix_rt::test]
@@ -1460,6 +1551,8 @@ mod tests {
     async fn find_for_test_success() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         let mut new_run = create_test_run_with_results(&pool.get().unwrap());
         replace_wdl_and_deps_with_links(&mut new_run);
@@ -1468,6 +1561,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1488,23 +1582,265 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn find_for_test_success_csv() {
+    async fn find_for_test_success_software_version_list() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
 
         let mut new_run = create_test_run_with_results(&pool.get().unwrap());
         replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
 
         let mut app = test::init_service(
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
+                .configure(init_routes),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::List {
+            name: String::from("TestSoftware"),
+            commits_and_tags: vec![String::from("first")]
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs?software_versions={}", new_run.test_id, software_versions_query_param))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_success_software_version_count() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
+
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .data(git_repo_manager)
+                .configure(init_routes),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::Count {
+            name: String::from("TestSoftware"),
+            count: 1,
+            branch: Some(String::from("master")),
+            tags_only: false
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs?software_versions={}", new_run.test_id, software_versions_query_param))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_success_software_version_tags() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
+
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .data(git_repo_manager)
+                .configure(init_routes),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::Count {
+            name: String::from("TestSoftware"),
+            count: 1,
+            branch: None,
+            tags_only: true
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs?software_versions={}", new_run.test_id, software_versions_query_param))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_success_software_version_dates() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
+
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .data(git_repo_manager)
+                .configure(init_routes),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::Dates {
+            name: String::from("TestSoftware"),
+            to: Some(NaiveDateTime::parse_from_str("2022-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+            from: Some(NaiveDateTime::parse_from_str("2021-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+            branch: None
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/tests/{}/runs?software_versions={}", new_run.test_id, software_versions_query_param))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
+    }
+
+    #[actix_rt::test]
+    async fn find_for_test_success_csv() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
+
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
 
+        let software_versions_query = SoftwareVersionQueryForRun::Dates {
+            name: String::from("TestSoftware"),
+            to: Some(NaiveDateTime::parse_from_str("2022-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+            from: Some(NaiveDateTime::parse_from_str("2021-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+            branch: None
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
         let req = test::TestRequest::get()
-            .uri(&format!("/tests/{}/runs?csv=true", new_run.test_id))
+            .uri(&format!("/tests/{}/runs?csv=true&software_versions={}", new_run.test_id, software_versions_query_param))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1521,6 +1857,8 @@ mod tests {
     async fn find_for_test_failure_not_found() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         create_test_run_with_results(&pool.get().unwrap());
 
@@ -1528,6 +1866,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1554,6 +1893,8 @@ mod tests {
     async fn find_for_test_failure_bad_uuid() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         create_test_run_with_results(&pool.get().unwrap());
 
@@ -1561,6 +1902,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1584,6 +1926,8 @@ mod tests {
     async fn find_for_template_success() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         let (_, new_test, mut new_run) = create_run_with_test_and_template(&pool.get().unwrap());
         replace_wdl_and_deps_with_links(&mut new_run);
@@ -1592,6 +1936,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1612,25 +1957,105 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn find_for_template_success_csv() {
+    async fn find_for_template_success_software_versions() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
 
         let (_, new_test, mut new_run) = create_run_with_test_and_template(&pool.get().unwrap());
         replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
 
         let mut app = test::init_service(
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
+                .configure(init_routes),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::Dates {
+            name: String::from("TestSoftware"),
+            to: Some(NaiveDateTime::parse_from_str("2022-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+            from: Some(NaiveDateTime::parse_from_str("2021-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+            branch: None
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/templates/{}/runs?software_versions={}", new_test.template_id, software_versions_query_param))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let result = test::read_body(resp).await;
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(test_runs.len(), 1);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
+    }
+
+    #[actix_rt::test]
+    async fn find_for_template_success_csv() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
+
+        let (_, new_test, mut new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
 
+        let software_versions_query = SoftwareVersionQueryForRun::Count {
+            name: String::from("TestSoftware"),
+            count: 1,
+            branch: Some(String::from("master")),
+            tags_only: false
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/templates/{}/runs?csv=true",
-                new_test.template_id
+                "/templates/{}/runs?csv=true&software_versions={}",
+                new_test.template_id,
+                software_versions_query_param
             ))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1648,6 +2073,8 @@ mod tests {
     async fn find_for_template_failure_not_found() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
@@ -1655,6 +2082,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1681,6 +2109,8 @@ mod tests {
     async fn find_for_template_failure_bad_uuid() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
@@ -1688,6 +2118,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1711,21 +2142,45 @@ mod tests {
     async fn find_for_pipeline_success() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&pool.get().unwrap());
+        git_repo_manager.download_git_repo(test_software.software_id, &test_software.repository_url).unwrap();
 
         let (new_template, _, mut new_run) =
             create_run_with_test_and_template(&pool.get().unwrap());
         replace_wdl_and_deps_with_links(&mut new_run);
+        let test_run_software_version = RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: new_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+
+        let run_we_wont_find = create_test_run_with_test_id_and_commit(&pool.get().unwrap(), new_run.test_id, &test_software_version2.commit);
+        RunSoftwareVersionData::create(&pool.get().unwrap(), NewRunSoftwareVersion {
+            run_id: run_we_wont_find.run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
 
         let mut app = test::init_service(
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
 
+        let software_versions_query = SoftwareVersionQueryForRun::Count {
+            name: String::from("TestSoftware"),
+            count: 1,
+            branch: Some(String::from("master")),
+            tags_only: false
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+
         let req = test::TestRequest::get()
-            .uri(&format!("/pipelines/{}/runs", new_template.pipeline_id))
+            .uri(&format!("/pipelines/{}/runs?software_versions={}", new_template.pipeline_id, software_versions_query_param))
             .to_request();
         let resp = test::call_service(&mut app, req).await;
 
@@ -1743,6 +2198,8 @@ mod tests {
     async fn find_for_pipeline_success_csv() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         let (new_template, _, mut new_run) =
             create_run_with_test_and_template(&pool.get().unwrap());
@@ -1752,6 +2209,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1777,6 +2235,8 @@ mod tests {
     async fn find_for_pipeline_failure_not_found() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
@@ -1784,6 +2244,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1810,6 +2271,8 @@ mod tests {
     async fn find_for_pipeline_failure_bad_uuid() {
         let pool = get_test_db_pool();
         let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = create_test_git_repo_manager(temp_repo_dir.path().to_str().unwrap());
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
@@ -1817,6 +2280,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_config)
+                .data(git_repo_manager)
                 .configure(init_routes),
         )
         .await;
@@ -1903,7 +2367,7 @@ mod tests {
         cromwell_mock.assert();
 
         let result = test::read_body(resp).await;
-        let test_run: RunWithResultsAndErrorsData = serde_json::from_slice(&result).unwrap();
+        let test_run: RunData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run.test_id, test_test.test_id);
         assert_eq!(test_run.status, RunStatusEnum::TestSubmitted);

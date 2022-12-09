@@ -62,3 +62,4 @@ def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_na
         print(map_entity.delete_map_by_ids(entity1_rest_name, entity1_id, entity2_id))
     else:
         print(map_entity.delete_map_by_ids(entity1_id, entity2_id))
+

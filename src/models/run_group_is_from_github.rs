@@ -4,7 +4,7 @@
 //! This is tracked to allow replying to comments on GitHub that trigger carrot runs. Represented
 //! in the database by the RUN_GROUP_IS_FROM_GITHUB table.
 
-use crate::schema::run;
+use crate::schema::run_in_group;
 use crate::schema::run_group_is_from_github;
 use crate::schema::run_group_is_from_github::dsl::*;
 use crate::util;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// Mapping to a run_group_is_from_github as it exists in the RUN_GROUP_IS_FROM_GITHUB table in the database.
 ///
 /// An instance of this struct will be returned by any queries for run_group_is_from_githubs records.
-#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct RunGroupIsFromGithubData {
     pub run_group_id: Uuid,
     pub owner: String,
@@ -101,11 +101,11 @@ impl RunGroupIsFromGithubData {
         conn: &PgConnection,
         run_id: Uuid,
     ) -> Result<Self, diesel::result::Error> {
-        let run_subquery = run::dsl::run
-            .filter(run::dsl::run_id.eq(run_id))
-            .select(run::dsl::run_group_id);
+        let run_in_group_subquery = run_in_group::dsl::run_in_group
+            .filter(run_in_group::dsl::run_id.eq(run_id))
+            .select(run_in_group::dsl::run_group_id);
         run_group_is_from_github
-            .filter(run_group_id.nullable().eq_any(run_subquery))
+            .filter(run_group_id.eq_any(run_in_group_subquery))
             .first::<Self>(conn)
     }
 
