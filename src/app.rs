@@ -70,7 +70,7 @@ pub fn run_app(
         // Create report builder
         let report_builder: Option<ReportBuilder> = carrot_config.reporting().map(|reporting_config| {
             // We can unwrap gcloud_client because reporting won't work without it
-            ReportBuilder::new(cromwell_client, gcloud_client.clone().expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config)
+            ReportBuilder::new(cromwell_client, gcloud_client.clone().expect("Failed to unwrap gcloud_client to create report builder.  This should not happen"), reporting_config, carrot_config.api().domain().to_owned())
         });
         // Create a womtool runner
         let womtool_runner: WomtoolRunner = WomtoolRunner::new(carrot_config.validation().womtool_location());

@@ -3,14 +3,20 @@
 //! Contains functions for processing requests to search runs, along with
 //! their URI mappings
 
+use crate::config::Config;
 use crate::custom_sql_types::RunStatusEnum;
 use crate::db;
 use crate::manager::test_runner;
 use crate::manager::test_runner::TestRunner;
 use crate::models::run::{DeleteError, RunData, RunQuery, RunWithResultsAndErrorsData};
+use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::util::parse_id;
 use crate::util::run_csv;
+use crate::util::uri_conversion::{
+    fill_uris_for_wdl_locations_run, fill_uris_for_wdl_locations_run_with_results_and_errors,
+};
+use crate::util::wdl_type::WdlType;
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
@@ -117,6 +123,7 @@ async fn find_by_id(
     req: HttpRequest,
     web::Query(query): web::Query<FindByIdQueryParams>,
     pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
 ) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
@@ -143,11 +150,16 @@ async fn find_by_id(
     })
     .await
     {
-        Ok(results) => {
+        Ok(mut run) => {
+            // Update the wdl mappings so the user will have uris they can use to access them
+            fill_uris_for_wdl_locations_run_with_results_and_errors(
+                config.api().domain(),
+                &mut run,
+            );
             // Return it as csvs if the user requested that
             if return_csvs {
                 // Build csv files from results
-                let zip_bytes: Vec<u8> = match get_bytes_for_csv_zip_from_runs(&vec![results]) {
+                let zip_bytes: Vec<u8> = match get_bytes_for_csv_zip_from_runs(&vec![run]) {
                     Ok(zip_bytes) => zip_bytes,
                     Err(error_response) => return error_response,
                 };
@@ -155,7 +167,7 @@ async fn find_by_id(
             }
             // Otherwise, just return the json
             else {
-                HttpResponse::Ok().json(results)
+                HttpResponse::Ok().json(run)
             }
         }
         Err(e) => {
@@ -189,6 +201,7 @@ async fn find_for_test(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
 ) -> HttpResponse {
     // Parse ID into Uuid
     let id = match parse_id(&id) {
@@ -203,7 +216,7 @@ async fn find_for_test(
     processed_query.test_id = Some(id);
 
     // Use our processed query to find the run data
-    find(processed_query, return_csvs, pool).await
+    find(processed_query, return_csvs, pool, config).await
 }
 
 /// Handles requests to /templates/{id}/runs for retrieving run info by query parameters and
@@ -221,6 +234,7 @@ async fn find_for_template(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
 ) -> HttpResponse {
     // Parse ID into Uuid
     let id = match parse_id(&id) {
@@ -235,7 +249,7 @@ async fn find_for_template(
     processed_query.template_id = Some(id);
 
     // Use our processed query to find the run data
-    find(processed_query, return_csvs, pool).await
+    find(processed_query, return_csvs, pool, config).await
 }
 
 /// Handles requests to /pipelines/{id}/runs for retrieving run info by query parameters and
@@ -253,6 +267,7 @@ async fn find_for_pipeline(
     id: web::Path<String>,
     web::Query(query): web::Query<RunQueryIncomplete>,
     pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
 ) -> HttpResponse {
     // Parse ID into Uuid
     let id = match parse_id(&id) {
@@ -267,14 +282,19 @@ async fn find_for_pipeline(
     processed_query.pipeline_id = Some(id);
 
     // Use our processed query to find the run data
-    find(processed_query, return_csvs, pool).await
+    find(processed_query, return_csvs, pool, config).await
 }
 
 /// Queries for run data based on `run_query` (using a connection from `pool`), and returns an
 /// appropriate HttpResponse containing either the retrieved run data (as binary data for a zip of
 /// csvs containing the data if `return_csvs` or as json if not) or an error message and status code
 /// if there is an error
-async fn find(run_query: RunQuery, return_csvs: bool, pool: web::Data<db::DbPool>) -> HttpResponse {
+async fn find(
+    run_query: RunQuery,
+    return_csvs: bool,
+    pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
+) -> HttpResponse {
     // Query DB for runs in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
@@ -289,7 +309,7 @@ async fn find(run_query: RunQuery, return_csvs: bool, pool: web::Data<db::DbPool
     })
     .await
     {
-        Ok(results) => {
+        Ok(mut results) => {
             // If no run is found, return a 404
             if results.is_empty() {
                 HttpResponse::NotFound().json(ErrorBody {
@@ -298,6 +318,14 @@ async fn find(run_query: RunQuery, return_csvs: bool, pool: web::Data<db::DbPool
                     detail: "No runs found with the specified parameters".to_string(),
                 })
             } else {
+                // Update the wdl mappings so the user will have uris they can use to access them
+                for run in &mut results {
+                    // Update the wdl mappings so the user will have uris they can use to access them
+                    fill_uris_for_wdl_locations_run_with_results_and_errors(
+                        config.api().domain(),
+                        run,
+                    );
+                }
                 // If there is no error, return a response with the retrieved data
                 // Return it as csvs if the user requested that
                 if return_csvs {
@@ -307,7 +335,7 @@ async fn find(run_query: RunQuery, return_csvs: bool, pool: web::Data<db::DbPool
                         Err(error_response) => error_response,
                     }
                 }
-                // Otherwise, just return the json
+                // Otherwise, just return the json converted to user version
                 else {
                     HttpResponse::Ok().json(results)
                 }
@@ -334,6 +362,7 @@ async fn run_for_test(
     id: web::Path<String>,
     web::Json(run_inputs): web::Json<NewRunIncomplete>,
     pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
     test_runner: web::Data<TestRunner>,
 ) -> HttpResponse {
     // Get DB connection
@@ -353,7 +382,12 @@ async fn run_for_test(
         )
         .await
     {
-        Ok(run) => HttpResponse::Ok().json(run),
+        Ok(mut run) => {
+            // Update the wdl mappings so the user will have uris they can use to access them
+            fill_uris_for_wdl_locations_run(config.api().domain(), &mut run);
+
+            HttpResponse::Ok().json(run)
+        }
         Err(err) => {
             let error_body = match err {
                 test_runner::Error::DuplicateName => ErrorBody {
@@ -485,6 +519,252 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
     }
 }
 
+/// Handles GET requests to /runs/{id}/test_wdl for retrieving test wdl by run_id
+///
+/// This function is called by Actix-Web when a get request is made to the /runs/{id}/test_wdl
+/// mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
+/// look up the specified run, retrieves the test_wdl from where it is located, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_test_wdl(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<TestResourceClient>,
+) -> HttpResponse {
+    download_wdl(id_param, pool, &client, WdlType::Test).await
+}
+
+/// Handles GET requests to /runs/{id}/eval_wdl for retrieving eval wdl by run_id
+///
+/// This function is called by Actix-Web when a get request is made to the /runs/{id}/eval_wdl
+/// mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
+/// look up the specified run, retrieves the eval_wdl from where it is located, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_eval_wdl(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<TestResourceClient>,
+) -> HttpResponse {
+    download_wdl(id_param, pool, &client, WdlType::Eval).await
+}
+
+/// Handlers requests for downloading WDLs for a run.  Meant to be called by other functions
+/// that are REST endpoints.
+///
+/// Parses `id_param` as a UUID, connects to the db via a connection from `pool`, attempts to
+/// look up the specified run, retrieves the wdl from where it is located based on wdl_type,
+/// and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_wdl(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: &TestResourceClient,
+    wdl_type: WdlType,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&id_param) {
+        Ok(parsed_id) => parsed_id,
+        Err(error_response) => return error_response,
+    };
+
+    // Get the template first so we can get the wdl from it
+    let run = match web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match RunData::find_by_id(&conn, id) {
+            Ok(run) => Ok(run),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await
+    {
+        Ok(run) => run,
+        Err(e) => {
+            error!("{:?}", e);
+            return match e {
+                // If no template is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No run found".to_string(),
+                        status: 404,
+                        detail: "No run found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: "Error while attempting to retrieve requested run from DB".to_string(),
+                }),
+            };
+        }
+    };
+
+    // Get the location of the wdl from the template
+    let wdl_location = match wdl_type {
+        WdlType::Test => run.test_wdl,
+        WdlType::Eval => run.eval_wdl,
+    };
+
+    // Attempt to retrieve the WDL
+    match client.get_resource_as_string(&wdl_location).await {
+        // If we retrieved it successfully, return it
+        Ok(wdl_string) => HttpResponse::Ok().body(wdl_string),
+        // Otherwise, let the user know of the error
+        Err(e) => HttpResponse::InternalServerError().json(ErrorBody {
+            title: "Server error".to_string(),
+            status: 500,
+            detail: format!(
+                "Encountered the following error while trying to retrieve the {} wdl: {}",
+                wdl_type, e
+            ),
+        }),
+    }
+}
+
+/// Handles GET requests to /runs/{id}/test_wdl_dependencies for retrieving test wdl by run_id
+///
+/// This function is called by Actix-Web when a get request is made to the
+/// /runs/{id}/test_wdl_dependencies mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
+/// look up the specified run, retrieves the test_wdl dependencies zip from where it is
+/// located, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_test_wdl_dependencies(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<TestResourceClient>,
+) -> HttpResponse {
+    download_wdl_dependencies(id_param, pool, &client, WdlType::Test).await
+}
+
+/// Handles GET requests to /runs/{id}/eval_wdl_dependencies for retrieving eval wdl by
+/// template_id
+///
+/// This function is called by Actix-Web when a get request is made to the /runs/{id}/eval_wdl
+/// mapping
+/// It parses the id from `req`, connects to the db via a connection from `pool`, attempts to
+/// look up the specified run, retrieves the eval_wdl dependencies zip from where it is
+/// located, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_eval_wdl_dependencies(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: web::Data<TestResourceClient>,
+) -> HttpResponse {
+    download_wdl_dependencies(id_param, pool, &client, WdlType::Eval).await
+}
+
+/// Handlers requests for downloading WDL dependencies for a run.  Meant to be called by other
+/// functions that are REST endpoints.
+///
+/// Parses `id_param` as a UUID, connects to the db via a connection from `pool`, attempts to
+/// look up the specified run, retrieves the wdl dependency zip from where it is located based
+/// on wdl_type, and returns it
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn download_wdl_dependencies(
+    id_param: web::Path<String>,
+    pool: web::Data<db::DbPool>,
+    client: &TestResourceClient,
+    wdl_type: WdlType,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&id_param) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+
+    // Get the template first so we can get the wdl from it
+    let run = match web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match RunData::find_by_id(&conn, id) {
+            Ok(run) => Ok(run),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
+            }
+        }
+    })
+    .await
+    {
+        Ok(run) => run,
+        Err(e) => {
+            error!("{:?}", e);
+            return match e {
+                // If no template is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No run found".to_string(),
+                        status: 404,
+                        detail: "No run found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => HttpResponse::InternalServerError().json(ErrorBody {
+                    title: "Server error".to_string(),
+                    status: 500,
+                    detail: "Error while attempting to retrieve requested run from DB".to_string(),
+                }),
+            };
+        }
+    };
+
+    // Get the location of the wdl from the template
+    let wdl_deps_location = match wdl_type {
+        WdlType::Test => run.test_wdl_dependencies,
+        WdlType::Eval => run.eval_wdl_dependencies,
+    };
+
+    // If there isn't a value for the deps location, return a 404
+    let wdl_deps_location = match wdl_deps_location {
+        Some(location) => location,
+        None => {
+            return HttpResponse::NotFound().json(ErrorBody {
+                title: format!("No {} dependencies found for the specified run", wdl_type),
+                status: 404,
+                detail: format!(
+                    "The run with id {} does not have a value for {}_dependencies",
+                    id, wdl_type
+                ),
+            });
+        }
+    };
+
+    // Attempt to retrieve the WDL
+    match client.get_resource_as_bytes(&wdl_deps_location).await {
+        // If we retrieved it successfully, return it
+        Ok(wdl_bytes) => HttpResponse::Ok()
+            .content_type("application/zip")
+            .body(wdl_bytes),
+        // Otherwise, let the user know of the error
+        Err(e) => HttpResponse::InternalServerError().json(ErrorBody {
+            title: "Server error".to_string(),
+            status: 500,
+            detail: format!(
+                "Encountered the following error while trying to retrieve the {} wdl: {}",
+                wdl_type, e
+            ),
+        }),
+    }
+}
+
 /// Generates csv files from `runs` and returns a zip of the csvs as bytes.  If an error occurs,
 /// logs the error and returns an appropriate error response
 fn get_bytes_for_csv_zip_from_runs(
@@ -548,6 +828,16 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     );
     cfg.service(web::resource("/templates/{id}/runs").route(web::get().to(find_for_template)));
     cfg.service(web::resource("/pipelines/{id}/runs").route(web::get().to(find_for_pipeline)));
+    cfg.service(web::resource("/runs/{id}/test_wdl").route(web::get().to(download_test_wdl)));
+    cfg.service(web::resource("/runs/{id}/eval_wdl").route(web::get().to(download_eval_wdl)));
+    cfg.service(
+        web::resource("/templates/{id}/test_wdl_dependencies")
+            .route(web::get().to(download_test_wdl_dependencies)),
+    );
+    cfg.service(
+        web::resource("/templates/{id}/eval_wdl_dependencies")
+            .route(web::get().to(download_eval_wdl_dependencies)),
+    );
 }
 
 #[cfg(test)]
@@ -562,6 +852,7 @@ mod tests {
     use crate::models::run_result::{NewRunResult, RunResultData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
+    use crate::models::wdl_hash::WdlHashData;
     use crate::requests::cromwell_requests::CromwellClient;
     use crate::requests::test_resource_requests::TestResourceClient;
     use crate::unit_test_util::*;
@@ -574,6 +865,80 @@ mod tests {
     use serde_json::json;
     use std::fs::read_to_string;
     use uuid::Uuid;
+
+    /// A variation on RunWithResultsAndErrorsData that deserializes properly from what a
+    /// RunWithResultsAndErrorsData serializes to (with hex strings for hashes instead of byte
+    /// vectors)
+    #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+    pub struct TestRunWithResultsAndErrorsData {
+        pub run_id: Uuid,
+        pub test_id: Uuid,
+        pub run_group_id: Option<Uuid>,
+        pub name: String,
+        pub status: RunStatusEnum,
+        pub test_wdl: String,
+        pub test_wdl_hash: Option<String>,
+        pub test_wdl_dependencies: Option<String>,
+        pub test_wdl_dependencies_hash: Option<String>,
+        pub eval_wdl: String,
+        pub eval_wdl_hash: Option<String>,
+        pub eval_wdl_dependencies: Option<String>,
+        pub eval_wdl_dependencies_hash: Option<String>,
+        pub test_input: Value,
+        pub test_options: Option<Value>,
+        pub eval_input: Value,
+        pub eval_options: Option<Value>,
+        pub test_cromwell_job_id: Option<String>,
+        pub eval_cromwell_job_id: Option<String>,
+        pub created_at: NaiveDateTime,
+        pub created_by: Option<String>,
+        pub finished_at: Option<NaiveDateTime>,
+        pub results: Option<Value>,
+        pub errors: Option<Value>,
+    }
+
+    impl From<RunWithResultsAndErrorsData> for TestRunWithResultsAndErrorsData {
+        fn from(r: RunWithResultsAndErrorsData) -> Self {
+            TestRunWithResultsAndErrorsData {
+                run_id: r.run_id,
+                test_id: r.test_id,
+                run_group_id: r.run_group_id,
+                name: r.name,
+                status: r.status,
+                test_wdl: r.test_wdl,
+                test_wdl_hash: match r.test_wdl_hash {
+                    Some(t) => Some(hex::encode(t)),
+                    None => None,
+                },
+                test_wdl_dependencies: r.test_wdl_dependencies,
+                test_wdl_dependencies_hash: match r.test_wdl_dependencies_hash {
+                    Some(t) => Some(hex::encode(t)),
+                    None => None,
+                },
+                eval_wdl: r.eval_wdl,
+                eval_wdl_hash: match r.eval_wdl_hash {
+                    Some(t) => Some(hex::encode(t)),
+                    None => None,
+                },
+                eval_wdl_dependencies: r.eval_wdl_dependencies,
+                eval_wdl_dependencies_hash: match r.eval_wdl_dependencies_hash {
+                    Some(t) => Some(hex::encode(t)),
+                    None => None,
+                },
+                test_input: r.test_input,
+                test_options: r.test_options,
+                eval_input: r.eval_input,
+                eval_options: r.eval_options,
+                test_cromwell_job_id: r.test_cromwell_job_id,
+                eval_cromwell_job_id: r.eval_cromwell_job_id,
+                created_at: r.created_at,
+                created_by: r.created_by,
+                finished_at: r.finished_at,
+                results: r.results,
+                errors: r.errors,
+            }
+        }
+    }
 
     fn create_test_run_with_results(conn: &PgConnection) -> RunWithResultsAndErrorsData {
         let new_pipeline = NewPipeline {
@@ -624,12 +989,31 @@ mod tests {
 
         let test_errors = insert_test_run_errors_with_run_id(&conn, test_run.run_id);
 
-        RunWithResultsAndErrorsData {
+        let test_wdl_hash = WdlHashData::create_with_hash(
+            conn,
+            test_run.test_wdl.clone(),
+            hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()
+        ).unwrap();
+        let eval_wdl_hash = WdlHashData::create_with_hash(
+            conn,
+            test_run.eval_wdl.clone(),
+            hex::decode("abc7d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()
+        ).unwrap();
+
+        let run_to_return = RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
             run_group_id: test_run.run_group_id,
             name: test_run.name,
             status: test_run.status,
+            test_wdl: test_wdl_hash.location.clone(),
+            test_wdl_hash: Some(test_wdl_hash.hash.clone()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: eval_wdl_hash.location.clone(),
+            eval_wdl_hash: Some(eval_wdl_hash.hash.clone()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: test_run.test_input,
             test_options: test_run.test_options,
             eval_input: test_run.eval_input,
@@ -641,6 +1025,25 @@ mod tests {
             finished_at: test_run.finished_at,
             results: Some(test_results),
             errors: Some(test_errors),
+        };
+
+        run_to_return
+    }
+
+    fn replace_wdl_and_deps_with_links(run: &mut RunWithResultsAndErrorsData) {
+        run.test_wdl = format!("example.com/api/v1/runs/{}/test_wdl", run.run_id);
+        if run.test_wdl_dependencies.is_some() {
+            run.test_wdl_dependencies = Some(format!(
+                "example.com/api/v1/runs/{}/test_wdl_dependencies",
+                run.run_id
+            ));
+        }
+        run.eval_wdl = format!("example.com/api/v1/runs/{}/eval_wdl", run.run_id);
+        if run.eval_wdl_dependencies.is_some() {
+            run.eval_wdl_dependencies = Some(format!(
+                "example.com/api/v1/runs/{}/eval_wdl_dependencies",
+                run.run_id
+            ));
         }
     }
 
@@ -789,6 +1192,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
+            test_wdl: String::from("~/.carrot/wdl/f65b7c37-5458-4dee-8434-04198af3af72/test.wdl"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("~/.carrot/wdl/592c6531-3e71-4c40-b190-0155be959f28/eval.wdl"),
+            eval_wdl_dependencies: None,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
             test_options: Some(json!({"test": "test"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
@@ -845,6 +1252,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: test.test_id,
             status: RunStatusEnum::TestSubmitted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
             test_options: Some(json!({"an_option": "true"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
@@ -902,6 +1313,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: test.test_id,
             status: RunStatusEnum::TestFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({"in_greeted": "Cool Person", "in_greeting": "Yo"}),
             test_options: Some(json!({"in_greeting": "Yo"})),
             eval_input: json!({"in_output_filename": "test_greeting.txt", "in_output_filename": "greeting.txt"}),
@@ -927,10 +1342,18 @@ mod tests {
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let new_run = create_test_run_with_results(&pool.get().unwrap());
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/runs/{}", new_run.run_id))
@@ -940,18 +1363,26 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_run: RunWithResultsAndErrorsData = serde_json::from_slice(&result).unwrap();
+        let test_run: TestRunWithResultsAndErrorsData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(test_run, new_run);
+        assert_eq!(test_run, TestRunWithResultsAndErrorsData::from(new_run));
     }
 
     #[actix_rt::test]
     async fn find_by_id_success_csv() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let new_run = create_test_run_with_results(&pool.get().unwrap());
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/runs/{}?csv=true", new_run.run_id))
@@ -970,10 +1401,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_by_id_failure_not_found() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_test_run_with_results(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/runs/{}", Uuid::new_v4()))
@@ -993,10 +1431,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_by_id_failure_bad_uuid() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_test_run_with_results(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get().uri("/runs/123456789").to_request();
         let resp = test::call_service(&mut app, req).await;
@@ -1014,10 +1459,18 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_test_success() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let new_run = create_test_run_with_results(&pool.get().unwrap());
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/tests/{}/runs", new_run.test_id))
@@ -1027,19 +1480,28 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunWithResultsAndErrorsData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
-        assert_eq!(test_runs[0], new_run);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
     }
 
     #[actix_rt::test]
     async fn find_for_test_success_csv() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let new_run = create_test_run_with_results(&pool.get().unwrap());
+        let mut new_run = create_test_run_with_results(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/tests/{}/runs?csv=true", new_run.test_id))
@@ -1058,10 +1520,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_test_failure_not_found() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_test_run_with_results(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/tests/{}/runs", Uuid::new_v4()))
@@ -1084,10 +1553,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_test_failure_bad_uuid() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_test_run_with_results(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/tests/123456789/runs")
@@ -1107,10 +1583,18 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_template_success() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let (_, new_test, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        let (_, new_test, mut new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/runs", new_test.template_id))
@@ -1120,19 +1604,28 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunWithResultsAndErrorsData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
-        assert_eq!(test_runs[0], new_run);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
     }
 
     #[actix_rt::test]
     async fn find_for_template_success_csv() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let (_, new_test, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        let (_, new_test, mut new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
@@ -1154,10 +1647,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_template_failure_not_found() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}/runs", Uuid::new_v4()))
@@ -1180,10 +1680,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_template_failure_bad_uuid() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/templates/123456789/runs")
@@ -1203,10 +1710,19 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_pipeline_success() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let (new_template, _, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        let (new_template, _, mut new_run) =
+            create_run_with_test_and_template(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/pipelines/{}/runs", new_template.pipeline_id))
@@ -1216,19 +1732,29 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         let result = test::read_body(resp).await;
-        let test_runs: Vec<RunWithResultsAndErrorsData> = serde_json::from_slice(&result).unwrap();
+        let test_runs: Vec<TestRunWithResultsAndErrorsData> =
+            serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_runs.len(), 1);
-        assert_eq!(test_runs[0], new_run);
+        assert_eq!(test_runs[0], TestRunWithResultsAndErrorsData::from(new_run));
     }
 
     #[actix_rt::test]
     async fn find_for_pipeline_success_csv() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
-        let (new_template, _, new_run) = create_run_with_test_and_template(&pool.get().unwrap());
+        let (new_template, _, mut new_run) =
+            create_run_with_test_and_template(&pool.get().unwrap());
+        replace_wdl_and_deps_with_links(&mut new_run);
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
@@ -1250,10 +1776,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_pipeline_failure_not_found() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/pipelines/{}/runs", Uuid::new_v4()))
@@ -1276,10 +1809,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_for_pipeline_failure_bad_uuid() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_run_with_test_and_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/pipelines/123456789/runs")
@@ -1299,6 +1839,7 @@ mod tests {
     #[actix_rt::test]
     async fn run_test() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
         let test_runner = TestRunner::new(
             CromwellClient::new(Client::default(), &mockito::server_url()),
             TestResourceClient::new(Client::default(), None),
@@ -1346,6 +1887,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_runner)
+                .data(test_config)
                 .configure(init_routes),
         )
         .await;
@@ -1361,10 +1903,12 @@ mod tests {
         cromwell_mock.assert();
 
         let result = test::read_body(resp).await;
-        let test_run: RunData = serde_json::from_slice(&result).unwrap();
+        let test_run: RunWithResultsAndErrorsData = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(test_run.test_id, test_test.test_id);
         assert_eq!(test_run.status, RunStatusEnum::TestSubmitted);
+        assert_eq!(test_run.test_wdl, format!("{}/test", mockito::server_url()));
+        assert_eq!(test_run.eval_wdl, format!("{}/eval", mockito::server_url()));
         assert_eq!(
             test_run.test_cromwell_job_id,
             Some("53709600-d114-4194-a7f7-9e41211ca2ce".to_string())
@@ -1396,6 +1940,7 @@ mod tests {
     #[actix_rt::test]
     async fn run_test_failure_taken_name() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
         let test_runner = TestRunner::new(
             CromwellClient::new(Client::default(), &mockito::server_url()),
             TestResourceClient::new(Client::default(), None),
@@ -1426,6 +1971,7 @@ mod tests {
             App::new()
                 .data(pool)
                 .data(test_runner)
+                .data(test_config)
                 .configure(init_routes),
         )
         .await;

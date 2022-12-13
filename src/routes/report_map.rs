@@ -663,6 +663,10 @@ mod tests {
             run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -769,6 +773,10 @@ mod tests {
             run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({
                 "greeting_workflow.in_greeting": "Yo",
                 "greeting_workflow.in_greeted": "Jean-Paul Gasse"
@@ -908,6 +916,10 @@ mod tests {
             run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({
                 "greeting_workflow.docker": "carrot_build:ExampleRepo2|6aef1203ac82ba2af28f6979c2c36c07fa4eef7d",
                 "greeting_workflow.in_greeting": "Yo",
@@ -1076,7 +1088,7 @@ mod tests {
         let reporting_config = carrot_config
             .reporting()
             .expect("Cannot create report builder for testing without reporting config");
-        ReportBuilder::new(cromwell_client.clone(), gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen").clone(), reporting_config)
+        ReportBuilder::new(cromwell_client.clone(), gcloud_client.expect("Failed to unwrap gcloud_client to create report builder.  This should not happen").clone(), reporting_config, carrot_config.api().domain().to_owned())
     }
 
     #[actix_rt::test]

@@ -305,7 +305,11 @@ mod tests {
         // Create a github commenter
         let github_commenter = GithubCommenter::new(github_client);
         // Create a notification handler
-        NotificationHandler::new(Some(test_emailer), Some(github_commenter))
+        NotificationHandler::new(
+            Some(test_emailer),
+            Some(github_commenter),
+            String::from("example.com"),
+        )
     }
 
     #[actix_rt::test]

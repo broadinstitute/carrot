@@ -5,7 +5,7 @@
 //! WDL (but not new inputs) for execution or evaluation, a new template is required.  Represented
 //! in the database by the TEMPLATE table.
 
-use crate::custom_sql_types::RUN_FAILURE_STATUSES;
+use crate::custom_sql_types::RUN_TERMINAL_STATUSES;
 use crate::models::pipeline::PipelineData;
 use crate::schema::pipeline;
 use crate::schema::run;
@@ -346,20 +346,20 @@ impl TemplateData {
         params: TemplateChangeset,
     ) -> Result<Self, UpdateError> {
         // If trying to update the test_wdl, eval_wdl, or their dependencies, verify that no
-        // non-failed runs exist for this template
+        // non-terminal runs exist for this template
         if params.test_wdl.is_some()
             || params.eval_wdl.is_some()
             || params.test_wdl_dependencies.is_some()
             || params.eval_wdl_dependencies.is_some()
         {
-            match Self::has_nonfailed_runs(conn, id) {
-                // If there is a nonfailed run, return an error
+            match Self::has_processing_runs(conn, id) {
+                // If there is a non-terminal run, return an error
                 Ok(true) => {
-                    let err = UpdateError::Prohibited(String::from("Attempted to update test_wdl, eval_wdl, and/or their dependencies when a non-failed run already exists for this template.  Doing so is prohibited"));
+                    let err = UpdateError::Prohibited(String::from("Attempted to update test_wdl, eval_wdl, and/or their dependencies when a processing run exists for this template.  Doing so is prohibited"));
                     error!("Failed to update due to error: {}", err);
                     return Err(err);
                 }
-                // If there are no nonfailed runs, don't stop execution
+                // If there are no non-terminal runs, don't stop execution
                 Ok(false) => {}
                 // If checking for runs failed for some reason, return the error
                 Err(e) => {
@@ -383,12 +383,12 @@ impl TemplateData {
         diesel::delete(template.filter(template_id.eq(id))).execute(conn)
     }
 
-    /// Checks whether the specified template has nonfailed runs associated with it
+    /// Checks whether the specified template has processing runs associated with it
     ///
     /// Returns either a boolean indicating whether there are runs in the database that are children
-    /// of the template specified by `id` that have non-failure statuses, or a diesel error if there
+    /// of the template specified by `id` that have non-terminal statuses, or a diesel error if there
     /// if one is encountered
-    pub fn has_nonfailed_runs(
+    pub fn has_processing_runs(
         conn: &PgConnection,
         id: Uuid,
     ) -> Result<bool, diesel::result::Error> {
@@ -397,16 +397,16 @@ impl TemplateData {
             .filter(test::dsl::template_id.eq(id))
             .select(test::dsl::test_id);
         // Query the run table
-        let non_failed_runs_count = run::dsl::run
+        let non_terminal_runs_count = run::dsl::run
             .filter(run::dsl::test_id.eq(any(template_subquery)))
-            .filter(run::dsl::status.ne(all(RUN_FAILURE_STATUSES.to_vec())))
+            .filter(run::dsl::status.ne(all(RUN_TERMINAL_STATUSES.to_vec())))
             .select(run::dsl::run_id)
             .first::<Uuid>(conn);
 
-        match non_failed_runs_count {
-            // If we got a result, there is a nonfailed run, so return true
+        match non_terminal_runs_count {
+            // If we got a result, there is a nonterminal run, so return true
             Ok(_) => Ok(true),
-            // If we got not found, then there are no nonfailed runs, so return false
+            // If we got not found, then there are no nonterminal runs, so return false
             Err(diesel::result::Error::NotFound) => Ok(false),
             // Otherwise, return the error
             Err(e) => Err(e),
@@ -474,6 +474,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -491,6 +495,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -508,6 +516,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -525,6 +537,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -542,6 +558,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -559,6 +579,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -574,12 +598,16 @@ mod tests {
         runs
     }
 
-    fn insert_non_failed_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_non_terminal_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
             test_id: id,
             run_group_id: None,
-            name: String::from("name1"),
+            name: String::from("Name1"),
             status: RunStatusEnum::EvalRunning,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -704,7 +732,7 @@ mod tests {
 
         let test_template = insert_test_template(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
-        let test_run = insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        let test_run = insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let found_template = TemplateData::find_by_run(&conn, test_run.run_id)
             .expect("Failed to retrieve test template by run_id.");
@@ -1167,49 +1195,13 @@ mod tests {
     }
 
     #[test]
-    fn update_success_with_only_failed_runs() {
+    fn update_success() {
         let conn = get_test_db_connection();
 
         let test_template = insert_test_template(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
         insert_failed_test_runs_with_test_id(&conn, test_test.test_id);
-
-        let changes = TemplateChangeset {
-            name: Some(String::from("TestTestTestTest")),
-            description: Some(String::from("TESTTESTTESTTEST")),
-            test_wdl: Some(String::from("testtesttest")),
-            test_wdl_dependencies: Some(String::from("testtesttestdep")),
-            eval_wdl: Some(String::from("evalevaleval")),
-            eval_wdl_dependencies: Some(String::from("evalevalevaldep")),
-        };
-
-        let updated_template = TemplateData::update(&conn, test_template.template_id, changes)
-            .expect("Failed to update template");
-
-        assert_eq!(updated_template.name, String::from("TestTestTestTest"));
-        assert_eq!(
-            updated_template.description.unwrap(),
-            String::from("TESTTESTTESTTEST")
-        );
-        assert_eq!(updated_template.test_wdl, String::from("testtesttest"));
-        assert_eq!(
-            updated_template.test_wdl_dependencies,
-            Some(String::from("testtesttestdep"))
-        );
-        assert_eq!(updated_template.eval_wdl, String::from("evalevaleval"));
-        assert_eq!(
-            updated_template.eval_wdl_dependencies,
-            Some(String::from("evalevalevaldep"))
-        );
-    }
-
-    #[test]
-    fn update_success_with_only_allowed_params() {
-        let conn = get_test_db_connection();
-
-        let test_template = insert_test_template(&conn);
-        let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
-        insert_failed_test_runs_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TemplateChangeset {
             name: Some(String::from("TestTestTestTest")),
@@ -1263,7 +1255,7 @@ mod tests {
 
         let test_template = insert_test_template(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
         let changes = TemplateChangeset {
             name: None,
@@ -1321,9 +1313,9 @@ mod tests {
 
         let test_template = insert_test_template(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
-        insert_non_failed_test_run_with_test_id(&conn, test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&conn, test_test.test_id);
 
-        let result = TemplateData::has_nonfailed_runs(&conn, test_template.template_id).unwrap();
+        let result = TemplateData::has_processing_runs(&conn, test_template.template_id).unwrap();
 
         assert!(result);
     }
@@ -1336,7 +1328,7 @@ mod tests {
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
         insert_failed_test_runs_with_test_id(&conn, test_test.test_id);
 
-        let result = TemplateData::has_nonfailed_runs(&conn, test_template.template_id).unwrap();
+        let result = TemplateData::has_processing_runs(&conn, test_template.template_id).unwrap();
 
         assert!(!result);
     }
@@ -1348,7 +1340,7 @@ mod tests {
         let test_template = insert_test_template(&conn);
         let test_test = insert_test_test_with_template_id(&conn, test_template.template_id);
 
-        let result = TemplateData::has_nonfailed_runs(&conn, test_template.template_id).unwrap();
+        let result = TemplateData::has_processing_runs(&conn, test_template.template_id).unwrap();
 
         assert!(!result);
     }

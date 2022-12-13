@@ -147,8 +147,11 @@ pub async fn init_and_run(
     );
     let github_commenter: GithubCommenter = GithubCommenter::new(github_client);
     // Create a notification handler
-    let notification_handler: NotificationHandler =
-        NotificationHandler::new(emailer, Some(github_commenter));
+    let notification_handler: NotificationHandler = NotificationHandler::new(
+        emailer,
+        Some(github_commenter),
+        carrot_config.api().domain().to_owned(),
+    );
     // Create a test resource client and cromwell client for the test runner
     let test_resource_client: TestResourceClient =
         TestResourceClient::new(http_client.clone(), Some(gcloud_client));
@@ -554,8 +557,11 @@ mod tests {
         );
         let github_commenter: GithubCommenter = GithubCommenter::new(github_client);
         // Create a notification handler
-        let notification_handler: NotificationHandler =
-            NotificationHandler::new(None, Some(github_commenter));
+        let notification_handler: NotificationHandler = NotificationHandler::new(
+            None,
+            Some(github_commenter),
+            carrot_config.api().domain().to_owned(),
+        );
         // Create a test resource client and cromwell client for the test runner
         let test_resource_client: TestResourceClient =
             TestResourceClient::new(http_client.clone(), Some(gcloud_client));

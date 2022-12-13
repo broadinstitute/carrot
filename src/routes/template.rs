@@ -12,9 +12,11 @@ use crate::requests::test_resource_requests::TestResourceClient;
 use crate::routes::disabled_features::is_gs_uris_for_wdls_enabled;
 use crate::routes::error_handling::{default_500, ErrorBody};
 use crate::routes::multipart_handling;
-use crate::routes::util::parse_id;
+use crate::routes::util::{parse_id, retrieve_resource};
 use crate::util::gs_uri_parsing;
+use crate::util::uri_conversion::fill_uris_for_wdl_locations_template;
 use crate::util::wdl_storage::WdlStorageClient;
+use crate::util::wdl_type::WdlType;
 use crate::validation::womtool;
 use crate::validation::womtool::WomtoolRunner;
 use actix_multipart::Multipart;
@@ -25,32 +27,10 @@ use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::fmt;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use tempfile::{NamedTempFile, TempDir};
 use uuid::Uuid;
-
-/// Enum for distinguishing between a template's test and eval wdl for consolidating functionality
-/// where the only difference is whether we're using the test or eval wdl
-#[derive(Copy, Clone)]
-enum WdlType {
-    Test,
-    Eval,
-}
-
-impl fmt::Display for WdlType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            WdlType::Test => {
-                write!(f, "test")
-            }
-            WdlType::Eval => {
-                write!(f, "eval")
-            }
-        }
-    }
-}
 
 /// Query parameters for the create mapping
 #[derive(Deserialize)]
@@ -81,7 +61,11 @@ struct CreateBody {
 ///
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
-async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResponse {
+async fn find_by_id(
+    req: HttpRequest,
+    pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
+) -> HttpResponse {
     // Pull id param from path
     let id = &req.match_info().get("id").unwrap();
 
@@ -90,29 +74,44 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
         Ok(parsed_id) => parsed_id,
         Err(error_response) => return error_response,
     };
-    let conn = pool.get().expect("Failed to get DB connection from pool");
-    // Retrieve the template
-    let mut template: TemplateData = match web::block(move || {
-        TemplateData::find_by_id(&conn, id)
-    }).await {
-        Ok(template) => template,
-        Err(e) => return match e {
-            // If no template is found, return a 404
-            BlockingError::Error(diesel::NotFound) => {
-                HttpResponse::NotFound().json(ErrorBody {
-                    title: "No template found".to_string(),
-                    status: 404,
-                    detail: "No template found with the specified ID".to_string(),
-                })
+
+    //Query DB for template in new thread
+    match web::block(move || {
+        let conn = pool.get().expect("Failed to get DB connection from pool");
+
+        match TemplateData::find_by_id(&conn, id) {
+            Ok(template) => Ok(template),
+            Err(e) => {
+                error!("{}", e);
+                Err(e)
             }
-            // For other errors, return a 500
-            _ => default_500(&e),
         }
-    };
-    // Update the wdl mappings so the user will have uris they can use to access them
-    fill_uris_for_wdl_location(&req, &mut template);
-    // Return the template
-    HttpResponse::Ok().json(template)
+    })
+    .await
+    {
+        // If there is no error, return a response with the retrieved data
+        Ok(mut template) => {
+            // Update the wdl mappings so the user will have uris they can use to access them
+            fill_uris_for_wdl_locations_template(config.api().domain(), &mut template);
+            // Return the template
+            HttpResponse::Ok().json(template)
+        }
+        Err(e) => {
+            error!("{:?}", e);
+            match e {
+                // If no template is found, return a 404
+                BlockingError::Error(diesel::NotFound) => {
+                    HttpResponse::NotFound().json(ErrorBody {
+                        title: "No template found".to_string(),
+                        status: 404,
+                        detail: "No template found with the specified ID".to_string(),
+                    })
+                }
+                // For other errors, return a 500
+                _ => default_500(&e),
+            }
+        }
+    }
 }
 
 /// Handles requests to /templates for retrieving template info by query parameters
@@ -125,9 +124,9 @@ async fn find_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpRespon
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn find(
-    req: HttpRequest,
     web::Query(query): web::Query<TemplateQuery>,
     pool: web::Data<db::DbPool>,
+    config: web::Data<Config>,
 ) -> HttpResponse {
     // Query DB for templates in new thread
     match web::block(move || {
@@ -155,7 +154,7 @@ async fn find(
                 // If there is no error, return a response with the retrieved data
                 // Update the wdl mappings so the user will have uris they can use to access them
                 for template in &mut templates {
-                    fill_uris_for_wdl_location(&req, template);
+                    fill_uris_for_wdl_locations_template(config.api().domain(), template);
                 }
                 // Return the templates
                 HttpResponse::Ok().json(templates)
@@ -182,7 +181,6 @@ async fn find(
 /// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
 /// poisoned
 async fn create_from_multipart(
-    req: HttpRequest,
     payload: Multipart,
     web::Query(query): web::Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
@@ -208,7 +206,7 @@ async fn create_from_multipart(
         Err(error_response) => return error_response,
     };
     // Create the template
-    create(req, new_template, conn).await
+    create(new_template, conn, &carrot_config).await
 }
 
 /// Handles requests to /templates with content-type application/json for creating templates
@@ -224,7 +222,6 @@ async fn create_from_multipart(
 /// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
 /// poisoned
 async fn create_from_json(
-    req: HttpRequest,
     web::Json(create_body): web::Json<CreateBody>,
     web::Query(query): web::Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
@@ -382,7 +379,7 @@ async fn create_from_json(
         created_by: new_template.created_by,
     };
 
-    create(req, new_new_template, conn).await
+    create(new_new_template, conn, &carrot_config).await
 }
 
 /// Handles requests to /templates for creating templates
@@ -396,9 +393,9 @@ async fn create_from_json(
 /// Panics if attempting to connect to the database results in an error or the storage_hub mutex is
 /// poisoned
 async fn create(
-    req: HttpRequest,
     new_template: NewTemplate,
     conn: PooledConnection<ConnectionManager<PgConnection>>,
+    config: &Config,
 ) -> HttpResponse {
     // Insert in new thread
     match web::block(move || {
@@ -416,7 +413,7 @@ async fn create(
         // If there is no error, return a response with the retrieved data
         Ok(mut template) => {
             // Update the wdl mappings so the user will have uris they can use to access them
-            fill_uris_for_wdl_location(&req, &mut template);
+            fill_uris_for_wdl_locations_template(config.api().domain(), &mut template);
             // Return the template
             HttpResponse::Ok().json(template)
         }
@@ -442,7 +439,6 @@ async fn create(
 /// poisoned
 #[allow(clippy::too_many_arguments)]
 async fn update_from_multipart(
-    req: HttpRequest,
     id_param: web::Path<String>,
     payload: Multipart,
     pool: web::Data<db::DbPool>,
@@ -474,7 +470,7 @@ async fn update_from_multipart(
         Err(error_response) => return error_response,
     };
     // Create the template
-    update(req, id, template_changes, conn).await
+    update(id, template_changes, conn, &carrot_config).await
 }
 
 /// Handles requests to /templates/{id} with content-type application/json for updating templates
@@ -491,7 +487,6 @@ async fn update_from_multipart(
 /// poisoned
 #[allow(clippy::too_many_arguments)]
 async fn update_from_json(
-    req: HttpRequest,
     id_param: web::Path<String>,
     web::Json(template_changes): web::Json<TemplateChangeset>,
     pool: web::Data<db::DbPool>,
@@ -615,7 +610,7 @@ async fn update_from_json(
     processed_template_changes.eval_wdl = eval_wdl_location;
     processed_template_changes.eval_wdl_dependencies = eval_wdl_dependency_location;
 
-    update(req, id, processed_template_changes, conn).await
+    update(id, processed_template_changes, conn, &carrot_config).await
 }
 
 /// Handles requests to /templates/{id} for updating a template
@@ -628,10 +623,10 @@ async fn update_from_json(
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn update(
-    req: HttpRequest,
     id: Uuid,
     template_changes: TemplateChangeset,
     conn: PooledConnection<ConnectionManager<PgConnection>>,
+    config: &Config,
 ) -> HttpResponse {
     // Update in new thread
     match web::block(
@@ -648,7 +643,7 @@ async fn update(
         // If there is no error, return a response with the retrieved data
         Ok(mut template) => {
             // Update the wdl mappings so the user will have uris they can use to access them
-            fill_uris_for_wdl_location(&req, &mut template);
+            fill_uris_for_wdl_locations_template(config.api().domain(), &mut template);
             // Return the template
             HttpResponse::Ok().json(template)
         }
@@ -659,7 +654,7 @@ async fn update(
                     HttpResponse::Forbidden().json(ErrorBody {
                         title: "Update params not allowed".to_string(),
                         status: 403,
-                        detail: "Updating test_wdl or eval_wdl is not allowed if there is a run tied to this template that is running or has succeeded".to_string(),
+                        detail: "Updating test_wdl, eval_wdl, test_wdl_dependencies, or eval_wdl_dependencies is not allowed if there is a run tied to this template that is running".to_string(),
                     })
                 },
                 _ => default_500(&e)
@@ -1660,32 +1655,6 @@ fn write_wdl_data_to_file(file_path: &Path, wdl_data: &[u8]) -> Result<(), HttpR
     }
 }
 
-/// Wrapper function for retrieving a resource from a specific location with the added functionality
-/// that it will return an http error response in place of an error
-async fn retrieve_resource(
-    test_resource_client: &TestResourceClient,
-    location: &str,
-) -> Result<Vec<u8>, HttpResponse> {
-    match test_resource_client.get_resource_as_bytes(location).await {
-        Ok(wdl_bytes) => Ok(wdl_bytes),
-        // If we failed to get it, return an error response
-        Err(e) => {
-            debug!(
-                "Encountered error trying to retrieve at {}: {}",
-                location, e
-            );
-            return Err(HttpResponse::InternalServerError().json(ErrorBody {
-                title: "Failed to retrieve resource".to_string(),
-                status: 500,
-                detail: format!(
-                    "Attempt to retrieve resource at {} resulted in error: {}",
-                    location, e
-                ),
-            }));
-        }
-    }
-}
-
 /// Convenience function for downloading the wdl at `wdl_location`, validating it, storing it, and
 /// returning its stored location. `wdl_type` refers to whether the wdl is a test or eval wdl.
 /// `identifier` should be an identifier for the entity to which the wdl belongs (e.g. the
@@ -1854,86 +1823,6 @@ async fn store_wdl_dependencies(
             }))
         }
     }
-}
-
-/// Replaces the values for test_wdl and eval_wdl in `template` with URIs for the user to use to
-/// retrieve them (either keeping them the same if they are gs://, http://, or https://; or
-/// replacing with the download REST mapping based on the host value on `req`)
-fn fill_uris_for_wdl_location(req: &HttpRequest, template: &mut TemplateData) {
-    template.test_wdl =
-        get_uri_for_wdl_location(req, &template.test_wdl, template.template_id, WdlType::Test);
-    template.eval_wdl =
-        get_uri_for_wdl_location(req, &template.eval_wdl, template.template_id, WdlType::Eval);
-    template.test_wdl_dependencies = match &template.test_wdl_dependencies {
-        Some(dep_location) => Some(get_uri_for_wdl_deps_location(
-            req,
-            dep_location,
-            template.template_id,
-            WdlType::Test,
-        )),
-        None => None,
-    };
-    template.eval_wdl_dependencies = match &template.eval_wdl_dependencies {
-        Some(dep_location) => Some(get_uri_for_wdl_deps_location(
-            req,
-            dep_location,
-            template.template_id,
-            WdlType::Eval,
-        )),
-        None => None,
-    };
-}
-
-/// Returns a URI that the user can use to retrieve the wdl at wdl_location.  For gs: and
-/// http/https: locations, it just returns the location.  For local file locations, returns a REST
-/// URI for accessing it
-fn get_uri_for_wdl_location(
-    req: &HttpRequest,
-    wdl_location: &str,
-    template_id: Uuid,
-    wdl_type: WdlType,
-) -> String {
-    // If the location starts with gs://, http://, or https://, we'll just return it, since the
-    // user can use that to retrieve the wdl
-    if wdl_location.starts_with("gs://")
-        || wdl_location.starts_with("http://")
-        || wdl_location.starts_with("https://")
-    {
-        return String::from(wdl_location);
-    }
-    // Otherwise, we assume it's a file, so we build the REST mapping the user can use to access it
-    format!(
-        "{}/api/v1/templates/{}/{}_wdl",
-        req.connection_info().host(),
-        template_id,
-        wdl_type
-    )
-}
-
-/// Returns a URI that the user can use to retrieve the wdl dependency zip at wdl_dep_location.
-/// For gs: and http/https: locations, it just returns the location.  For local file locations,
-/// returns a REST URI for accessing it
-fn get_uri_for_wdl_deps_location(
-    req: &HttpRequest,
-    wdl_deps_location: &str,
-    template_id: Uuid,
-    wdl_type: WdlType,
-) -> String {
-    // If the location starts with gs://, http://, or https://, we'll just return it, since the
-    // user can use that to retrieve the wdl
-    if wdl_deps_location.starts_with("gs://")
-        || wdl_deps_location.starts_with("http://")
-        || wdl_deps_location.starts_with("https://")
-    {
-        return String::from(wdl_deps_location);
-    }
-    // Otherwise, we assume it's a file, so we build the REST mapping the user can use to access it
-    format!(
-        "{}/api/v1/templates/{}/{}_wdl_dependencies",
-        req.connection_info().host(),
-        template_id,
-        wdl_type
-    )
 }
 
 /// Attaches the REST mappings in this file to a service config
@@ -2177,12 +2066,16 @@ mod tests {
         TestData::create(conn, new_test).expect("Failed inserting test test")
     }
 
-    fn insert_non_failed_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
+    fn insert_non_terminal_test_run_with_test_id(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
             test_id: id,
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -2204,6 +2097,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -2221,6 +2118,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -2238,6 +2139,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -2255,6 +2160,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -2272,6 +2181,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -2289,6 +2202,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -2307,6 +2224,7 @@ mod tests {
     #[actix_rt::test]
     async fn find_by_id_success() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         let (valid_wdl_address, _mock) = setup_valid_wdl_address();
         let eval_wdl_string =
@@ -2321,7 +2239,13 @@ mod tests {
             None,
         );
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}", new_template.template_id))
@@ -2343,7 +2267,7 @@ mod tests {
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -2351,11 +2275,18 @@ mod tests {
 
     #[actix_rt::test]
     async fn find_by_id_failure_not_found() {
+        let test_config = load_default_config();
         let pool = get_test_db_pool();
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri(&format!("/templates/{}", Uuid::new_v4()))
@@ -2375,10 +2306,17 @@ mod tests {
     #[actix_rt::test]
     async fn find_by_id_failure_bad_uuid() {
         let pool = get_test_db_pool();
+        let test_config = load_default_config();
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/templates/123456789")
@@ -2399,6 +2337,7 @@ mod tests {
     async fn find_success() {
         let pool = get_test_db_pool();
 
+        let test_config = load_default_config();
         let (valid_wdl_address, _mock) = setup_valid_wdl_address();
         let eval_wdl_string =
             read_to_string("testdata/routes/template/different_valid_wdl.wdl").unwrap();
@@ -2412,7 +2351,13 @@ mod tests {
             None,
         );
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/templates?name=Kevin%27s%20Template")
@@ -2435,7 +2380,7 @@ mod tests {
         assert_eq!(
             test_templates[0].eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_templates[0].template_id
             )
         );
@@ -2443,11 +2388,18 @@ mod tests {
 
     #[actix_rt::test]
     async fn find_failure_not_found() {
+        let test_config = load_default_config();
         let pool = get_test_db_pool();
 
         create_test_template(&pool.get().unwrap());
 
-        let mut app = test::init_service(App::new().data(pool).configure(init_routes)).await;
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(test_config)
+                .configure(init_routes),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/templates?name=Gibberish")
@@ -2539,28 +2491,28 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.test_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                "example.com/api/v1/templates/{}/test_wdl_dependencies",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
+                "example.com/api/v1/templates/{}/eval_wdl_dependencies",
                 test_template.template_id
             )
         );
@@ -2642,28 +2594,28 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.test_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                "example.com/api/v1/templates/{}/test_wdl_dependencies",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
+                "example.com/api/v1/templates/{}/eval_wdl_dependencies",
                 test_template.template_id
             )
         );
@@ -2734,14 +2686,14 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -2849,14 +2801,14 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -2965,14 +2917,14 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -3468,28 +3420,28 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.test_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl_dependencies",
+                "example.com/api/v1/templates/{}/test_wdl_dependencies",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl_dependencies.unwrap(),
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl_dependencies",
+                "example.com/api/v1/templates/{}/eval_wdl_dependencies",
                 test_template.template_id
             )
         );
@@ -3557,14 +3509,14 @@ mod tests {
         assert_eq!(
             test_template.test_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/test_wdl",
+                "example.com/api/v1/templates/{}/test_wdl",
                 test_template.template_id
             )
         );
         assert_eq!(
             test_template.eval_wdl,
             format!(
-                "localhost:8080/api/v1/templates/{}/eval_wdl",
+                "example.com/api/v1/templates/{}/eval_wdl",
                 test_template.template_id
             )
         );
@@ -3725,7 +3677,7 @@ mod tests {
 
         let template = create_test_template(&pool.get().unwrap());
         let test = insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
-        insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test.test_id);
+        insert_non_terminal_test_run_with_test_id(&pool.get().unwrap(), test.test_id);
 
         let (valid_wdl_address, _mock) = setup_valid_wdl_address();
 
@@ -3754,7 +3706,7 @@ mod tests {
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Updating test_wdl or eval_wdl is not allowed if there is a run tied to this template that is running or has succeeded"
+            "Updating test_wdl, eval_wdl, test_wdl_dependencies, or eval_wdl_dependencies is not allowed if there is a run tied to this template that is running"
         );
     }
 
@@ -3782,7 +3734,7 @@ mod tests {
         let template = create_test_template(&pool.get().unwrap());
         let test_test =
             insert_test_test_with_template_id(&pool.get().unwrap(), template.template_id);
-        insert_non_failed_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
+        insert_non_terminal_test_run_with_test_id(&pool.get().unwrap(), test_test.test_id);
 
         let (valid_wdl_address, _mock) = setup_different_valid_wdl_address();
 
@@ -3815,7 +3767,7 @@ mod tests {
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Updating test_wdl or eval_wdl is not allowed if there is a run tied to this template that is running or has succeeded"
+            "Updating test_wdl, eval_wdl, test_wdl_dependencies, or eval_wdl_dependencies is not allowed if there is a run tied to this template that is running"
         );
     }
 

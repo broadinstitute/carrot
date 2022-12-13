@@ -24,13 +24,17 @@ use uuid::Uuid;
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
 /// An instance of this struct will be returned by any queries for runs.
-#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug)]
+#[derive(Queryable, Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct RunData {
     pub run_id: Uuid,
     pub test_id: Uuid,
     pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
+    pub test_wdl: String,
+    pub test_wdl_dependencies: Option<String>,
+    pub eval_wdl: String,
+    pub eval_wdl_dependencies: Option<String>,
     pub test_input: Value,
     pub test_options: Option<Value>,
     pub eval_input: Value,
@@ -54,6 +58,18 @@ pub struct RunWithResultsAndErrorsData {
     pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
+    pub test_wdl: String,
+    #[serde(serialize_with = "byte_to_hex_serialize")]
+    pub test_wdl_hash: Option<Vec<u8>>,
+    pub test_wdl_dependencies: Option<String>,
+    #[serde(serialize_with = "byte_to_hex_serialize")]
+    pub test_wdl_dependencies_hash: Option<Vec<u8>>,
+    pub eval_wdl: String,
+    #[serde(serialize_with = "byte_to_hex_serialize")]
+    pub eval_wdl_hash: Option<Vec<u8>>,
+    pub eval_wdl_dependencies: Option<String>,
+    #[serde(serialize_with = "byte_to_hex_serialize")]
+    pub eval_wdl_dependencies_hash: Option<Vec<u8>>,
     pub test_input: Value,
     pub test_options: Option<Value>,
     pub eval_input: Value,
@@ -65,6 +81,16 @@ pub struct RunWithResultsAndErrorsData {
     pub finished_at: Option<NaiveDateTime>,
     pub results: Option<Value>,
     pub errors: Option<Value>,
+}
+
+fn byte_to_hex_serialize<S>(x: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match x {
+        Some(bytes) => s.serialize_some(&hex::encode(bytes)),
+        None => s.serialize_none(),
+    }
 }
 
 /// Represents all possible parameters for a query of the RUN table
@@ -108,6 +134,10 @@ pub struct NewRun {
     pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
+    pub test_wdl: String,
+    pub test_wdl_dependencies: Option<String>,
+    pub eval_wdl: String,
+    pub eval_wdl_dependencies: Option<String>,
     pub test_input: Value,
     pub test_options: Option<Value>,
     pub eval_input: Value,
@@ -478,6 +508,14 @@ impl RunWithResultsAndErrorsData {
                 run_with_results_and_errors::dsl::run_group_id,
                 run_with_results_and_errors::dsl::name,
                 run_with_results_and_errors::dsl::status,
+                run_with_results_and_errors::dsl::test_wdl,
+                run_with_results_and_errors::dsl::test_wdl_hash,
+                run_with_results_and_errors::dsl::test_wdl_dependencies,
+                run_with_results_and_errors::dsl::test_wdl_dependencies_hash,
+                run_with_results_and_errors::dsl::eval_wdl,
+                run_with_results_and_errors::dsl::eval_wdl_hash,
+                run_with_results_and_errors::dsl::eval_wdl_dependencies,
+                run_with_results_and_errors::dsl::eval_wdl_dependencies_hash,
                 run_with_results_and_errors::dsl::test_input,
                 run_with_results_and_errors::dsl::test_options,
                 run_with_results_and_errors::dsl::eval_input,
@@ -736,6 +774,14 @@ impl RunWithResultsAndErrorsData {
                 run_with_results_and_errors::dsl::run_group_id,
                 run_with_results_and_errors::dsl::name,
                 run_with_results_and_errors::dsl::status,
+                run_with_results_and_errors::dsl::test_wdl,
+                run_with_results_and_errors::dsl::test_wdl_hash,
+                run_with_results_and_errors::dsl::test_wdl_dependencies,
+                run_with_results_and_errors::dsl::test_wdl_dependencies_hash,
+                run_with_results_and_errors::dsl::eval_wdl,
+                run_with_results_and_errors::dsl::eval_wdl_hash,
+                run_with_results_and_errors::dsl::eval_wdl_dependencies,
+                run_with_results_and_errors::dsl::eval_wdl_dependencies_hash,
                 run_with_results_and_errors::dsl::test_input,
                 run_with_results_and_errors::dsl::test_options,
                 run_with_results_and_errors::dsl::eval_input,
@@ -771,6 +817,7 @@ mod tests {
     use crate::models::template::TemplateData;
     use crate::models::test::NewTest;
     use crate::models::test::TestData;
+    use crate::models::wdl_hash::WdlHashData;
     use crate::unit_test_util::*;
     use chrono::format::StrftimeItems;
     use chrono::offset::Utc;
@@ -786,12 +833,31 @@ mod tests {
 
         let test_errors = insert_test_run_errors_with_run_id(&conn, test_run.run_id);
 
+        let test_wdl_hash = WdlHashData::create_with_hash(
+            conn,
+            test_run.test_wdl.clone(),
+            hex::decode("ce57d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()
+        ).unwrap();
+        let eval_wdl_hash = WdlHashData::create_with_hash(
+            conn,
+            test_run.eval_wdl.clone(),
+            hex::decode("abc7d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()
+        ).unwrap();
+
         RunWithResultsAndErrorsData {
             run_id: test_run.run_id,
             test_id: test_run.test_id,
             run_group_id: test_run.run_group_id,
             name: test_run.name,
             status: test_run.status,
+            test_wdl: test_run.test_wdl.clone(),
+            test_wdl_hash: Some(test_wdl_hash.hash.clone()),
+            test_wdl_dependencies: None,
+            test_wdl_dependencies_hash: None,
+            eval_wdl: test_run.eval_wdl.clone(),
+            eval_wdl_hash: Some(eval_wdl_hash.hash.clone()),
+            eval_wdl_dependencies: None,
+            eval_wdl_dependencies_hash: None,
             test_input: test_run.test_input,
             test_options: test_run.test_options,
             eval_input: test_run.eval_input,
@@ -940,6 +1006,10 @@ mod tests {
             run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             test_options: serde_json::from_str("{\"test_option\":\"1\"}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -997,6 +1067,10 @@ mod tests {
             run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::EvalFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             test_options: serde_json::from_str("{\"test_option\":\"1\"}").unwrap(),
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -1106,6 +1180,10 @@ mod tests {
             run_group_id: Some(run_group.run_group_id),
             name: String::from("name1"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: serde_json::from_str("{\"test_option\": \"2\"}").unwrap(),
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -1125,6 +1203,10 @@ mod tests {
             run_group_id: Some(run_group.run_group_id),
             name: String::from("name2"),
             status: RunStatusEnum::TestSubmitted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -1142,6 +1224,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),

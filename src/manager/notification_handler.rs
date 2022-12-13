@@ -8,7 +8,7 @@ use crate::models::run_is_from_github::RunIsFromGithubData;
 use crate::models::subscription::SubscriptionData;
 use crate::models::test::TestData;
 use crate::notifications::{emailer, github_commenter};
-use crate::util::json_parsing;
+use crate::util::{json_parsing, uri_conversion};
 use diesel::PgConnection;
 use log::error;
 use std::collections::HashSet;
@@ -20,6 +20,7 @@ use uuid::Uuid;
 pub struct NotificationHandler {
     emailer: Option<emailer::Emailer>,
     github_commenter: Option<github_commenter::GithubCommenter>,
+    domain: String,
 }
 
 /// Enum of error types for sending notifications
@@ -78,10 +79,12 @@ impl NotificationHandler {
     pub fn new(
         emailer: Option<emailer::Emailer>,
         github_commenter: Option<github_commenter::GithubCommenter>,
+        domain: String,
     ) -> NotificationHandler {
         NotificationHandler {
             emailer,
             github_commenter,
+            domain,
         }
     }
 
@@ -149,15 +152,24 @@ impl NotificationHandler {
         run: &RunData,
         test_name: &str,
     ) -> Result<(), Error> {
+        // Get full run data and convert wdl uris
+        let run = {
+            let mut run = RunWithResultsAndErrorsData::find_by_id(conn, run.run_id)?;
+            uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors(
+                &self.domain,
+                &mut run,
+            );
+            run
+        };
         // Send emails
         if self.emailer.is_some() {
-            self.send_run_started_from_github_email(conn, author, run, test_name)?;
+            self.send_run_started_from_github_email(conn, author, &run, test_name)?;
         }
         // Post github comments
         match &self.github_commenter {
             Some(github_commenter) => {
                 github_commenter
-                    .post_run_started_comment(owner, repo, issue_number, run, test_name)
+                    .post_run_started_comment(owner, repo, issue_number, &run, test_name)
                     .await?;
             }
             None => {}
@@ -222,10 +234,27 @@ impl NotificationHandler {
         head_run: &RunData,
         test_name: &str,
     ) -> Result<(), Error> {
+        // Get full run data and fill wdl locations with uris to retrieve them
+        let base_run = {
+            let mut run = RunWithResultsAndErrorsData::find_by_id(conn, base_run.run_id)?;
+            uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors(
+                &self.domain,
+                &mut run,
+            );
+            run
+        };
+        let head_run = {
+            let mut run = RunWithResultsAndErrorsData::find_by_id(conn, head_run.run_id)?;
+            uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors(
+                &self.domain,
+                &mut run,
+            );
+            run
+        };
         // Send emails
         if self.emailer.is_some() {
             self.send_pr_run_started_from_github_email(
-                conn, author, base_run, head_run, test_name,
+                conn, author, &base_run, &head_run, test_name,
             )?;
         }
         // Post github comments
@@ -236,8 +265,8 @@ impl NotificationHandler {
                         owner,
                         repo,
                         issue_number,
-                        base_run,
-                        head_run,
+                        &base_run,
+                        &head_run,
                         test_name,
                     )
                     .await?;
@@ -330,7 +359,7 @@ impl NotificationHandler {
         &self,
         conn: &PgConnection,
         author: &str,
-        run: &RunData,
+        run: &RunWithResultsAndErrorsData,
         test_name: &str,
     ) -> Result<(), Error> {
         // Build subject and message for email
@@ -363,8 +392,8 @@ impl NotificationHandler {
         &self,
         conn: &PgConnection,
         author: &str,
-        base_run: &RunData,
-        head_run: &RunData,
+        base_run: &RunWithResultsAndErrorsData,
+        head_run: &RunWithResultsAndErrorsData,
         test_name: &str,
     ) -> Result<(), Error> {
         // Build subject and message for email
@@ -413,7 +442,15 @@ impl NotificationHandler {
         match &self.emailer {
             Some(emailer) => {
                 // Get run with result data
-                let run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
+                let run = {
+                    let mut run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
+                    // Replace wdl locations with uris for retrieving them
+                    uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors(
+                        &self.domain,
+                        &mut run,
+                    );
+                    run
+                };
                 // Get test
                 let test = TestData::find_by_id(conn, run.test_id)?;
                 // Get subscriptions
@@ -564,7 +601,15 @@ impl NotificationHandler {
                 match RunIsFromGithubData::find_by_run_id(conn, run_id) {
                     Ok(data_from_github) => {
                         // If the run was triggered from github, retrieve its data and post to github
-                        let run_data = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
+                        let run_data = {
+                            let mut run = RunWithResultsAndErrorsData::find_by_id(conn, run_id)?;
+                            // Replace wdl locations with uris for retrieving them
+                            uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors(
+                                &self.domain,
+                                &mut run,
+                            );
+                            run
+                        };
                         let test_data = TestData::find_by_id(conn, run_data.test_id)?;
                         github_commenter
                             .post_run_finished_comment(
@@ -610,31 +655,32 @@ impl NotificationHandler {
                     RunGroupIsFromGithubData::find_by_run_id(conn, run_id)
                 {
                     // Get the runs for this group
-                    let runs: Vec<RunWithResultsAndErrorsData> = RunWithResultsAndErrorsData::find(
-                        conn,
-                        RunQuery {
-                            pipeline_id: None,
-                            template_id: None,
-                            test_id: None,
-                            run_group_id: Some(run_group_is_from_github.run_group_id),
-                            name: None,
-                            status: None,
-                            test_input: None,
-                            test_options: None,
-                            eval_input: None,
-                            eval_options: None,
-                            test_cromwell_job_id: None,
-                            eval_cromwell_job_id: None,
-                            created_before: None,
-                            created_after: None,
-                            created_by: None,
-                            finished_before: None,
-                            finished_after: None,
-                            sort: None,
-                            limit: None,
-                            offset: None,
-                        },
-                    )?;
+                    let mut runs: Vec<RunWithResultsAndErrorsData> =
+                        RunWithResultsAndErrorsData::find(
+                            conn,
+                            RunQuery {
+                                pipeline_id: None,
+                                template_id: None,
+                                test_id: None,
+                                run_group_id: Some(run_group_is_from_github.run_group_id),
+                                name: None,
+                                status: None,
+                                test_input: None,
+                                test_options: None,
+                                eval_input: None,
+                                eval_options: None,
+                                test_cromwell_job_id: None,
+                                eval_cromwell_job_id: None,
+                                created_before: None,
+                                created_after: None,
+                                created_by: None,
+                                finished_before: None,
+                                finished_after: None,
+                                sort: None,
+                                limit: None,
+                                offset: None,
+                            },
+                        )?;
                     // We expect there to be exactly two runs, so we'll consider it an error if that
                     // is not the case
                     if runs.len() != 2 {
@@ -646,6 +692,13 @@ impl NotificationHandler {
                         if !RUN_TERMINAL_STATUSES.contains(&run.status) {
                             return Ok(());
                         }
+                    }
+                    // Replace wdl locations with uris for retrieving them
+                    for run in &mut runs {
+                        uri_conversion::fill_uris_for_wdl_locations_run_with_results_and_errors(
+                            &self.domain,
+                            run,
+                        );
                     }
                     // Get test since we'll need the test name
                     let test_data = TestData::find_by_id(conn, runs[0].test_id)?;
@@ -816,6 +869,7 @@ mod tests {
     use crate::models::subscription::{NewSubscription, SubscriptionData};
     use crate::models::template::{NewTemplate, TemplateData};
     use crate::models::test::{NewTest, TestData};
+    use crate::models::wdl_hash::WdlHashData;
     use crate::notifications::emailer::Emailer;
     use crate::notifications::github_commenter::GithubCommenter;
     use crate::requests::github_requests::GithubClient;
@@ -901,9 +955,9 @@ mod tests {
             name: String::from("Kevin's test template"),
             pipeline_id: id,
             description: None,
-            test_wdl: String::from(""),
+            test_wdl: String::from("testtest"),
             test_wdl_dependencies: None,
-            eval_wdl: String::from(""),
+            eval_wdl: String::from("evaltest"),
             eval_wdl_dependencies: None,
             created_by: None,
         };
@@ -936,6 +990,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({"test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             test_options: None,
             eval_input: json!({"test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_filename": "greeting.txt"}),
@@ -961,6 +1019,10 @@ mod tests {
             name: String::from("Base Run"),
             test_id: id,
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({"test_test.in_docker": "carrot_build:software|1.0"}),
             test_options: None,
             eval_input: json!({"eval_test.docker": "carrot_build:software|1.0"}),
@@ -977,6 +1039,10 @@ mod tests {
             name: String::from("Head Run"),
             test_id: id,
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: json!({"test_test.in_docker": "carrot_build:software|0.9"}),
             test_options: None,
             eval_input: json!({"eval_test.docker": "carrot_build:software|0.9"}),
@@ -1069,6 +1135,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1082,8 +1149,16 @@ mod tests {
             "Run {} completed for test {} with status {}",
             &new_run.name, &new_test.name, &new_run.status
         );
-        let new_run_with_results =
-            RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id).unwrap();
+        let new_run_with_results = {
+            let mut new_run_with_results =
+                RunWithResultsAndErrorsData::find_by_id(&pool.get().unwrap(), new_run.run_id)
+                    .unwrap();
+            new_run_with_results.test_wdl =
+                format!("example.com/api/v1/runs/{}/test_wdl", new_run.run_id);
+            new_run_with_results.eval_wdl =
+                format!("example.com/api/v1/runs/{}/eval_wdl", new_run.run_id);
+            new_run_with_results
+        };
         let test_message = serde_json::to_string_pretty(&new_run_with_results).unwrap();
 
         // Make temporary directory for the email
@@ -1149,6 +1224,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1178,6 +1254,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1208,6 +1285,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1238,6 +1316,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1326,6 +1405,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1367,6 +1447,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1406,6 +1487,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1486,6 +1568,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: Some(test_emailer),
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1521,6 +1604,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1555,6 +1639,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1566,7 +1651,13 @@ mod tests {
         let test_run = insert_test_run_with_test_id(&conn, test.test_id, "doesnotmatter");
         let test_run_is_from_github =
             insert_test_run_is_from_github_with_run_id(&conn, test_run.run_id);
-        let test_run = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
+        let test_run = {
+            let mut new_run =
+                RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
+            new_run.test_wdl = format!("example.com/api/v1/runs/{}/test_wdl", new_run.run_id);
+            new_run.eval_wdl = format!("example.com/api/v1/runs/{}/eval_wdl", new_run.run_id);
+            new_run
+        };
 
         let test_run_string = serde_json::to_string_pretty(&test_run).unwrap();
 
@@ -1611,6 +1702,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1640,6 +1732,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1670,6 +1763,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1681,8 +1775,20 @@ mod tests {
         let run_group = RunGroupData::create(&conn).unwrap();
         let (base_run, head_run, run_group) =
             insert_pr_runs_with_test_id(&conn, test.test_id, "does_not_matter");
-        let base_run = RunWithResultsAndErrorsData::find_by_id(&conn, base_run.run_id).unwrap();
-        let head_run = RunWithResultsAndErrorsData::find_by_id(&conn, head_run.run_id).unwrap();
+        let base_run = {
+            let mut base_run =
+                RunWithResultsAndErrorsData::find_by_id(&conn, base_run.run_id).unwrap();
+            base_run.test_wdl = format!("example.com/api/v1/runs/{}/test_wdl", base_run.run_id);
+            base_run.eval_wdl = format!("example.com/api/v1/runs/{}/eval_wdl", base_run.run_id);
+            base_run
+        };
+        let head_run = {
+            let mut head_run =
+                RunWithResultsAndErrorsData::find_by_id(&conn, head_run.run_id).unwrap();
+            head_run.test_wdl = format!("example.com/api/v1/runs/{}/test_wdl", head_run.run_id);
+            head_run.eval_wdl = format!("example.com/api/v1/runs/{}/eval_wdl", head_run.run_id);
+            head_run
+        };
         insert_run_group_is_from_github_with_run_group_id(&conn, run_group.run_group_id);
 
         let base_run_string = serde_json::to_string_pretty(&base_run).unwrap();
@@ -1729,6 +1835,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1758,6 +1865,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1788,6 +1896,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
@@ -1854,6 +1963,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
         let pool = get_test_db_pool();
         let conn = pool.get().unwrap();
@@ -1921,6 +2031,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: Some(github_commenter),
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();
@@ -1961,6 +2072,7 @@ mod tests {
         let test_handler = NotificationHandler {
             emailer: None,
             github_commenter: None,
+            domain: String::from("example.com"),
         };
 
         let pool = get_test_db_pool();

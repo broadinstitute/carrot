@@ -265,10 +265,10 @@ impl TemplateResultData {
     ) -> Result<usize, DeleteError> {
         // If there are non-failed runs associated with the template associated with this
         // template_result, return an error
-        match TemplateData::has_nonfailed_runs(conn, query_template_id) {
+        match TemplateData::has_processing_runs(conn, query_template_id) {
             // If there is a nonfailed run, return an error
             Ok(true) => {
-                let err = DeleteError::Prohibited(String::from("Attempted to delete a template_result when a non-failed run exists for the associated template.  Doing so is prohibited"));
+                let err = DeleteError::Prohibited(String::from("Attempted to delete a template_result when a processing run exists for the associated template.  Doing so is prohibited"));
                 error!("Failed to delete due to error: {}", err);
                 return Err(err);
             }
@@ -581,6 +581,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::CarrotFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -598,6 +602,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -615,6 +623,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::EvalFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -632,6 +644,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name4"),
             status: RunStatusEnum::TestAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -649,6 +665,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name5"),
             status: RunStatusEnum::EvalAborted,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -666,6 +686,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name6"),
             status: RunStatusEnum::BuildFailed,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -687,6 +711,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),

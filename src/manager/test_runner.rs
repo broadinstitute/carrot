@@ -175,6 +175,8 @@ impl TestRunner {
         let test_id = TestRunner::parse_test_id(test_id)?;
         // Retrieve test for id or return error
         let test = TestRunner::get_test(conn, test_id)?;
+        // Retrieve template for test
+        let template = TestRunner::get_template(conn, test.template_id)?;
 
         // Merge input and options JSONs
         let mut test_json = json!({});
@@ -232,6 +234,10 @@ impl TestRunner {
             test_id,
             run_group_id,
             run_name,
+            template.test_wdl,
+            template.test_wdl_dependencies,
+            template.eval_wdl,
+            template.eval_wdl_dependencies,
             test_json,
             test_options_json,
             eval_json,
@@ -299,10 +305,7 @@ impl TestRunner {
         }
         // Otherwise, start the run
         else {
-            match self
-                .start_run_test_with_template_id(conn, &run, test.template_id)
-                .await
-            {
+            match self.start_run_test(conn, &run).await {
                 Ok(run) => Ok(run),
                 Err(e) => {
                     update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
@@ -314,38 +317,14 @@ impl TestRunner {
 
     /// Starts a run by submitting it to cromwell
     ///
-    /// Assembles the input json and test wdl for `run` (using `conn` to retrieve necessary data
-    /// from the TEMPLATE table) and submits it to cromwell using `self.client`, then updates the
-    /// row in the database with the status and the test cromwell job id.  This function is basically a
-    /// wrapper for `start_run_test_with_template_id` for the case that the template_id, necessary for
-    /// retrieving WDLs from the TEMPLATE table, is not available
+    /// Assembles the input json and test wdl for `run` and submits it to cromwell using
+    /// `self.client`, then updates the row in the database with the status and the test cromwell
+    /// job id.
     pub async fn start_run_test(
         &self,
         conn: &PgConnection,
         run: &RunData,
     ) -> Result<RunData, Error> {
-        // Retrieve test for id or return error
-        let test = TestRunner::get_test(conn, run.test_id)?;
-
-        self.start_run_test_with_template_id(conn, run, test.template_id)
-            .await
-    }
-
-    /// Starts a run by submitting the test wdl to cromwell
-    ///
-    /// Assembles the input json and test wdl for `run` (using `conn` to retrieve necessary data
-    /// from the TEMPLATE table) and submits it to cromwell using `self.client`, then updates the
-    /// row in the database with the status and the test cromwell job id
-    pub async fn start_run_test_with_template_id(
-        &self,
-        conn: &PgConnection,
-        run: &RunData,
-        template_id: Uuid,
-    ) -> Result<RunData, Error> {
-        // Retrieve template to get WDLs or return error
-        let template_id = template_id;
-        let template = TestRunner::get_template(conn, template_id)?;
-
         // Format json so it's ready to submit
         let input_json_to_submit = self.format_test_json_for_cromwell(conn, &run.test_input)?;
 
@@ -368,7 +347,7 @@ impl TestRunner {
         // Download test wdl and write it to a file
         let test_wdl_as_string = self
             .test_resource_client
-            .get_resource_as_string(&template.test_wdl)
+            .get_resource_as_string(&run.test_wdl)
             .await?;
         let test_wdl_as_file = temp_storage::get_temp_file(test_wdl_as_string.as_bytes())?;
 
@@ -376,7 +355,7 @@ impl TestRunner {
         let (_test_wdl_deps_file, test_wdl_deps_file_path): (
             Option<NamedTempFile>,
             Option<PathBuf>,
-        ) = match &template.test_wdl_dependencies {
+        ) = match &run.test_wdl_dependencies {
             Some(deps_location) => {
                 let deps_data = self
                     .test_resource_client
@@ -428,49 +407,14 @@ impl TestRunner {
     /// Starts a run by submitting it to cromwell
     ///
     /// Assembles the input json (including pulling relevant outputs from `test_outputs` to supply as
-    /// inputs to the eval wdl) and eval wdl for `run` (using `conn` to retrieve necessary data
-    /// from the TEMPLATE table) and submits it to cromwell using `client`, then updates the
-    /// row in the database with the status and the eval cromwell job id.  This function is basically a
-    /// wrapper for `start_run_eval_with_template_id` for the case that the template_id, necessary for
-    /// retrieving WDLs from the TEMPLATE table, is not available
+    /// inputs to the eval wdl) and eval wdl for `run` and submits it to cromwell using `client`,
+    /// then updates the row in the database with the status and the eval cromwell job id.
     pub async fn start_run_eval(
         &self,
         conn: &PgConnection,
         run: &RunData,
         test_outputs: &Map<String, Value>,
     ) -> Result<RunData, Error> {
-        // Retrieve test for id or return error
-        let test = TestRunner::get_test(conn, run.test_id)?;
-
-        match self
-            .start_run_eval_with_template_id(conn, run, test.template_id, test_outputs)
-            .await
-        {
-            Ok(run) => Ok(run),
-            Err(e) => {
-                update_run_status(conn, run.run_id, RunStatusEnum::CarrotFailed)?;
-                Err(e)
-            }
-        }
-    }
-
-    /// Continues the run from the test WDL finishing by submitting the eval WDL to cromwell
-    ///
-    /// Assembles the input json (including pulling relevant outputs from `test_outputs` to supply as
-    /// inputs to the eval wdl) and eval wdl for `run` (using `conn` to retrieve necessary data
-    /// from the TEMPLATE table) and submits it to cromwell using `client`, then updates the
-    /// row in the database with the status and the eval cromwell job id
-    pub async fn start_run_eval_with_template_id(
-        &self,
-        conn: &PgConnection,
-        run: &RunData,
-        template_id: Uuid,
-        test_outputs: &Map<String, Value>,
-    ) -> Result<RunData, Error> {
-        // Retrieve template to get WDLs or return error
-        let template_id = template_id;
-        let template = TestRunner::get_template(conn, template_id)?;
-
         // Format json so it's ready to submit
         let input_json_to_submit =
             self.format_eval_json_for_cromwell(conn, &run.eval_input, test_outputs)?;
@@ -494,7 +438,7 @@ impl TestRunner {
         // Download eval wdl and write it to a file
         let eval_wdl_as_string = self
             .test_resource_client
-            .get_resource_as_string(&template.eval_wdl)
+            .get_resource_as_string(&run.eval_wdl)
             .await?;
         let eval_wdl_as_file = temp_storage::get_temp_file(eval_wdl_as_string.as_bytes())?;
 
@@ -502,7 +446,7 @@ impl TestRunner {
         let (_eval_wdl_deps_file, eval_wdl_deps_file_path): (
             Option<NamedTempFile>,
             Option<PathBuf>,
-        ) = match &template.eval_wdl_dependencies {
+        ) = match &run.eval_wdl_dependencies {
             Some(deps_location) => {
                 let deps_data = self
                     .test_resource_client
@@ -966,6 +910,10 @@ impl TestRunner {
         test_id: Uuid,
         run_group_id: Option<Uuid>,
         name: String,
+        test_wdl: String,
+        test_wdl_dependencies: Option<String>,
+        eval_wdl: String,
+        eval_wdl_dependencies: Option<String>,
         test_input: Value,
         test_options: Option<Value>,
         eval_input: Value,
@@ -983,6 +931,10 @@ impl TestRunner {
                 run_group_id,
                 name,
                 status: RunStatusEnum::Created,
+                test_wdl,
+                test_wdl_dependencies,
+                eval_wdl,
+                eval_wdl_dependencies,
                 test_input,
                 test_options,
                 eval_input,
@@ -1207,6 +1159,10 @@ mod tests {
             test_id: test.test_id,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{\"test\":\"1\"}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{}").unwrap(),
@@ -1226,6 +1182,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::Building,
+            test_wdl: format!("{}/test_software_params", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            eval_wdl_dependencies: None,
             test_input: json!({"test_test.in_pleasantry":"Yo", "test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             test_options: Some(json!({"option": "yes"})),
             eval_input: json!({"test_test.in_verb":"yelled", "test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
@@ -1248,6 +1208,10 @@ mod tests {
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,
+            test_wdl: format!("{}/test_software_params", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval_software_params", mockito::server_url()),
+            eval_wdl_dependencies: None,
             test_input: json!({"test_test.in_pleasantry":"Yo", "test_test.in_greeted": "Cool Person", "test_test.in_greeting": "Yo"}),
             test_options: None,
             eval_input: json!({"test_test.in_verb":"yelled", "test_test.in_output_filename": "test_greeting.txt", "test_test.in_output_file": "test_output:test_test.TestKey"}),
@@ -1820,6 +1784,16 @@ mod tests {
             test.test_id,
             Some(run_group.run_group_id),
             String::from("Kevin's test run"),
+            template.test_wdl.clone(),
+            match template.test_wdl_dependencies {
+                Some(w) => Some(w.clone()),
+                None => None,
+            },
+            template.eval_wdl.clone(),
+            match template.eval_wdl_dependencies {
+                Some(w) => Some(w.clone()),
+                None => None,
+            },
             json!({"test":"1"}),
             Some(json!({"test": "option"})),
             json!({"eval":"2"}),
@@ -1844,6 +1818,10 @@ mod tests {
             Uuid::new_v4(),
             None,
             String::from("Kevin's test run"),
+            String::from("testtest"),
+            None,
+            String::from("evaltest"),
+            None,
             json!({"test":"1"}),
             None,
             json!({"eval":"2"}),

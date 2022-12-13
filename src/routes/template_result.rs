@@ -245,7 +245,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
         Err(error_response) => return error_response,
     };
 
-    //Query DB for pipeline in new thread
+    // Query DB for pipeline in new thread
     match web::block(move || {
         let conn = pool.get().expect("Failed to get DB connection from pool");
 
@@ -281,7 +281,7 @@ async fn delete_by_id(req: HttpRequest, pool: web::Data<db::DbPool>) -> HttpResp
                 ) => HttpResponse::Forbidden().json(ErrorBody {
                     title: "Cannot delete".to_string(),
                     status: 403,
-                    detail: "Cannot delete a template_result mapping if the associated template has non-failed runs".to_string(),
+                    detail: "Cannot delete a template_result mapping if the associated template has runs in progress".to_string(),
                 }),
                 // For other errors, return a 500
                 _ => default_500(&e),
@@ -390,6 +390,10 @@ mod tests {
             run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::EvalRunning,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
             test_input: serde_json::from_str("{}").unwrap(),
             test_options: None,
             eval_input: serde_json::from_str("{\"test\":\"2\"}").unwrap(),
@@ -705,7 +709,7 @@ mod tests {
         assert_eq!(error_body.status, 403);
         assert_eq!(
             error_body.detail,
-            "Cannot delete a template_result mapping if the associated template has non-failed runs"
+            "Cannot delete a template_result mapping if the associated template has runs in progress"
         );
     }
 

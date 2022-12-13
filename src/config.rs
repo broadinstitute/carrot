@@ -213,17 +213,23 @@ pub struct ApiConfig {
     host: String,
     /// Host port for the application
     port: String,
+    /// Base domain or IP address + port that carrot will assume is the domain for its server when
+    /// constructing URIs that will be exposed to users
+    domain: String,
 }
 
 impl ApiConfig {
-    pub fn new(host: String, port: String) -> Self {
-        ApiConfig { host, port }
+    pub fn new(host: String, port: String, domain: String) -> Self {
+        ApiConfig { host, port, domain }
     }
     pub fn host(&self) -> &String {
         &self.host
     }
     pub fn port(&self) -> &String {
         &self.port
+    }
+    pub fn domain(&self) -> &String {
+        &self.domain
     }
 }
 
