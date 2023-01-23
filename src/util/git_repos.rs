@@ -10,7 +10,6 @@ use uuid::Uuid;
 /// Struct for checking the existence/accessibility of git repos
 #[derive(Clone)]
 pub struct GitRepoManager {
-    private_github_config: Option<PrivateGithubAccessConfig>,
     repo_cache_location: String,
 }
 
@@ -46,9 +45,34 @@ impl GitRepoManager {
         private_github_config: Option<PrivateGithubAccessConfig>,
         repo_cache_location: String,
     ) -> GitRepoManager {
+
+        if let Some(config) = &private_github_config {
+            Self::store_credentials(config)
+                .expect("Encountered an error attempting to store github creds")
+        }
+
         GitRepoManager {
-            private_github_config,
             repo_cache_location,
+        }
+    }
+
+    /// Stores the specified github credentials so they will be used when cloning repos from github
+    /// in case we need access to private ones
+    fn store_credentials(
+        config: &PrivateGithubAccessConfig
+    ) -> Result<(), Error> {
+        // Run the command
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(format!("git config --global credential.helper store && echo \"https://{}:{}@github.com\" > ~/.git-credentials", config.client_id(), config.client_token()))
+            .output()?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(Error::Git(
+                String::from_utf8_lossy(&*output.stderr).to_string(),
+            ))
         }
     }
 
@@ -56,9 +80,6 @@ impl GitRepoManager {
     /// `&self.repo_cache_location` in a new subdirectory `subdir`.  Returns an error if it fails
     /// for any reason
     pub fn download_git_repo(&self, software_id: Uuid, url: &str) -> Result<(), Error> {
-        // Get the url with credentials if it's a github url and we have a configuration for private
-        // github access
-        let url_to_check = self.process_url_for_github_creds(url);
         // Get the directory path we'll write to
         let directory: PathBuf = [&self.repo_cache_location, &software_id.to_string()]
             .iter()
@@ -68,7 +89,7 @@ impl GitRepoManager {
 
         let output = Command::new("sh")
             .arg("-c")
-            .arg(format!("git clone -n {} {}", url_to_check, directory.to_str().expect("Failed to convert directory for git repo into string.  This should not happen.")))
+            .arg(format!("git clone -n {} {}", url, directory.to_str().expect("Failed to convert directory for git repo into string.  This should not happen.")))
             .output()?;
 
         if output.status.success() {
@@ -266,36 +287,6 @@ impl GitRepoManager {
             ))
         }
     }
-
-    /// Checks if `url` is a github url.  If it is, and `&self` has credentials for connecting to
-    /// private github repos, adds those creds to the url and returns.  Otherwise, returns the url
-    /// unchanged as a String
-    fn process_url_for_github_creds(&self, url: &str) -> String {
-        if url.contains("github.com") {
-            if let Some(private_github_config) = &self.private_github_config {
-                GitRepoManager::format_github_url_with_creds(
-                    url,
-                    private_github_config.client_id(),
-                    private_github_config.client_token(),
-                )
-            } else {
-                url.to_string()
-            }
-        } else {
-            url.to_string()
-        }
-    }
-
-    /// Takes a github url, username, and password and returns the url to use for cloning with those
-    /// credentials, in the form https://username:password@github.com/some/repo.git
-    fn format_github_url_with_creds(url: &str, username: &str, password: &str) -> String {
-        // Trim https://www. from start of url so we can stick the credentials in there
-        let trimmed_url = url
-            .trim_start_matches("https://")
-            .trim_start_matches("www.");
-        // Format url with auth creds and return
-        format!("https://{}:{}@{}", username, password, trimmed_url)
-    }
 }
 
 #[cfg(test)]
@@ -433,47 +424,5 @@ mod tests {
             .expect_err("No error when checking for commit and tags");
 
         assert!(matches!(error, Error::IO(_)));
-    }
-
-    #[test]
-    fn format_github_url_with_creds_with_www() {
-        let test = GitRepoManager::format_github_url_with_creds(
-            "https://www.example.com/example/project.git",
-            "test_user",
-            "test_pass",
-        );
-
-        assert_eq!(
-            test,
-            "https://test_user:test_pass@example.com/example/project.git"
-        );
-    }
-
-    #[test]
-    fn format_github_url_with_creds_without_www() {
-        let test = GitRepoManager::format_github_url_with_creds(
-            "https://example.com/example/project.git",
-            "test_user",
-            "test_pass",
-        );
-
-        assert_eq!(
-            test,
-            "https://test_user:test_pass@example.com/example/project.git"
-        );
-    }
-
-    #[test]
-    fn format_github_url_with_creds_without_https() {
-        let test = GitRepoManager::format_github_url_with_creds(
-            "example.com/example/project.git",
-            "test_user",
-            "test_pass",
-        );
-
-        assert_eq!(
-            test,
-            "https://test_user:test_pass@example.com/example/project.git"
-        );
     }
 }
