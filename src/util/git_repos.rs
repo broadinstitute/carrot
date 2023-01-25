@@ -11,6 +11,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct GitRepoManager {
     repo_cache_location: String,
+    private_github_config: Option<PrivateGithubAccessConfig>,
 }
 
 #[derive(Debug)]
@@ -53,6 +54,7 @@ impl GitRepoManager {
 
         GitRepoManager {
             repo_cache_location,
+            private_github_config
         }
     }
 
@@ -71,7 +73,7 @@ impl GitRepoManager {
             Ok(())
         } else {
             Err(Error::Git(
-                String::from_utf8_lossy(&*output.stderr).to_string(),
+                String::from_utf8_lossy(&*output.stderr).to_string().replace(config.client_id(), "*******").replace(config.client_token(), "*******"),
             ))
         }
     }
@@ -96,7 +98,7 @@ impl GitRepoManager {
             Ok(())
         } else {
             Err(Error::Git(
-                String::from_utf8_lossy(&*output.stderr).to_string(),
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
             ))
         }
     }
@@ -155,7 +157,7 @@ impl GitRepoManager {
             Ok(())
         } else {
             Err(Error::Git(
-                String::from_utf8_lossy(&*output.stderr).to_string(),
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
             ))
         }
     }
@@ -188,7 +190,7 @@ impl GitRepoManager {
                 return Ok(false);
             }
             // Otherwise return an error
-            Err(Error::Git(stderr))
+            Err(Error::Git(self.censor_git_error(stderr)))
         }
     }
 
@@ -212,7 +214,7 @@ impl GitRepoManager {
                 return Ok(false);
             }
             // Otherwise return an error
-            Err(Error::Git(stderr))
+            Err(Error::Git(self.censor_git_error(stderr)))
         }
     }
 
@@ -235,7 +237,7 @@ impl GitRepoManager {
         } else {
             // Otherwise return an error
             Err(Error::Git(
-                String::from_utf8_lossy(&*output.stderr).to_string(),
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
             ))
         }
     }
@@ -255,7 +257,7 @@ impl GitRepoManager {
             Ok(stdout.split_terminator("\n").map(String::from).collect())
         } else {
             Err(Error::Git(
-                String::from_utf8_lossy(&*output.stderr).to_string(),
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
             ))
         }
     }
@@ -283,9 +285,19 @@ impl GitRepoManager {
             )
         } else {
             Err(Error::Git(
-                String::from_utf8_lossy(&*output.stderr).to_string(),
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
             ))
         }
+    }
+
+    /// I'm not 100% sure if any of git's error messages could include credentials, so just in case,
+    /// I'm gonna censor them
+    fn censor_git_error(&self, mut error_message: String) -> String {
+        // We're only checking for credentials if we actually have any
+        if let Some(creds) = &self.private_github_config {
+            error_message = error_message.replace(creds.client_id(), "*******").replace(creds.client_token(), "*******");
+        }
+        error_message
     }
 }
 
@@ -424,5 +436,41 @@ mod tests {
             .expect_err("No error when checking for commit and tags");
 
         assert!(matches!(error, Error::IO(_)));
+    }
+
+    #[test]
+    fn censor_git_error_has_creds() {
+        let git_repo_manager = GitRepoManager::new(
+            Some(PrivateGithubAccessConfig::new(
+                String::from("test_client_id"),
+                String::from("test_client_token"),
+                String::from(""),
+                String::from(""),
+                String::from("")),
+            ),
+            String::from("Repo dir doesn't matter for this test")
+        );
+
+        let censored_error = git_repo_manager.censor_git_error(String::from("This error message has credentials in it: test_client_id:test_client_token"));
+
+        assert_eq!(censored_error, "This error message has credentials in it: *******:*******");
+    }
+
+    #[test]
+    fn censor_git_error_no_creds() {
+        let git_repo_manager = GitRepoManager::new(
+            Some(PrivateGithubAccessConfig::new(
+                String::from("test_client_id"),
+                String::from("test_client_token"),
+                String::from(""),
+                String::from(""),
+                String::from("")),
+            ),
+            String::from("Repo dir doesn't matter for this test")
+        );
+
+        let censored_error = git_repo_manager.censor_git_error(String::from("This error message has no credentials in it"));
+
+        assert_eq!(censored_error, "This error message has no credentials in it");
     }
 }
