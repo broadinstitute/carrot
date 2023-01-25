@@ -2,7 +2,7 @@
 # carrot\_cli
 The official CLI tool for [CARROT](https://github.com/broadinstitute/carrot). This tool provides a suite of commands for interacting with the CARROT REST API.
 
-Current version: 0.6.2
+Current version: 0.6.3
 
 ## Table of Contents
 * [Installation](#installation)
