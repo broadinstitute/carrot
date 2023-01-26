@@ -80,7 +80,7 @@ v0.6.2
 
 ## <a name="about"/> **About**
 
-This document serves as a guide for how to interact with CARROT, including how to set up tests, link your github repo to CARROT, and interact with the server.  This guide does not cover how to set up the CARROT system - that topic is explained in the README.
+This document serves as a guide for how to interact with CARROT, including how to set up tests, link your github repo to CARROT, and interact with the server.  This guide does not cover how to set up the CARROT system - that topic is explained in the [README](README.md).
 
 Remember - “A full eval is just a #carrot() away.”
 
@@ -146,7 +146,7 @@ The relationship between **pipelines, templates, tests, runs**, and **results** 
 
 ![Test Structure](images/Test_Structure.png)
 
-The following sections detail some specifics for how to use CARROT to create and dispatch analyses.  These sections refer to “tests” largely as notional concepts, rather than the CARROT **test** defined above.
+The following sections detail some specifics for how to use CARROT to create and dispatch analyses.  These sections refer to “tests” in the more general sense, rather than specifically the CARROT **test** defined above.
 
 
 ### <a name="pipeline-analysis-design"/> **Pipeline / Analysis Design**
@@ -319,7 +319,7 @@ The  `TEMPLATE ID OR NAME` corresponds to the CARROT ID or name of the template 
 
 `<EVAL_WDL_DEFAULT_JSON_FILE> `corresponds to the JSON file containing default values for the evaluation WDL.  In general, all workflow inputs should be set here except for the docker container specification (this is required for the GitHub integration to function properly).  If the evaluation WDL does not require a docker image input, you do not need to add a dummy value to the WDL prior to running the test.
 
-The `--test_option_defaults` and `--eval_option_defaults` inputs allow you to optionally specify configuration options (the `workflowOptions` param when [submitting a workflow to Cromwell](https://cromwell.readthedocs.io/en/stable/api/RESTAPI/#submit-a-workflow-for-execution)) for running the test and eval WDLs.  Like the input defaults, this can be overrided or added to when running the test.
+The `--test_option_defaults` and `--eval_option_defaults` inputs allow you to specify configuration options (the `workflowOptions` param when [submitting a workflow to Cromwell](https://cromwell.readthedocs.io/en/stable/api/RESTAPI/#submit-a-workflow-for-execution)) for running the test and eval WDLs.  Like the input defaults, this can be overridden or added to when running the test.
 
 The `--created_by email` flag is optional and defaults to the email address in your carrot_cli configuration file.
 
@@ -524,11 +524,11 @@ The `--created_by email` flag is optional and defaults to the email address in y
 
 #### <a name="generating-a-report"/> **Generating a Report**
 
-Filled reports can be generated in three ways. Once the report has been generated, it will be available in 3 forms: the Jupyter notebook that is produced by CARROT before being run, the filled Jupyter notebook that is created once all the cells are run, and a static HTML representation of the filled notebook.
+Filled reports can be generated in three ways. Once the report has been generated, it will be available in 3 forms: the Jupyter notebook that is produced by CARROT before being run, the filled Jupyter notebook that is created once all the cells are run, and a static HTML representation of the filled notebook. These will be available in Google Cloud Storage and the URIs for accessing them will be emailed to you if you triggered the report, they will be posted to GitHub if the report is generated automatically from a GitHub run, and they will also be available if you query for them using the `find_reports` or `find_report_by_ids` commands in carrot_cli for `run` or `run_group`.
 
 ##### <a name="auto-generated-reports"/> **Auto-Generated Reports**
 
-First, if a report has been properly defined and mapped to a template, any future successful runs of tests based on that template will automatically result in the report being generated, and any users subscribed to the pipeline, template, or test, or who created the run, will receive an email notification when the report has been generated.  Additionally, if the run is triggered via a GitHub comment, the results of the report run will also be posted as a comment below it.
+First, if a report has been properly defined and mapped to a template, any future successful runs of tests that are based on that template and that match the specified report trigger ([see mapping a report to a template](3-map-the-report-to-a-template)) will automatically result in the report being generated for that run, and any users subscribed to the pipeline, template, or test, or who created the run, will receive an email notification when the report has been generated.  Additionally, if the run is triggered via a GitHub comment, the results of the report run will also be posted as a comment below it.
 
 ##### <a name="manually-generating-a-report-for-a-run"/> **Manually Generating a Report for a Run**
 
@@ -564,7 +564,18 @@ carrot_cli pipeline create_report_for_runs [options] PIPELINE REPORT
 
 `REPORT` is the ID or name of the report you wish to generate for the run.  If you just completed step 2 above and created a report, the ID of that report should have been included in the results from that command.  If not, you can find the report using `carrot_cli report find`.
 
-`[options]` can be any from a list of options for filtering runs that are the same as you have available to you for any of the `find_runs` commands. For a full list of the filtering options available, see the output of `carrot_cli pipeline create_report_for_runs --help`.
+`[options]` can be any from a list of options for filtering runs that are the same as you have available to you for any of the `find_runs` commands. Some useful options include:
+
+* `--test_input` and `--eval_input`, if you want to filter by specific input json files
+* `--software_name` can be used in combination with:
+  * `--commit_count` to get runs on the last n commits to a software
+    * on a specific branch using `--software-branch`
+    * with tagged commits only using `--tags-only`
+  * `--commit_or_tag` any number of times for runs on specific commits/tags on that software
+  * `--commit_from` and/or `--commit_to` for runs on commits from a range of dates
+* `--limit` to change the number of runs to include (default 20)
+
+For a full list of the filtering options available, see the output of `carrot_cli pipeline create_report_for_runs --help`.
 
 
 ## <a name="github-integration"/> **GitHub Integration**
