@@ -184,7 +184,7 @@ fn update_software_version(
         get_software_version(conn, software_version_id)?;
     // Get the commit, tags, and commit date for it
     let (commit, tags, commit_date): (String, Vec<String>, NaiveDateTime) = match git_repo_manager
-        .get_commit_and_tags_and_date_from_commit_or_tag(
+        .get_commit_and_tags_and_date_from_ref(
             found_software_version.software_id,
             &found_software_version.commit,
         ) {
@@ -198,7 +198,7 @@ fn update_software_version(
                     found_software_version.software_id,
                     git_repo_manager,
                 )?;
-                match git_repo_manager.get_commit_and_tags_and_date_from_commit_or_tag(
+                match git_repo_manager.get_commit_and_tags_and_date_from_ref(
                     found_software_version.software_id,
                     &found_software_version.commit,
                 ) {

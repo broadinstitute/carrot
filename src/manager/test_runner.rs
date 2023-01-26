@@ -563,7 +563,7 @@ impl TestRunner {
                     };
                 // Get commit, tags, and commit date from commit_or_tag
                 let (commit, tags, commit_date): (String, Vec<String>, NaiveDateTime) =
-                    match git_repo_manager.get_commit_and_tags_and_date_from_commit_or_tag(
+                    match git_repo_manager.get_commit_and_tags_and_date_from_ref(
                         software.software_id,
                         name_and_commit_or_tag[1],
                     ) {
@@ -576,7 +576,7 @@ impl TestRunner {
                                     software.software_id,
                                     &software.repository_url,
                                 )?;
-                                git_repo_manager.get_commit_and_tags_and_date_from_commit_or_tag(
+                                git_repo_manager.get_commit_and_tags_and_date_from_ref(
                                     software.software_id,
                                     name_and_commit_or_tag[1],
                                 )?

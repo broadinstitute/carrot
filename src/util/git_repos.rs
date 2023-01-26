@@ -104,40 +104,23 @@ impl GitRepoManager {
     }
 
     /// Runs git fetch on the cached repo for the software specified by `software_id`, determines
-    /// whether `commit_or_tag` is a commit or tag, and if it is a commit, returns the commit and
-    /// the tags if the commit has any, and if it is a tag, returns the commit for that tag and any
-    /// tags for that commit.  If it's neither, returns Error::NotFound.  Returns an error for any
-    /// other failures
-    pub fn get_commit_and_tags_and_date_from_commit_or_tag(
+    /// the commit hash for `git_ref`, and gets any tags for that commit along with the commit date.
+    /// Returns the commit hash, tags, and commit date.  If `git_ref` not a valid git ref, returns
+    /// Error::NotFound.  Returns an error for any other failures
+    pub fn get_commit_and_tags_and_date_from_ref(
         &self,
         software_id: Uuid,
-        commit_or_tag: &str,
+        git_ref: &str,
     ) -> Result<(String, Vec<String>, NaiveDateTime), Error> {
         let subdir: String = software_id.to_string();
         // Get the directory path for the git repo
         let repo_dir: PathBuf = [&self.repo_cache_location, &subdir].iter().collect();
         // Run git fetch on the repo so it's up to date
         self.git_fetch(&repo_dir)?;
-        // Check first if it's a tag
-        let (commit, tags): (String, Vec<String>) =
-            if self.git_show_ref_verify(&repo_dir, commit_or_tag)? {
-                // Get the commit for this tag
-                let commit = self.git_rev_list(&repo_dir, commit_or_tag)?;
-                // Get all tags for this commit (in case there are multiple)
-                let tags = self.git_tag_points_at(&repo_dir, &commit)?;
-                (commit, tags)
-            }
-            // If it's not, we'll check if it's a commit
-            else if self.git_rev_parse_verify(&repo_dir, commit_or_tag)? {
-                // Check if we have a tag for this commit
-                let tags = self.git_tag_points_at(&repo_dir, commit_or_tag)?;
-                (commit_or_tag.to_owned(), tags)
-            }
-            // If it's neither, we'll return an error
-            else {
-                return Err(Error::NotFound(commit_or_tag.to_string()));
-            };
-
+        // Get the commit hash for git_ref
+        let commit: String = self.git_rev_parse_verify(&repo_dir, git_ref)?;
+        // Get tags for this commit (if any)
+        let tags: Vec<String> = self.git_tag_points_at(&repo_dir, &commit)?;
         // Get the timestamp for the commit
         let timestamp: NaiveDateTime = self.git_show_date(&repo_dir, &commit)?;
 
@@ -162,83 +145,35 @@ impl GitRepoManager {
         }
     }
 
-    /// Runs git rev-parse on the git repo in `repo_dir` to see if `commit_maybe` is a commit in the
-    /// repo.  Returns true if it is an false if it's not.  If it fails for any other reason,
-    /// returns an error.  It should be noted that a true returned from this function does not
-    /// mean `commit_maybe` is not a tag.  This will also return true for tags.  If using this to
-    /// differentiate between tags and commits, `git_show_ref_verify` should be run first to check
-    /// if the string in question is a tag
-    fn git_rev_parse_verify(&self, repo_dir: &Path, commit_maybe: &str) -> Result<bool, Error> {
+    /// Runs git rev-parse on the git repo in `repo_dir` to get the commit hash for `git_ref`.
+    /// Returns the commit hash if `git_ref` is a valid ref, otherwise returns Error::NotFound. If
+    /// it fails for any other reason, returns an error.
+    fn git_rev_parse_verify(&self, repo_dir: &Path, git_ref: &str) -> Result<String, Error> {
         // Run the command
         let output = Command::new("sh")
             .current_dir(repo_dir)
             .arg("-c")
             .arg(format!(
                 "git rev-parse --verify \"{}^{{commit}}\"",
-                commit_maybe
+                git_ref
             ))
             .output()?;
 
-        // If the command was successful, return true
-        if output.status.success() {
-            Ok(true)
-        } else {
-            let stderr = String::from_utf8_lossy(&*output.stderr).to_string();
-            // If stderr matches the message that git spits out if the commit is not valid, return
-            // false
-            if stderr.trim() == "fatal: Needed a single revision" {
-                return Ok(false);
-            }
-            // Otherwise return an error
-            Err(Error::Git(self.censor_git_error(stderr)))
-        }
-    }
-
-    /// Uses git show-ref to verify whether `tag_maybe` is a tag.  Returns true if it is, or false
-    /// if it's not.  Returns an error if the command fails for some reason.
-    fn git_show_ref_verify(&self, repo_dir: &Path, tag_maybe: &str) -> Result<bool, Error> {
-        // Run the command
-        let output = Command::new("sh")
-            .current_dir(repo_dir)
-            .arg("-c")
-            .arg(format!("git show-ref --verify \"refs/tags/{}\"", tag_maybe))
-            .output()?;
-
-        // If the command was successful, return true
-        if output.status.success() {
-            Ok(true)
-        } else {
-            let stderr = String::from_utf8_lossy(&*output.stderr).to_string();
-            // If stderr says it's not a valid ref, we'll just return false
-            if stderr.contains("- not a valid ref") {
-                return Ok(false);
-            }
-            // Otherwise return an error
-            Err(Error::Git(self.censor_git_error(stderr)))
-        }
-    }
-
-    /// Calls git rev-list on the repo in `repo_dir` for `tag` and returns the resulting commit if
-    /// successful, or an error if the command fails for some other reason
-    fn git_rev_list(&self, repo_dir: &Path, tag: &str) -> Result<String, Error> {
-        // Run the command
-        let output = Command::new("sh")
-            .current_dir(repo_dir)
-            .arg("-c")
-            .arg(format!("git rev-list -n 1 {}", tag))
-            .output()?;
-
-        // If the command was successful, return the commit string
+        // If the command was successful, return the commit hash
         if output.status.success() {
             Ok(String::from_utf8_lossy(&*output.stdout)
                 .to_string()
                 .trim()
                 .to_string())
         } else {
+            let stderr = String::from_utf8_lossy(&*output.stderr).to_string();
+            // If stderr matches the message that git spits out if the commit is not valid, return
+            // NotFound
+            if stderr.trim() == "fatal: Needed a single revision" {
+                return Err(Error::NotFound(git_ref.to_string()));
+            }
             // Otherwise return an error
-            Err(Error::Git(
-                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
-            ))
+            Err(Error::Git(self.censor_git_error(stderr)))
         }
     }
 
@@ -348,13 +283,13 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn get_commit_and_tags_from_commit_or_tag_success_commit() {
+    async fn get_commit_and_tag_from_ref_success_commit() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
             create_test_git_repo();
         let git_repo_manager =
             GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
         let (commit, tags, commit_date) = git_repo_manager
-            .get_commit_and_tags_and_date_from_commit_or_tag(
+            .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
                 &first_commit,
             )
@@ -368,13 +303,13 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn get_commit_and_tags_from_commit_or_tag_success_commit_no_tags() {
+    async fn get_commit_and_tag_from_ref_success_commit_no_tags() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
             create_test_git_repo();
         let git_repo_manager =
             GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
         let (commit, tags, commit_date) = git_repo_manager
-            .get_commit_and_tags_and_date_from_commit_or_tag(
+            .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
                 &second_commit,
             )
@@ -386,13 +321,13 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn get_commit_and_tags_from_commit_or_tag_success_tag() {
+    async fn get_commit_and_tag_from_ref_success_tag() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
             create_test_git_repo();
         let git_repo_manager =
             GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
         let (commit, tags, commit_date) = git_repo_manager
-            .get_commit_and_tags_and_date_from_commit_or_tag(
+            .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
                 "first",
             )
@@ -406,14 +341,50 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn get_commit_and_tags_from_commit_or_tag_failure_not_found() {
+    async fn get_commit_and_tags_from_ref_success_branch() {
+        let (git_repo_temp_dir, _first_commit, second_commit, _first_date, second_date) =
+            create_test_git_repo();
+        let git_repo_manager =
+            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+        let (commit, tags, commit_date) = git_repo_manager
+            .get_commit_and_tags_and_date_from_ref(
+                Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+                "test_branch",
+            )
+            .expect("Error when checking for commit and tags");
+
+        assert_eq!(commit, second_commit);
+        assert_eq!(commit_date, second_date);
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[actix_rt::test]
+    async fn get_commit_and_tags_from_ref_success_short_hash() {
+        let (git_repo_temp_dir, _first_commit, second_commit, _first_date, second_date) =
+            create_test_git_repo();
+        let git_repo_manager =
+            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+        let (commit, tags, commit_date) = git_repo_manager
+            .get_commit_and_tags_and_date_from_ref(
+                Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+                &second_commit[..10],
+            )
+            .expect("Error when checking for commit and tags");
+
+        assert_eq!(commit, second_commit);
+        assert_eq!(commit_date, second_date);
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[actix_rt::test]
+    async fn get_commit_and_tag_from_ref_failure_not_found() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
             create_test_git_repo();
         let git_repo_manager =
             GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
         let commit_or_tag = String::from("last");
         let error = git_repo_manager
-            .get_commit_and_tags_and_date_from_commit_or_tag(
+            .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
                 &commit_or_tag,
             )
@@ -423,13 +394,13 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn get_commit_and_tags_from_commit_or_tag_failure_no_software() {
+    async fn get_commit_and_tag_from_ref_failure_no_software() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
             create_test_git_repo();
         let git_repo_manager =
             GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
         let error = git_repo_manager
-            .get_commit_and_tags_and_date_from_commit_or_tag(
+            .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("2d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
                 "first",
             )
