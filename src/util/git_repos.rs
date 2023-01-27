@@ -105,7 +105,7 @@ impl GitRepoManager {
 
     /// Runs git fetch on the cached repo for the software specified by `software_id`, determines
     /// the commit hash for `git_ref`, and gets any tags for that commit along with the commit date.
-    /// Returns the commit hash, tags, and commit date.  If `git_ref` not a valid git ref, returns
+    /// Returns the commit hash, tags, and commit date.  If `git_ref` is not a valid git ref, returns
     /// Error::NotFound.  Returns an error for any other failures
     pub fn get_commit_and_tags_and_date_from_ref(
         &self,
