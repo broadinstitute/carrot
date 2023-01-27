@@ -9,6 +9,7 @@ first_commit_hash=$(git rev-parse HEAD)
 first_commit_date=$(git show --no-patch --no-notes --pretty='%cd' ${first_commit_hash})
 git tag "first" > /dev/null 2>&1
 git tag "beginning" > /dev/null 2>&1
+git checkout -b "test_branch"
 echo "more text" >> file.txt
 git commit -am "Arbitrary change" > /dev/null 2>&1
 second_commit_hash=$(git rev-parse HEAD)
