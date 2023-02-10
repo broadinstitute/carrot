@@ -250,7 +250,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -338,7 +337,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("name1"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -359,7 +357,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("name2"),
             status: RunStatusEnum::TestSubmitted,
             test_wdl: String::from("testtest"),
@@ -380,7 +377,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::Building,
             test_wdl: String::from("testtest"),

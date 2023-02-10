@@ -14,6 +14,40 @@ pub struct GitRepoManager {
     private_github_config: Option<PrivateGithubAccessConfig>,
 }
 
+/// To be implemented on structs of query params for finding tags/commits in a git repo
+pub trait GitQuery {
+    fn query(&self, git_repo_manager: &GitRepoManager, repo_dir: &Path) -> Result<Vec<String>, Error>;
+}
+
+/// Represents possible params for querying a git repo for a list of commits
+#[derive(Debug)]
+pub struct CommitQuery {
+    pub branch: Option<String>,
+    pub since: Option<NaiveDateTime>,
+    pub until: Option<NaiveDateTime>,
+    pub number: Option<u32>,
+}
+
+impl GitQuery for CommitQuery {
+    fn query(&self, git_repo_manager: &GitRepoManager, repo_dir: &Path) -> Result<Vec<String>, Error> {
+        git_repo_manager.git_log_commits(repo_dir, self)
+    }
+}
+
+/// Represents possible params for querying a git repo for a list of tags
+#[derive(Debug)]
+pub struct TagQuery {
+    pub branch: Option<String>,
+    pub number: usize
+}
+
+impl GitQuery for TagQuery {
+    fn query(&self, git_repo_manager: &GitRepoManager, repo_dir: &Path) -> Result<Vec<String>, Error> {
+        git_repo_manager.git_tags_list(repo_dir, self)
+    }
+}
+
+
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
@@ -127,6 +161,95 @@ impl GitRepoManager {
         Ok((commit, tags, timestamp))
     }
 
+    /// Runs git fetch on the cached repo for the software specified by `software_id` and attempts
+    /// to retrieve a list of commit hashes or tags for `query`
+    pub fn query_repo_for_commits_or_tags(
+        &self, software_id: Uuid, query: &impl GitQuery
+    ) -> Result<Vec<String>, Error> {
+        let subdir: String = software_id.to_string();
+        // Get the directory path for the git repo
+        let repo_dir: PathBuf = [&self.repo_cache_location, &subdir].iter().collect();
+        // Run git fetch on the repo so it's up to date
+        self.git_fetch(&repo_dir)?;
+        // Retrieve commits/tags for query
+        query.query(&self, &repo_dir)
+    }
+
+    /// Calls git log to list commit hashes for the repo in `repo_dir`, optionally on
+    /// `query.branch`, optionally starting at the date specified by `query.since`, optionally
+    /// ending at the date specified by `query.until`, optionally limited to max `query.number`
+    /// commits
+    fn git_log_commits(&self, repo_dir: &Path, query: &CommitQuery) -> Result<Vec<String>, Error> {
+        let output = Command::new("sh")
+            .current_dir(repo_dir)
+            .arg("-c")
+            .arg(format!(
+                "git --no-pager log {} {} {} {} --pretty=format:\"%H\"",
+                match &query.branch {
+                    Some(b) => {
+                        // Since this is a no-checkout clone, we need to make sure we're referring to the
+                        // branches starting with origin/ if it's just the branch name
+                        if b.starts_with("origin/") {
+                            format!("\'{}\'", b.replace("\'", "\\\'"))
+                        }
+                        else {
+                            format!("\'origin/{}\'", b.replace("\'", "\\\'"))
+                        }
+                    },
+                    None => String::from("")
+                },
+                match query.since { Some(s) => format!("--since \"{}\"", s), None => String::from("")},
+                match query.until { Some(u) => format!("--until \"{}\"", u), None => String::from("")},
+                match query.number { Some(n) => format!("-n \"{}\"", n), None => String::from("")},
+            ))
+            .output()?;
+
+        if output.status.success() {
+            let stdout: String = String::from_utf8_lossy(&*output.stdout).to_string();
+            // Split the output on newlines to get the list of commits
+            Ok(stdout.split_terminator("\n").map(String::from).collect())
+        } else {
+            Err(Error::Git(
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
+            ))
+        }
+    }
+
+    /// Calls git tags --list to list the last `query.number` (or fewer if there aren't that many)
+    /// tags for the repo in `repo_dir`, optionally on `query. branch`
+    fn git_tags_list(&self, repo_dir: &Path, query: &TagQuery) -> Result<Vec<String>, Error> {
+        let output = Command::new("sh")
+            .current_dir(repo_dir)
+            .arg("-c")
+            .arg(format!(
+                "git tag {} --list --sort -creatordate",
+                match &query.branch {
+                    Some(b) => {
+                        // Since this is a no-checkout clone, we need to make sure we're referring to the
+                        // branches starting with origin/ if it's just the branch name
+                        if b.starts_with("origin/") {
+                            format!("--merged \'{}\'", b.replace("\'", "\\\'"))
+                        }
+                        else {
+                            format!("--merged \'origin/{}\'", b.replace("\'", "\\\'"))
+                        }
+                    },
+                    None => String::from("")
+                }
+            ))
+            .output()?;
+
+        if output.status.success() {
+            let stdout: String = String::from_utf8_lossy(&*output.stdout).to_string();
+            // Split the output on newlines to get the list of commits
+            Ok(stdout.split_terminator("\n").take(query.number).map(String::from).collect())
+        } else {
+            Err(Error::Git(
+                self.censor_git_error(String::from_utf8_lossy(&*output.stderr).to_string()),
+            ))
+        }
+    }
+
     /// Runs git fetch on the git repo in `repo_dir`.  Returns an error if that fails
     fn git_fetch(&self, repo_dir: &Path) -> Result<(), Error> {
         // Run the command
@@ -154,7 +277,7 @@ impl GitRepoManager {
             .current_dir(repo_dir)
             .arg("-c")
             .arg(format!(
-                "git rev-parse --verify \"{}^{{commit}}\"",
+                "git rev-parse --verify \'{}^{{commit}}\'",
                 git_ref
             ))
             .output()?;
@@ -183,7 +306,7 @@ impl GitRepoManager {
         let output = Command::new("sh")
             .current_dir(repo_dir)
             .arg("-c")
-            .arg(format!("git tag --points-at {}", commit))
+            .arg(format!("git tag --points-at \'{}\'", commit.replace("\'", "\\\'")))
             .output()?;
 
         if output.status.success() {
@@ -204,8 +327,8 @@ impl GitRepoManager {
             .current_dir(repo_dir)
             .arg("-c")
             .arg(format!(
-                "git show --no-patch --no-notes --pretty='%cd' {}",
-                commit
+                "git show --no-patch --no-notes --pretty='%cd' \'{}\'",
+                commit.replace("\'", "\\\'")
             ))
             .output()?;
 
@@ -243,51 +366,24 @@ mod tests {
     use std::fs::read_to_string;
     use std::str::FromStr;
     use tempfile::TempDir;
+    use crate::unit_test_util::get_test_remote_github_repo;
 
-    fn create_test_git_repo() -> (TempDir, String, String, NaiveDateTime, NaiveDateTime) {
-        // Create a tempdir we'll put the repo in
-        let temp_repo_dir = TempDir::new().unwrap();
-        // Make a dir for the repo
-        let mut repo_dir_path: PathBuf = temp_repo_dir.path().to_path_buf();
-        repo_dir_path.push(PathBuf::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap());
-        fs::create_dir(&repo_dir_path).unwrap();
-        // Load script we'll run
-        let script = read_to_string("testdata/util/git_repo/create_test_repo.sh").unwrap();
-        // Run script for filling repo
-        let output = Command::new("sh")
-            .current_dir(repo_dir_path)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .unwrap();
+    fn create_test_repo_manager() -> (GitRepoManager, TempDir) {
+        let repo_manager_dir = TempDir::new().unwrap();
+        let repo_manager = GitRepoManager{
+            private_github_config: None,
+            repo_cache_location: repo_manager_dir.path().to_str().unwrap().to_string()
+        };
 
-        let mut commits: Vec<String> = String::from_utf8_lossy(&*output.stdout)
-            .split_terminator("\n")
-            .map(String::from)
-            .collect();
-
-        let second_commit_date =
-            NaiveDateTime::parse_from_str(&commits.pop().unwrap(), "%a %b %-d %T %Y %z").unwrap();
-        let first_commit_date =
-            NaiveDateTime::parse_from_str(&commits.pop().unwrap(), "%a %b %-d %T %Y %z").unwrap();
-        let second_commit = commits.pop().unwrap();
-        let first_commit = commits.pop().unwrap();
-
-        (
-            temp_repo_dir,
-            first_commit,
-            second_commit,
-            first_commit_date,
-            second_commit_date,
-        )
+        (repo_manager, repo_manager_dir)
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tag_from_ref_success_commit() {
+    #[test]
+    fn get_commit_and_tag_from_ref_success_commit() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let (commit, tags, commit_date) = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
@@ -302,12 +398,12 @@ mod tests {
         assert!(tags.contains(&"beginning".to_string()));
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tag_from_ref_success_commit_no_tags() {
+    #[test]
+    fn get_commit_and_tag_from_ref_success_commit_no_tags() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let (commit, tags, commit_date) = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
@@ -320,12 +416,12 @@ mod tests {
         assert_eq!(tags.len(), 0);
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tag_from_ref_success_tag() {
+    #[test]
+    fn get_commit_and_tag_from_ref_success_tag() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let (commit, tags, commit_date) = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
@@ -340,12 +436,12 @@ mod tests {
         assert!(tags.contains(&"beginning".to_string()));
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tags_from_ref_success_branch() {
+    #[test]
+    fn get_commit_and_tags_from_ref_success_branch() {
         let (git_repo_temp_dir, _first_commit, second_commit, _first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let (commit, tags, commit_date) = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
@@ -358,12 +454,12 @@ mod tests {
         assert_eq!(tags.len(), 0);
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tags_from_ref_success_short_hash() {
+    #[test]
+    fn get_commit_and_tags_from_ref_success_short_hash() {
         let (git_repo_temp_dir, _first_commit, second_commit, _first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let (commit, tags, commit_date) = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
@@ -376,12 +472,12 @@ mod tests {
         assert_eq!(tags.len(), 0);
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tag_from_ref_failure_not_found() {
+    #[test]
+    fn get_commit_and_tag_from_ref_failure_not_found() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let commit_or_tag = String::from("last");
         let error = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
@@ -393,12 +489,12 @@ mod tests {
         assert!(matches!(error, Error::NotFound(commit_or_tag)));
     }
 
-    #[actix_rt::test]
-    async fn get_commit_and_tag_from_ref_failure_no_software() {
+    #[test]
+    fn get_commit_and_tag_from_ref_failure_no_software() {
         let (git_repo_temp_dir, first_commit, second_commit, first_date, second_date) =
-            create_test_git_repo();
-        let git_repo_manager =
-            GitRepoManager::new(None, git_repo_temp_dir.path().to_str().unwrap().to_string());
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
         let error = git_repo_manager
             .get_commit_and_tags_and_date_from_ref(
                 Uuid::from_str("2d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
@@ -407,6 +503,166 @@ mod tests {
             .expect_err("No error when checking for commit and tags");
 
         assert!(matches!(error, Error::IO(_)));
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_since() {
+        let (git_repo_temp_dir, _first_commit, second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: None,
+                since: Some(NaiveDateTime::parse_from_str("2022-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+                until: None,
+                number: None
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![second_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_until() {
+        let (git_repo_temp_dir, first_commit, _second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: None,
+                since: None,
+                until: Some(NaiveDateTime::parse_from_str("2022-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()),
+                number: None
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![first_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_branch() {
+        let (git_repo_temp_dir, first_commit, _second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: Some(String::from("master")),
+                since: None,
+                until: None,
+                number: None
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![first_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_branch_two_commits() {
+        let (git_repo_temp_dir, first_commit, second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: Some(String::from("test_branch")),
+                since: None,
+                until: None,
+                number: None
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![second_commit, first_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_number() {
+        let (git_repo_temp_dir, _first_commit, second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: None,
+                since: None,
+                until: None,
+                number: Some(1)
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![second_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_number_with_branch() {
+        let (git_repo_temp_dir, first_commit, _second_commit, _first_date, _second_date) =
+            crate::unit_test_util::get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: Some(String::from("master")),
+                since: None,
+                until: None,
+                number: Some(1)
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![first_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_number_more_than_commits() {
+        let (git_repo_temp_dir, first_commit, second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: None,
+                since: None,
+                until: None,
+                number: Some(3)
+            }
+        ).unwrap();
+        assert_eq!(commits, vec![second_commit, first_commit])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_success_tags() {
+        let (git_repo_temp_dir, _first_commit, _second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let commits = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &TagQuery {
+                branch: Some(String::from("master")),
+                number: 1
+            }
+        ).unwrap();
+        assert_eq!(commits, vec!["first"])
+    }
+
+    #[test]
+    fn query_repo_for_commits_or_tags_failure_no_branch() {
+        let (git_repo_temp_dir, _first_commit, _second_commit, _first_date, _second_date) =
+            get_test_remote_github_repo();
+        let (git_repo_manager, _manager_temp_dir) = create_test_repo_manager();
+        git_repo_manager.download_git_repo(Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(), git_repo_temp_dir.to_str().unwrap()).unwrap();
+        let query_error = git_repo_manager.query_repo_for_commits_or_tags(
+            Uuid::from_str("6d80625b-5044-4aad-8d21-5d648371b52a").unwrap(),
+            &CommitQuery {
+                branch: Some(String::from("not_a_real_branch")),
+                since: None,
+                until: None,
+                number: None
+            }
+        ).unwrap_err();
+        assert!(matches!(query_error, Error::Git(_)));
     }
 
     #[test]

@@ -37,7 +37,6 @@ table! {
     run (run_id) {
         run_id -> Uuid,
         test_id -> Uuid,
-        run_group_id -> Nullable<Uuid>,
         name -> Text,
         status -> Run_status_enum,
         test_wdl -> Text,
@@ -120,7 +119,7 @@ table! {
     run_with_results_and_errors (run_id) {
         run_id -> Uuid,
         test_id -> Uuid,
-        run_group_id -> Nullable<Uuid>,
+        run_group_ids -> Array<Uuid>,
         name -> Text,
         status -> Run_status_enum,
         test_wdl -> Text,
@@ -249,7 +248,7 @@ table! {
 table! {
     use diesel::sql_types::*;
 
-    run_group_with_github(run_group_id) {
+    run_group_with_metadata(run_group_id) {
         run_group_id -> Uuid,
         owner -> Nullable<Text>,
         repo -> Nullable<Text>,
@@ -259,6 +258,9 @@ table! {
         head_commit -> Nullable<Text>,
         test_input_key -> Nullable<Text>,
         eval_input_key -> Nullable<Text>,
+        github_created_at -> Nullable<Timestamptz>,
+        query -> Nullable<Jsonb>,
+        query_created_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
     }
 }
@@ -354,6 +356,35 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+
+    run_in_group (run_id, run_group_id) {
+        run_id -> Uuid,
+        run_group_id -> Uuid,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    run_group_is_from_query (run_group_id) {
+        run_group_id -> Uuid,
+        query -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+
+    run_software_versions_with_identifiers(run_id, software_with_identifier) {
+        run_id -> Uuid,
+        software_with_identifier -> Text,
+    }
+}
+
 joinable!(test -> template(template_id));
 joinable!(software_version -> software(software_id));
 joinable!(software_version_tag -> software_version(software_version_id));
@@ -379,5 +410,8 @@ allow_tables_to_appear_in_same_query!(
     report_map,
     run_error,
     run_group,
-    run_group_is_from_github
+    run_in_group,
+    run_group_is_from_github,
+    run_group_is_from_query,
+    run_software_versions_with_identifiers
 );

@@ -488,7 +488,7 @@ mod tests {
         let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id: None,
+            run_group_ids: vec![],
             name: String::from("TestRun"),
             status: RunStatusEnum::Created,
             test_wdl: String::from("testtest"),
@@ -548,13 +548,13 @@ mod tests {
         // Create a github commenter
         let github_commenter = GithubCommenter::new(github_client);
 
-        let run_group_id = Some(Uuid::new_v4());
+        let run_group_id = Uuid::new_v4();
 
         // Create runs to test with
         let head_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id,
+            run_group_ids: vec![run_group_id],
             name: String::from("HeadRun"),
             status: RunStatusEnum::Created,
             test_wdl: String::from("testtest"),
@@ -582,7 +582,7 @@ mod tests {
         let base_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id,
+            run_group_ids: vec![run_group_id],
             name: String::from("BaseRun"),
             status: RunStatusEnum::Building,
             test_wdl: String::from("testtest"),
@@ -730,7 +730,7 @@ mod tests {
         let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id: None,
+            run_group_ids: vec![],
             name: String::from("TestRun"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -818,7 +818,7 @@ mod tests {
         let base_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id: Some(run_group_id),
+            run_group_ids: vec![run_group_id],
             name: String::from("BaseRun"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -849,7 +849,7 @@ mod tests {
         let head_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id: Some(run_group_id),
+            run_group_ids: vec![run_group_id],
             name: String::from("HeadRun"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),

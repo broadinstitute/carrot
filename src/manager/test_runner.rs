@@ -28,6 +28,7 @@ use std::fmt;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
+use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
 
 lazy_static! {
     // Build regex for matching values specifying custom builds
@@ -393,7 +394,6 @@ impl TestRunner {
 
         // Update run with job id and TestSubmitted status
         let run_update = RunChangeset {
-            run_group_id: None,
             name: None,
             status: Some(RunStatusEnum::TestSubmitted),
             test_cromwell_job_id: Some(start_job_response.id),
@@ -483,7 +483,6 @@ impl TestRunner {
 
         // Update run with job id and TestSubmitted status
         let run_update = RunChangeset {
-            run_group_id: None,
             name: None,
             status: Some(RunStatusEnum::EvalSubmitted),
             test_cromwell_job_id: None,
@@ -680,6 +679,7 @@ impl TestRunner {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -928,7 +928,6 @@ impl TestRunner {
 
             let new_run = NewRun {
                 test_id,
-                run_group_id,
                 name,
                 status: RunStatusEnum::Created,
                 test_wdl,
@@ -945,16 +944,26 @@ impl TestRunner {
                 finished_at: None,
             };
 
-            match RunData::create(conn, new_run) {
-                Ok(run) => Ok(run),
+            let run = match RunData::create(conn, new_run) {
+                Ok(run) => run,
                 Err(e) => {
                     error!(
                         "Encountered error while attempting to write run to db: {}",
                         e
                     );
-                    Err(Error::DB(e))
+                    return Err(Error::DB(e))
                 }
+            };
+
+            // Insert a group mapping if run_group_id is specified
+            if let Some(group_id) = run_group_id {
+                RunInGroupData::create(conn, NewRunInGroup{
+                    run_id: run.run_id,
+                    run_group_id: group_id
+                })?;
             }
+
+            Ok(run)
         };
 
         // Write run to db in a transaction so we don't have issues with creating a run with the same
@@ -990,7 +999,6 @@ pub fn update_run_status(
         | RunStatusEnum::CarrotFailed
         | RunStatusEnum::TestFailed
         | RunStatusEnum::TestAborted => RunChangeset {
-            run_group_id: None,
             name: None,
             status: Some(status.clone()),
             test_cromwell_job_id: None,
@@ -998,7 +1006,6 @@ pub fn update_run_status(
             finished_at: Some(Utc::now().naive_utc()),
         },
         _ => RunChangeset {
-            run_group_id: None,
             name: None,
             status: Some(status.clone()),
             test_cromwell_job_id: None,
@@ -1155,7 +1162,6 @@ mod tests {
         let test = insert_test_test_with_template_id(conn, template.template_id);
 
         let new_run = NewRun {
-            run_group_id: None,
             test_id: test.test_id,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
@@ -1178,7 +1184,6 @@ mod tests {
 
     fn insert_test_run_with_test_id_and_status_building(conn: &PgConnection, id: Uuid) -> RunData {
         let new_run = NewRun {
-            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::Building,
@@ -1204,7 +1209,6 @@ mod tests {
         id: Uuid,
     ) -> RunData {
         let new_run = NewRun {
-            run_group_id: None,
             name: String::from("Kevin's Run"),
             test_id: id,
             status: RunStatusEnum::TestSubmitted,

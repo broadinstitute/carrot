@@ -27,6 +27,8 @@ use std::fs::File;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
+use crate::models::run_group::{RunGroupMetadata, RunGroupWithMetadataData};
+use crate::models::run_group_is_from_query::RunGroupIsFromQueryData;
 
 /// Struct for assembling reports from runs and submitting jobs to cromwell to fill them
 #[derive(Clone)]
@@ -226,6 +228,7 @@ impl ReportBuilder {
                         mapping.report_id,
                         run.run_id,
                         ReportableEnum::Run,
+                        None,
                         &run.created_by,
                     )
                     .await?,
@@ -254,6 +257,7 @@ impl ReportBuilder {
                         eval_options: None,
                         test_cromwell_job_id: None,
                         eval_cromwell_job_id: None,
+                        software_versions: None,
                         created_before: None,
                         created_after: None,
                         created_by: None,
@@ -312,6 +316,7 @@ impl ReportBuilder {
                                 mapping.report_id,
                                 run_group_is_from_github.run_group_id,
                                 ReportableEnum::RunGroup,
+                                Some(&RunGroupMetadata::Github(run_group_is_from_github.clone())),
                                 &run.created_by,
                             )
                             .await?,
@@ -483,6 +488,7 @@ impl ReportBuilder {
                     eval_options: None,
                     test_cromwell_job_id: None,
                     eval_cromwell_job_id: None,
+                    software_versions: None,
                     created_before: None,
                     created_after: None,
                     created_by: None,
@@ -494,11 +500,11 @@ impl ReportBuilder {
                 },
             )?
         };
-        // Get run group github info if appropriate
-        let github_info: Option<RunGroupIsFromGithubData> =
+        // Get run group info if appropriate
+        let run_group_info: Option<RunGroupWithMetadataData> =
             if entity_type == ReportableEnum::RunGroup {
-                match RunGroupIsFromGithubData::find_by_run_group_id(conn, entity_id) {
-                    Ok(run_group_github_info) => Some(run_group_github_info),
+                match RunGroupWithMetadataData::find_by_id(conn, entity_id) {
+                    Ok(run_group_info) => Some(run_group_info),
                     Err(diesel::NotFound) => None,
                     Err(e) => {
                         return Err(Error::DB(e));
@@ -509,7 +515,21 @@ impl ReportBuilder {
             };
         // Create and upload csv files for this run so we can use them as an input to the report wdl
         let run_csv_zip_location: String = self
-            .create_and_upload_run_csvs(&run_in_vec, github_info.as_ref())
+            .create_and_upload_run_csvs(
+                &run_in_vec,
+                // We need to extract the github info for the run_group from run_group_info if it
+                // has any
+                match &run_group_info {
+                    Some(run_group_with_metadata) => match &run_group_with_metadata.metadata {
+                        Some(metadata) => match metadata {
+                            RunGroupMetadata::Github(github_info) => Some(github_info),
+                            _ => None
+                        }
+                        None => None
+                    },
+                    None => None
+                }
+            )
             .await?;
         // Create the report_map
         self.create_report_map(
@@ -519,6 +539,10 @@ impl ReportBuilder {
             report_id,
             entity_id,
             entity_type,
+            match &run_group_info {
+                Some(run_group_with_metadata) => run_group_with_metadata.metadata.as_ref(),
+                None => None
+            },
             created_by,
         )
         .await
@@ -539,6 +563,7 @@ impl ReportBuilder {
         report_id: Uuid,
         entity_id: Uuid,
         report_type: ReportableEnum,
+        run_group_metadata: Option<&RunGroupMetadata>,
         created_by: &Option<String>,
     ) -> Result<ReportMapData, Error> {
         // Include the generator wdl file in the build
@@ -548,7 +573,7 @@ impl ReportBuilder {
         let test = TestData::find_by_id(conn, runs[0].test_id)?;
         // Build the notebook we will submit from the notebook specified in the report and the run data
         let report_json =
-            ReportBuilder::create_report_template(&report.notebook, runs, report_type, &test.name)?;
+            ReportBuilder::create_report_template(&report.notebook, runs, report_type, &test.name, run_group_metadata)?;
         // Upload the report json as a file to a GCS location where cromwell will be able to read it
         let report_template_location = self
             .upload_report_template(&report_json, &report.name)
@@ -667,12 +692,19 @@ impl ReportBuilder {
         runs: &[RunWithResultsAndErrorsData],
         report_type: ReportableEnum,
         test_name: &str,
+        run_group_metadata: Option<&RunGroupMetadata>
     ) -> Result<Value, Error> {
         // Get the metadata cell (based on report_type) to add to the notebook
         let metadata_cell: Value = match report_type {
             ReportableEnum::Run => ReportBuilder::build_run_metadata_cell(&runs[0], test_name),
             ReportableEnum::RunGroup => {
-                ReportBuilder::build_pr_comparison_metadata_cell(&runs[0], &runs[1], test_name)
+                match run_group_metadata {
+                    Some(metadata) => match metadata {
+                        RunGroupMetadata::Github(github_info) => ReportBuilder::build_pr_comparison_metadata_cell(&runs[0], &runs[1], test_name, github_info),
+                        RunGroupMetadata::Query(query_info) => ReportBuilder::build_run_query_metadata_cell(test_name, query_info)
+                    },
+                    None => return Err(Error::UnexpectedState(String::from("Attempted to create a report template for a run_group without metadata.  This can sometimes be fixed by retrying, but could also indicate a data issue.")))
+                }
             }
         };
         // Make an owned copy of notebook so we can add that metadata cell to it
@@ -745,17 +777,20 @@ impl ReportBuilder {
         base_run: &RunWithResultsAndErrorsData,
         head_run: &RunWithResultsAndErrorsData,
         test_name: &str,
+        github_info: &RunGroupIsFromGithubData
     ) -> Value {
         // We'll put the cell contents in a vec so we can insert them into the cell
         let cell_contents: Vec<String> = vec![
             format!("# Test: {}\n", test_name),
+            format!("## Software repo: {}/{}\n", github_info.owner, github_info.repo),
+            format!("#### Comment Issue: {} | Author: {}\n", github_info.issue_number, github_info.author),
             format!(
-                "### Base Run ID: {} | Run Name: {}\n",
-                base_run.run_id, base_run.name
+                "### Base Run ID: {} | Run Name: {} | Commit: {}\n",
+                base_run.run_id, base_run.name, github_info.base_commit
             ),
             format!(
-                "### Head Run ID: {} | Run Name: {}\n",
-                head_run.run_id, head_run.name
+                "### Head Run ID: {} | Run Name: {} | Commit: {}\n",
+                head_run.run_id, head_run.name, github_info.head_commit
             ),
             format!(
                 "#### Base start time: {} | End time: {}\n",
@@ -773,6 +808,27 @@ impl ReportBuilder {
                     None => "None".to_string(),
                 }
             ),
+        ];
+        // Return a new cell with the contents
+        json!(
+            {
+               "cell_type": "markdown",
+               "metadata": {},
+               "source": cell_contents
+            }
+        )
+    }
+
+    /// Creates and returns a metadata Jupyter Notebook cell (as a json object) that will print
+    /// metadata for
+    fn build_run_query_metadata_cell(
+        test_name: &str,
+        query_info: &RunGroupIsFromQueryData
+    ) -> Value {
+        // We'll put the cell contents in a vec so we can insert them into the cell
+        let cell_contents: Vec<String> = vec![
+            format!("# Test: {}\n", test_name),
+            format!("## Query: {}\n", serde_json::to_string_pretty(&query_info.query).expect("Failed to pretty print run query json.  This should not happen."))
         ];
         // Return a new cell with the contents
         json!(
@@ -989,8 +1045,8 @@ mod tests {
     use crate::models::report::{NewReport, ReportData};
     use crate::models::report_map::{NewReportMap, ReportMapData};
     use crate::models::result::{NewResult, ResultData};
-    use crate::models::run::{NewRun, RunData, RunWithResultsAndErrorsData};
-    use crate::models::run_group::RunGroupData;
+    use crate::models::run::{NewRun, RunData, RunQuery, RunWithResultsAndErrorsData};
+    use crate::models::run_group::{RunGroupData, RunGroupMetadata};
     use crate::models::run_group_is_from_github::{
         NewRunGroupIsFromGithub, RunGroupIsFromGithubData,
     };
@@ -1010,6 +1066,8 @@ mod tests {
     use std::env;
     use std::fs::{read_to_string, File};
     use uuid::Uuid;
+    use crate::models::run_group_is_from_query::{NewRunGroupIsFromQuery, RunGroupIsFromQueryData};
+    use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
 
     fn insert_test_run_with_results(
         conn: &PgConnection,
@@ -1052,7 +1110,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -1201,7 +1258,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -1227,9 +1283,13 @@ mod tests {
 
         let run = RunData::create(&conn, new_run).expect("Failed to insert run");
 
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run2"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -1254,6 +1314,11 @@ mod tests {
         };
 
         let run2 = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run2.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
 
         let new_result = NewResult {
             name: String::from("Greeting"),
@@ -1335,6 +1400,231 @@ mod tests {
             test,
             [run, run2],
             run_group_is_from_github,
+        )
+    }
+
+    fn insert_test_query_runs_with_results(
+        conn: &PgConnection,
+    ) -> (
+        PipelineData,
+        TemplateData,
+        TestData,
+        [RunData; 2],
+        RunGroupIsFromQueryData,
+    ) {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: None,
+            test_option_defaults: None,
+            eval_input_defaults: None,
+            eval_option_defaults: None,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+
+        let run_group = RunGroupData::create(conn).expect("Failed inserting run group");
+
+        let new_run_group_is_from_query = NewRunGroupIsFromQuery {
+            run_group_id: run_group.run_group_id,
+            query: serde_json::to_value(RunQuery{
+                pipeline_id: None,
+                template_id: None,
+                test_id: Some(test.test_id),
+                run_group_id: None,
+                name: None,
+                status: None,
+                test_input: None,
+                test_options: None,
+                eval_input: None,
+                eval_options: None,
+                test_cromwell_job_id: None,
+                eval_cromwell_job_id: None,
+                software_versions: None,
+                created_before: None,
+                created_after: None,
+                created_by: None,
+                finished_before: None,
+                finished_after: None,
+                sort: None,
+                limit: None,
+                offset: None
+            }).unwrap()
+        };
+
+        let run_group_is_from_query =
+            RunGroupIsFromQueryData::create(conn, new_run_group_is_from_query)
+                .expect("Failed inserting run_group_is_from_query");
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run"),
+            status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
+            test_input: json!({
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "Jean-Paul Gasse",
+                "greeting_workflow.docker": "image_build:test_software|7c35a3ce607a14953f070f0f83b5d74c2296ef93"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run2"),
+            status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
+            test_input: json!({
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "me",
+                "greeting_workflow.docker": "image_build:test_software|29932f3915935d773dc8d52c292cadd81c81071d"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run2 = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: run2.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        let new_result = NewResult {
+            name: String::from("Greeting"),
+            result_type: ResultTypeEnum::Text,
+            description: Some(String::from("Description4")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result =
+            ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: new_result.result_id,
+            result_key: "greeting_workflow.out_greeting".to_string(),
+            created_by: None,
+        };
+        let new_template_result = TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template result");
+
+        let new_run_result = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean-Paul Gasse".to_string(),
+        };
+
+        let new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_run_result = NewRunResult {
+            run_id: run2.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, me".to_string(),
+        };
+
+        let new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_result2 = NewResult {
+            name: String::from("File Result"),
+            result_type: ResultTypeEnum::File,
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result2 =
+            ResultData::create(conn, new_result2).expect("Failed inserting test result");
+
+        let new_template_result2 = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: new_result2.result_id,
+            result_key: "greeting_file_workflow.out_file".to_string(),
+            created_by: None,
+        };
+        let new_template_result2 = TemplateResultData::create(conn, new_template_result2)
+            .expect("Failed inserting test template result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result/greeting.txt"),
+        };
+
+        let new_run_result2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run2.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result2/greeting.txt"),
+        };
+
+        let new_run_result2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        (
+            pipeline,
+            template,
+            test,
+            [run, run2],
+            run_group_is_from_query,
         )
     }
 
@@ -1915,6 +2205,7 @@ mod tests {
             &[test_run_with_results],
             ReportableEnum::Run,
             "Kevin's Test",
+            None
         )
         .unwrap();
 
@@ -2029,18 +2320,21 @@ mod tests {
             &test_runs_with_results,
             ReportableEnum::RunGroup,
             "Kevin's Test",
+            Some(&RunGroupMetadata::Github(test_run_group_is_from_github))
         )
         .unwrap();
 
         let metadata_cell: Value = {
             let cell_contents: Vec<String> = vec![
                 String::from("# Test: Kevin's Test\n"),
+                String::from("## Software repo: test_owner/test_repo\n"),
+                String::from("#### Comment Issue: 25 | Author: test_author\n"),
                 format!(
-                    "### Base Run ID: {} | Run Name: Kevin's test run\n",
+                    "### Base Run ID: {} | Run Name: Kevin's test run | Commit: 7c35a3ce607a14953f070f0f83b5d74c2296ef93\n",
                     test_runs_with_results.get(0).unwrap().run_id
                 ),
                 format!(
-                    "### Head Run ID: {} | Run Name: Kevin's test run2\n",
+                    "### Head Run ID: {} | Run Name: Kevin's test run2 | Commit: 29932f3915935d773dc8d52c292cadd81c81071d\n",
                     test_runs_with_results.get(1).unwrap().run_id
                 ),
                 format!(
@@ -2132,6 +2426,135 @@ mod tests {
     }
 
     #[test]
+    fn create_report_template_success_query() {
+        let conn = get_test_db_connection();
+
+        let test_report = insert_test_report(&conn);
+        let (_, _, test_test, test_runs, test_run_group_is_from_query) =
+            insert_test_query_runs_with_results(&conn);
+        let test_runs_with_results = {
+            let mut runs_with_results: Vec<RunWithResultsAndErrorsData> = Vec::new();
+            for run in test_runs {
+                runs_with_results
+                    .push(RunWithResultsAndErrorsData::find_by_id(&conn, run.run_id).unwrap())
+            }
+            runs_with_results
+        };
+
+        let result_report = ReportBuilder::create_report_template(
+            &test_report.notebook,
+            &test_runs_with_results,
+            ReportableEnum::RunGroup,
+            "Kevin's Test",
+            Some(&RunGroupMetadata::Query(test_run_group_is_from_query.clone()))
+        )
+            .unwrap();
+
+        let metadata_cell: Value = {
+            let cell_contents: Vec<String> = vec![
+                String::from("# Test: Kevin's Test\n"),
+                format!("## Query: {}\n", serde_json::to_string_pretty(&test_run_group_is_from_query.query).unwrap())
+            ];
+            json!(
+                {
+                   "cell_type": "markdown",
+                   "metadata": {},
+                   "source": cell_contents
+                }
+            )
+        };
+
+        let expected_report = json!({
+            "metadata": {
+            "language_info": {
+                "codemirror_mode": {
+                    "name": "ipython",
+                    "version": 3
+                },
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.8.4-final"
+            },
+            "orig_nbformat": 2,
+            "kernelspec": {
+                "name": "python3",
+                "display_name": "Python 3.8.4 64-bit",
+                "metadata": {
+                    "interpreter": {
+                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
+                    }
+                }
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 2,
+            "cells": [
+                metadata_cell,
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print('Random message')",
+                   ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print('Hello')"
+                   ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": null,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "print('Thanks')",
+                   ]
+                },
+            ]
+        });
+
+        assert_eq!(expected_report, result_report);
+    }
+
+    #[test]
+    fn create_report_template_failure_no_group_metadata() {
+        let conn = get_test_db_connection();
+
+        let test_report = insert_test_report(&conn);
+        let (_, _, test_test, test_runs, _) =
+            insert_test_pr_runs_with_results(&conn);
+        let test_runs_with_results = {
+            let mut runs_with_results: Vec<RunWithResultsAndErrorsData> = Vec::new();
+            for run in test_runs {
+                runs_with_results
+                    .push(RunWithResultsAndErrorsData::find_by_id(&conn, run.run_id).unwrap())
+            }
+            runs_with_results
+        };
+
+        let result_error = ReportBuilder::create_report_template(
+            &test_report.notebook,
+            &test_runs_with_results,
+            ReportableEnum::RunGroup,
+            "Kevin's Test",
+            None
+        )
+            .unwrap_err();
+
+        assert!(matches!(result_error, Error::UnexpectedState(_)));
+    }
+
+    #[test]
     fn create_report_template_failure_bad_notebook() {
         let conn = get_test_db_connection();
 
@@ -2145,6 +2568,7 @@ mod tests {
             &[test_run_with_results],
             ReportableEnum::Run,
             "Kevin's Test",
+            None
         );
 
         assert!(matches!(result_report, Err(Error::Parse(_))));
@@ -2197,7 +2621,7 @@ mod tests {
         let test_run = RunWithResultsAndErrorsData {
             run_id: Uuid::new_v4(),
             test_id: Uuid::new_v4(),
-            run_group_id: None,
+            run_group_ids: vec![],
             name: "Test run".to_string(),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),

@@ -96,23 +96,24 @@ def test_find_by_id(find_by_id_data):
             "parent_entity": "tests",
             "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
             "params": [
-                ("run_group_id", ""),
+                ("run_group_id", None),
                 ("name", "Queen of Bright Moon run"),
-                ("status", ""),
-                ("test_input", ""),
-                ("test_options", ""),
-                ("eval_input", ""),
-                ("eval_options", ""),
-                ("test_cromwell_job_id", ""),
-                ("eval_cromwell_job_id", ""),
-                ("created_before", ""),
-                ("created_after", ""),
-                ("created_by", ""),
-                ("finished_before", ""),
-                ("finished_after", ""),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("status", None),
+                ("test_input", None),
+                ("test_options", None),
+                ("eval_input", None),
+                ("eval_options", None),
+                ("test_cromwell_job_id", None),
+                ("eval_cromwell_job_id", None),
+                ("software_versions", None),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("finished_before", None),
+                ("finished_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
                 ("csv", False),
             ],
             "return": json.dumps(
@@ -143,23 +144,72 @@ def test_find_by_id(find_by_id_data):
             "parent_entity": "tests",
             "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
             "params": [
-                ("run_group_id", ""),
+                ("run_group_id", None),
+                ("name", None),
+                ("status", None),
+                ("test_input", None),
+                ("test_options", None),
+                ("eval_input", None),
+                ("eval_options", None),
+                ("test_cromwell_job_id", None),
+                ("eval_cromwell_job_id", None),
+                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("finished_before", None),
+                ("finished_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
+                ("csv", False),
+            ],
+            "return": json.dumps(
+                [
+                    {
+                        "created_at": "2020-09-16T18:48:06.371563",
+                        "finished_at": None,
+                        "created_by": "glimmer@example.com",
+                        "test_input": {"in_daughter": "Glimmer", "docker": "image_build:test_software|1.1.0"},
+                        "test_options": {"option": "other_value"},
+                        "eval_input": {"in_wife": "Angella"},
+                        "eval_options": {"option": "value"},
+                        "status": "testsubmitted",
+                        "results": {},
+                        "run_group_id": None,
+                        "test_cromwell_job_id": "d9855002-6b71-429c-a4de-8e90222488cd",
+                        "eval_cromwell_job_id": None,
+                        "name": "Queen of Bright Moon run",
+                        "test_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
+                        "run_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                    }
+                ],
+                indent=4,
+                sort_keys=True,
+            ),
+        },
+        {
+            "parent_entity": "tests",
+            "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
+            "params": [
+                ("run_group_id", None),
                 ("name", "Queen of Bright Moon run"),
-                ("status", ""),
-                ("test_input", ""),
-                ("test_options", ""),
-                ("eval_input", ""),
-                ("eval_options", ""),
-                ("test_cromwell_job_id", ""),
-                ("eval_cromwell_job_id", ""),
-                ("created_before", ""),
-                ("created_after", ""),
-                ("created_by", ""),
-                ("finished_before", ""),
-                ("finished_after", ""),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("status", None),
+                ("test_input", None),
+                ("test_options", None),
+                ("eval_input", None),
+                ("eval_options", None),
+                ("test_cromwell_job_id", None),
+                ("eval_cromwell_job_id", None),
+                ("software_versions", None),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("finished_before", None),
+                ("finished_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
                 ("csv", False)
             ],
             "return": json.dumps(
@@ -176,23 +226,24 @@ def test_find_by_id(find_by_id_data):
             "parent_entity": "tests",
             "parent_entity_id": "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
             "params": [
-                ("run_group_id", ""),
+                ("run_group_id", None),
                 ("name", "Queen of Bright Moon run"),
-                ("status", ""),
-                ("test_input", ""),
-                ("test_options", ""),
-                ("eval_input", ""),
-                ("eval_options", ""),
-                ("test_cromwell_job_id", ""),
-                ("eval_cromwell_job_id", ""),
-                ("created_before", ""),
-                ("created_after", ""),
-                ("created_by", ""),
-                ("finished_before", ""),
-                ("finished_after", ""),
-                ("sort", ""),
-                ("limit", ""),
-                ("offset", ""),
+                ("status", None),
+                ("test_input", None),
+                ("test_options", None),
+                ("eval_input", None),
+                ("eval_options", None),
+                ("test_cromwell_job_id", None),
+                ("eval_cromwell_job_id", None),
+                ("software_versions", None),
+                ("created_before", None),
+                ("created_after", None),
+                ("created_by", None),
+                ("finished_before", None),
+                ("finished_after", None),
+                ("sort", None),
+                ("limit", None),
+                ("offset", None),
                 ("csv", True),
             ],
             "file_contents": b'randombytespresentingazip',
@@ -204,11 +255,12 @@ def find_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).find_runs(...).thenReturn(None)
     # Mock up request response
+    # Create a copy of the params so we can pass it to the mock and modify the original
+    params_for_mock = copy.deepcopy(request.param["params"])
+    params_for_mock[9] = ("software_versions", json.dumps(params_for_mock[9][1]) if params_for_mock[9][1] else None)
     # If csv param is true, we have to create a temp file and include expected format in the function call
-    if request.param["params"][17][1]:
-        # Pass a copy of params to the mock so we can modify the original
-        params_for_mock = copy.deepcopy(request.param["params"])
-        params_for_mock[17] = ("csv", "true")
+    if request.param["params"][18][1]:
+        params_for_mock[18] = ("csv", "true")
         mockito.when(request_handler).find_runs(
             request.param["parent_entity"],
             request.param["parent_entity_id"],
@@ -217,17 +269,15 @@ def find_data(request):
         ).thenReturn(request.param["file_contents"])
         # Create a temp file that we'll write to
         request.param["file"] = tempfile.NamedTemporaryFile()
-        request.param["params"][17] = ("csv", request.param["file"].name)
+        request.param["params"][18] = ("csv", request.param["file"].name)
     else:
-        # Pass a copy of params to the mock so we can modify the original
-        params_for_mock = copy.deepcopy(request.param["params"])
-        params_for_mock[17] = ("csv", "false")
+        params_for_mock[18] = ("csv", "false")
         mockito.when(request_handler).find_runs(
             request.param["parent_entity"],
             request.param["parent_entity_id"],
             params_for_mock,
         ).thenReturn(request.param["return"])
-        request.param["params"][17] = ("csv", None)
+        request.param["params"][18] = ("csv", None)
     return request.param
 
 
@@ -253,6 +303,7 @@ def test_find(find_data):
         find_data["params"][15][1],
         find_data["params"][16][1],
         find_data["params"][17][1],
+        find_data["params"][18][1],
     )
     assert result == find_data["return"]
     # If the result is written to a zip, check that the zip has what we expect

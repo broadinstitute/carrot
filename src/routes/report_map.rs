@@ -10,14 +10,21 @@ use crate::manager::report_builder::ReportBuilder;
 use crate::models::report_map::{ReportMapData, ReportMapQuery};
 use crate::routes::disabled_features;
 use crate::routes::error_handling::{default_500, ErrorBody};
-use crate::routes::util::parse_id;
+use crate::routes::util::{get_run_query_from_run_query_incomplete, parse_id, RunQueryIncomplete};
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Query;
 use actix_web::{error::BlockingError, web, HttpRequest, HttpResponse};
+use diesel::PgConnection;
 use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
+use crate::models::run::{RunData, RunQuery};
+use crate::models::run_group::RunGroupData;
+use crate::models::run_group_is_from_query::{NewRunGroupIsFromQuery, RunGroupIsFromQueryData};
+use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
+use crate::util::git_repos::GitRepoManager;
 
 /// Represents the part of a new report_map that is received as a request body
 #[derive(Deserialize, Serialize)]
@@ -246,23 +253,32 @@ async fn find(query: ReportMapQuery, pool: web::Data<db::DbPool>) -> HttpRespons
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn create_for_run(
-    req: HttpRequest,
+    web::Path(path_params): web::Path<(String, String)>,
     web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
     query_params: Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
     report_builder: web::Data<Option<ReportBuilder>>,
 ) -> HttpResponse {
-    // Pull id params from path
-    let id = &req.match_info().get("id").unwrap();
-    let report_id = &req.match_info().get("report_id").unwrap();
+    // Parse ID into Uuid
+    let id = match parse_id(&path_params.0) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Parse report ID into Uuid
+    let report_id = match parse_id(&path_params.1) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Get DB connection
+    let conn = pool.get().expect("Failed to get DB connection from pool");
 
     create(
         ReportableEnum::Run,
         id,
         report_id,
         report_map_inputs,
-        query_params,
-        pool,
+        &query_params,
+        &conn,
         report_builder,
     )
     .await
@@ -280,26 +296,283 @@ async fn create_for_run(
 /// # Panics
 /// Panics if attempting to connect to the database results in an error
 async fn create_for_run_group(
-    req: HttpRequest,
+    web::Path(path_params): web::Path<(String, String)>,
     web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
     query_params: Query<CreateQueryParams>,
     pool: web::Data<db::DbPool>,
     report_builder: web::Data<Option<ReportBuilder>>,
 ) -> HttpResponse {
-    // Pull id params from path
-    let id = &req.match_info().get("id").unwrap();
-    let report_id = &req.match_info().get("report_id").unwrap();
+    // Parse ID into Uuid
+    let id = match parse_id(&path_params.0) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Parse report ID into Uuid
+    let report_id = match parse_id(&path_params.1) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Get DB connection
+    let conn = pool.get().expect("Failed to get DB connection from pool");
 
     create(
         ReportableEnum::RunGroup,
         id,
         report_id,
         report_map_inputs,
-        query_params,
-        pool,
+        &query_params,
+        &conn,
         report_builder,
     )
     .await
+}
+
+/// Handles requests to /pipelines/{id}/runs/reports/{report_id} mapping for creating a run report
+/// from a run query
+///
+/// This function is called by Actix-Web when a post request is made to the
+/// /pipelines/{id}/runs/reports/{report_id} mapping
+/// It deserializes the request body to a NewReportMapIncomplete, uses the query params to retrieve
+/// ids for runs that match the params and create a run_group containing those runs, assembles a
+/// report template and a wdl for filling it for the report specified by `report_id`, submits it to
+/// cromwell with data filled in from the created run group, and creates a ReportMapData instance
+/// for it in the DB
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create_for_run_query_for_pipeline(
+    web::Path(path_params): web::Path<(String, String)>,
+    web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
+    pool: web::Data<db::DbPool>,
+    report_builder: web::Data<Option<ReportBuilder>>,
+    git_repo_manager: web::Data<GitRepoManager>,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&path_params.0) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Parse report ID into Uuid
+    let report_id = match parse_id(&path_params.1) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+
+    // Get DB connection
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    // Create RunQuery based on id and query
+    let processed_query = match get_run_query_from_run_query_incomplete(
+        &conn,
+        &git_repo_manager,
+        query,
+        Some(id),
+        None,
+        None
+    ) {
+        Ok(run_query) => run_query,
+        Err(e) => {
+            return default_500(&e);
+        }
+    };
+
+    create_for_run_query(
+        report_id,
+        processed_query,
+        report_map_inputs,
+        &conn,
+        report_builder,
+    ).await
+
+}
+
+/// Handles requests to /templates/{id}/runs/reports/{report_id} mapping for creating a run report
+/// from a run query
+///
+/// This function is called by Actix-Web when a post request is made to the
+/// /templates/{id}/runs/reports/{report_id} mapping
+/// It deserializes the request body to a NewReportMapIncomplete, uses the query params to retrieve
+/// ids for runs that match the params and create a run_group containing those runs, assembles a
+/// report template and a wdl for filling it for the report specified by `report_id`, submits it to
+/// cromwell with data filled in from the created run group, and creates a ReportMapData instance
+/// for it in the DB
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create_for_run_query_for_template(
+    web::Path(path_params): web::Path<(String, String)>,
+    web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
+    pool: web::Data<db::DbPool>,
+    report_builder: web::Data<Option<ReportBuilder>>,
+    git_repo_manager: web::Data<GitRepoManager>,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&path_params.0) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Parse report ID into Uuid
+    let report_id = match parse_id(&path_params.1) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+
+    // Get DB connection
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    // Create RunQuery based on id and query
+    let processed_query = match get_run_query_from_run_query_incomplete(
+        &conn,
+        &git_repo_manager,
+        query,
+        None,
+        Some(id),
+        None
+    ) {
+        Ok(run_query) => run_query,
+        Err(e) => {
+            return default_500(&e);
+        }
+    };
+
+    create_for_run_query(
+        report_id,
+        processed_query,
+        report_map_inputs,
+        &conn,
+        report_builder,
+    ).await
+
+}
+
+/// Handles requests to /tests/{id}/runs/reports/{report_id} mapping for creating a run report
+/// from a run query
+///
+/// This function is called by Actix-Web when a post request is made to the
+/// /tests/{id}/runs/reports/{report_id} mapping
+/// It deserializes the request body to a NewReportMapIncomplete, uses the query params to retrieve
+/// ids for runs that match the params and create a run_group containing those runs, assembles a
+/// report template and a wdl for filling it for the report specified by `report_id`, submits it to
+/// cromwell with data filled in from the created run group, and creates a ReportMapData instance
+/// for it in the DB
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create_for_run_query_for_test(
+    web::Path(path_params): web::Path<(String, String)>,
+    web::Json(report_map_inputs): web::Json<NewReportMapIncomplete>,
+    web::Query(query): web::Query<RunQueryIncomplete>,
+    pool: web::Data<db::DbPool>,
+    report_builder: web::Data<Option<ReportBuilder>>,
+    git_repo_manager: web::Data<GitRepoManager>,
+) -> HttpResponse {
+    // Parse ID into Uuid
+    let id = match parse_id(&path_params.0) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+    // Parse report ID into Uuid
+    let report_id = match parse_id(&path_params.1) {
+        Ok(id) => id,
+        Err(error_response) => return error_response,
+    };
+
+    // Get DB connection
+    let conn = pool.get().expect("Failed to get DB connection from pool");
+
+    // Create RunQuery based on id and query
+    let processed_query = match get_run_query_from_run_query_incomplete(
+        &conn,
+        &git_repo_manager,
+        query,
+        None,
+        None,
+        Some(id)
+    ) {
+        Ok(run_query) => run_query,
+        Err(e) => {
+            return default_500(&e);
+        }
+    };
+
+    create_for_run_query(
+        report_id,
+        processed_query,
+        report_map_inputs,
+        &conn,
+        report_builder,
+    ).await
+
+}
+
+/// Builds a run_group containing runs that result from using `run_query` to query the DB, assembles
+/// a report template and a wdl for filling it for the report specified by `report_id`,
+/// submits it to cromwell with data filled in from the created run_group, and creates a
+/// ReportMapData instance for it in the DB.  Returns the created ReportMapData
+/// instance as an HttpResponse or an appropriate error response if anything goes wrong
+///
+/// # Panics
+/// Panics if attempting to connect to the database results in an error
+async fn create_for_run_query(
+    report_id: Uuid,
+    run_query: RunQuery,
+    report_map_inputs: NewReportMapIncomplete,
+    conn: &PgConnection,
+    report_builder: web::Data<Option<ReportBuilder>>,
+) -> HttpResponse {
+
+    // Get the ids for the runs
+    let run_ids: Vec<Uuid> = match RunData::find_ids(&conn, run_query.clone()) {
+        Ok(ids) => {
+            if ids.is_empty() {
+                // If no is found, return a 404
+                return HttpResponse::NotFound().json(ErrorBody {
+                    title: "No runs found".to_string(),
+                    status: 404,
+                    detail: "No runs found with the specified parameters".to_string(),
+                })
+            } else {
+                ids
+            }
+        },
+        Err(e) => {
+            error!("Failed to retrieve runs for query with error: {}", e);
+            return default_500(&e);
+        }
+    };
+    // Create the run group and map it to the runs
+    let run_group: RunGroupData = match RunGroupData::create(&conn) {
+        Ok(run_group) => run_group,
+        Err(e) => {
+            error!("Failed to create run_group for run_query with error: {}", e);
+            return default_500(&e);
+        }
+    };
+    if let Err(e) = RunGroupIsFromQueryData::create(&conn, NewRunGroupIsFromQuery{
+        run_group_id: run_group.run_group_id,
+        query: serde_json::to_value(run_query).expect("Failed to convert a run_query into a json value.  This should not happen.")
+    }) {
+        error!("Failed to store query metadata for run_group with id {} due to {}", run_group.run_group_id, e);
+        return default_500(&e);
+    }
+    let new_runs_in_group: Vec<NewRunInGroup> = run_ids.into_iter().map(|id| NewRunInGroup{ run_id: id, run_group_id: run_group.run_group_id}).collect();
+    if let Err(e) = RunInGroupData::batch_create(&conn, new_runs_in_group) {
+        error!("Failed to add runs from query to run_group with id {} due to {}", run_group.run_group_id, e);
+        return default_500(&e);
+    }
+
+    create(
+        ReportableEnum::RunGroup,
+        run_group.run_group_id,
+        report_id,
+        report_map_inputs,
+        &CreateQueryParams{delete_failed: None},
+        &conn,
+        report_builder,
+    )
+        .await
 }
 
 /// Assembles a report template and a wdl for filling it for the report specified by `report_id`,
@@ -311,27 +584,15 @@ async fn create_for_run_group(
 /// Panics if attempting to connect to the database results in an error
 async fn create(
     entity_type: ReportableEnum,
-    entity_id: &str,
-    report_id: &str,
+    entity_id: Uuid,
+    report_id: Uuid,
     report_map_inputs: NewReportMapIncomplete,
-    query_params: Query<CreateQueryParams>,
-    pool: web::Data<db::DbPool>,
+    query_params: &CreateQueryParams,
+    conn: &PgConnection,
     report_builder: web::Data<Option<ReportBuilder>>,
 ) -> HttpResponse {
-    // Parse ID into Uuid
-    let entity_id = match parse_id(entity_id) {
-        Ok(id) => id,
-        Err(error_response) => return error_response,
-    };
-    // Parse report ID into Uuid
-    let report_id = match parse_id(report_id) {
-        Ok(id) => id,
-        Err(error_response) => return error_response,
-    };
     // Set whether to delete an existent failed report_map automatically based on query params
     let delete_failed: bool = matches!(query_params.delete_failed, Some(true));
-    // Get DB connection
-    let conn = pool.get().expect("Failed to get DB connection from pool");
     // Get the report_builder and create the run report or return an error if we don't have one
     match {
         match report_builder.as_ref() {
@@ -566,6 +827,9 @@ fn init_routes_reporting_enabled(cfg: &mut web::ServiceConfig) {
     );
     cfg.service(web::resource("/runs/{id}/reports").route(web::get().to(find_for_run)));
     cfg.service(web::resource("/run-groups/{id}/reports").route(web::get().to(find_for_run_group)));
+    cfg.service(web::resource("/pipelines/{id}/runs/reports/{report_id}").route(web::post().to(create_for_run_query_for_pipeline)));
+    cfg.service(web::resource("/templates/{id}/runs/reports/{report_id}").route(web::post().to(create_for_run_query_for_template)));
+    cfg.service(web::resource("/tests/{id}/runs/reports/{report_id}").route(web::post().to(create_for_run_query_for_test)));
 }
 
 /// Attaches a reporting-disabled error message REST mapping to a service cfg
@@ -587,6 +851,9 @@ fn init_routes_reporting_disabled(cfg: &mut web::ServiceConfig) {
         web::resource("/run-groups/{id}/reports/{report_id}")
             .route(web::route().to(disabled_features::reporting_disabled_mapping)),
     );
+    cfg.service(web::resource("/pipelines/{id}/runs/reports/{report_id}").route(web::route().to(disabled_features::reporting_disabled_mapping)));
+    cfg.service(web::resource("/templates/{id}/runs/reports/{report_id}").route(web::route().to(disabled_features::reporting_disabled_mapping)));
+    cfg.service(web::resource("/tests/{id}/runs/reports/{report_id}").route(web::post().to(disabled_features::reporting_disabled_mapping)));
 }
 
 #[cfg(test)]
@@ -614,12 +881,19 @@ mod tests {
     use crate::requests::gcloud_storage::GCloudClient;
     use crate::unit_test_util::*;
     use actix_web::{client::Client, http, test, App};
-    use chrono::Utc;
+    use chrono::{NaiveDateTime, Utc};
     use diesel::PgConnection;
     use serde_json::Value;
     use std::env;
     use std::fs::{read_to_string, File};
+    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+    use tempfile::TempDir;
     use uuid::Uuid;
+    use crate::models::run_software_version::{NewRunSoftwareVersion, RunSoftwareVersionData};
+    use crate::models::software::{NewSoftware, SoftwareData};
+    use crate::models::software_version::{NewSoftwareVersion, SoftwareVersionData};
+    use crate::models::software_version_tag::{NewSoftwareVersionTag, SoftwareVersionTagData};
+    use crate::routes::software_version_query_for_run::SoftwareVersionQueryForRun;
 
     fn insert_test_run(conn: &PgConnection) -> RunData {
         let new_pipeline = NewPipeline {
@@ -660,7 +934,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -770,7 +1043,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -856,7 +1128,7 @@ mod tests {
 
     fn insert_test_run_group_with_results(
         conn: &PgConnection,
-    ) -> (PipelineData, TemplateData, TestData, RunData) {
+    ) -> (PipelineData, TemplateData, TestData, RunData, RunData, RunGroupData) {
         let new_pipeline = NewPipeline {
             name: String::from("Kevin's Pipeline 2"),
             description: Some(String::from("Kevin made this pipeline for testing 2")),
@@ -879,6 +1151,44 @@ mod tests {
 
         let template =
             TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
+        let new_result = NewResult {
+            name: String::from("Greeting"),
+            result_type: ResultTypeEnum::Text,
+            description: Some(String::from("Description4")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result =
+            ResultData::create(conn, new_result).expect("Failed inserting test result");
+
+        let new_template_result = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: new_result.result_id,
+            result_key: "greeting_workflow.out_greeting".to_string(),
+            created_by: None,
+        };
+        let _new_template_result = TemplateResultData::create(conn, new_template_result)
+            .expect("Failed inserting test template result");
+
+        let new_result2 = NewResult {
+            name: String::from("File Result"),
+            result_type: ResultTypeEnum::File,
+            description: Some(String::from("Description3")),
+            created_by: Some(String::from("Test@example.com")),
+        };
+
+        let new_result2 =
+            ResultData::create(conn, new_result2).expect("Failed inserting test result");
+
+        let new_template_result2 = NewTemplateResult {
+            template_id: template.template_id,
+            result_id: new_result2.result_id,
+            result_key: "greeting_file_workflow.out_file".to_string(),
+            created_by: None,
+        };
+        let _new_template_result2 = TemplateResultData::create(conn, new_template_result2)
+            .expect("Failed inserting test template result");
 
         let new_test = NewTest {
             name: String::from("Kevin's Test"),
@@ -913,8 +1223,7 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: None,
-            name: String::from("Kevin's test run"),
+            name: String::from("Kevin's test run base"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
             test_wdl_dependencies: None,
@@ -939,6 +1248,108 @@ mod tests {
 
         let run = RunData::create(&conn, new_run).expect("Failed to insert run");
 
+        RunInGroupData::create(conn, NewRunInGroup{
+            run_id: run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        let new_run_result = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean Paul Gasse".to_string(),
+        };
+
+        let _new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result/greeting.txt"),
+        };
+
+        let _new_run_result2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        let new_run2 = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run head"),
+            status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
+            test_input: json!({
+                "greeting_workflow.docker": "carrot_build:ExampleRepo2|9172a559ad93ac320b53951742eca69814594cc7",
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "Jean-Paul Gasse"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run2 = RunData::create(&conn, new_run2).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup{
+            run_id: run2.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        let new_run_result = NewRunResult {
+            run_id: run2.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean Paul Gasse!".to_string(),
+        };
+
+        let _new_run_result2_1 =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run2.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result2/greeting.txt"),
+        };
+
+        let _new_run_result2_2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        (pipeline, template, test, run, run2, run_group)
+    }
+
+    fn insert_test_runs_with_results(
+        conn: &PgConnection,
+    ) -> (PipelineData, TemplateData, TestData, RunData, RunData, RunData) {
+        let new_pipeline = NewPipeline {
+            name: String::from("Kevin's Pipeline 2"),
+            description: Some(String::from("Kevin made this pipeline for testing 2")),
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let pipeline =
+            PipelineData::create(conn, new_pipeline).expect("Failed inserting test pipeline");
+
+        let new_template = NewTemplate {
+            name: String::from("Kevin's Template2"),
+            pipeline_id: pipeline.pipeline_id,
+            description: Some(String::from("Kevin made this template for testing2")),
+            test_wdl: format!("{}/test.wdl", mockito::server_url()),
+            test_wdl_dependencies: None,
+            eval_wdl: format!("{}/eval.wdl", mockito::server_url()),
+            eval_wdl_dependencies: None,
+            created_by: Some(String::from("Kevin2@example.com")),
+        };
+
+        let template =
+            TemplateData::create(conn, new_template).expect("Failed inserting test template");
+
         let new_result = NewResult {
             name: String::from("Greeting"),
             result_type: ResultTypeEnum::Text,
@@ -957,15 +1368,6 @@ mod tests {
         };
         let _new_template_result = TemplateResultData::create(conn, new_template_result)
             .expect("Failed inserting test template result");
-
-        let new_run_result = NewRunResult {
-            run_id: run.run_id,
-            result_id: new_result.result_id,
-            value: "Yo, Jean Paul Gasse".to_string(),
-        };
-
-        let _new_run_result =
-            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
 
         let new_result2 = NewResult {
             name: String::from("File Result"),
@@ -986,6 +1388,79 @@ mod tests {
         let _new_template_result2 = TemplateResultData::create(conn, new_template_result2)
             .expect("Failed inserting test template result");
 
+        let new_test = NewTest {
+            name: String::from("Kevin's Test"),
+            template_id: template.template_id,
+            description: Some(String::from("Kevin made this test for testing")),
+            test_input_defaults: None,
+            test_option_defaults: None,
+            eval_input_defaults: None,
+            eval_option_defaults: None,
+            created_by: Some(String::from("Kevin@example.com")),
+        };
+
+        let test = TestData::create(conn, new_test).expect("Failed inserting test test");
+        
+        let software = SoftwareData::create(conn, NewSoftware{
+            name: "ExampleRepo".to_string(),
+            description: None,
+            repository_url: "example.com/repo/location".to_string(),
+            machine_type: None,
+            created_by: None
+        }).unwrap();
+        
+        let software_version1 = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: "e9a03032fc79e74f920b3a5635f4f87a26e3ae7a".to_string(),
+            software_id: software.software_id,
+            commit_date: "2022-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()
+        }).unwrap();
+
+        let software_version1_tag = SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: software_version1.software_version_id,
+            tag: "1.1.0".to_string()
+        }).unwrap();
+
+        let new_run = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run 1"),
+            status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
+            test_input: json!({
+                "greeting_workflow.docker": "carrot_build:ExampleRepo2|1.1.0",
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "Jean-Paul Gasse"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        let run_software_version1 = RunSoftwareVersionData::create(conn, NewRunSoftwareVersion {
+            run_id: run.run_id,
+            software_version_id: software_version1.software_version_id
+        });
+
+        let new_run_result = NewRunResult {
+            run_id: run.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean Paul Gasse".to_string(),
+        };
+
+        let _new_run_result =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
         let new_run_result2 = NewRunResult {
             run_id: run.run_id,
             result_id: new_result2.result_id,
@@ -995,7 +1470,129 @@ mod tests {
         let _new_run_result2 =
             RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
 
-        (pipeline, template, test, run)
+        let software_version2 = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: "2c98ca41efcd666060ae729346bbe9e1a0b81d13".to_string(),
+            software_id: software.software_id,
+            commit_date: "2022-01-03T00:00:00".parse::<NaiveDateTime>().unwrap()
+        }).unwrap();
+
+        let software_version2_tag = SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: software_version2.software_version_id,
+            tag: "1.1.1".to_string()
+        }).unwrap();
+
+        let new_run2 = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run 2"),
+            status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
+            test_input: json!({
+                "greeting_workflow.docker": "carrot_build:ExampleRepo2|1.1.1",
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "Jean-Paul Gasse"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run2 = RunData::create(&conn, new_run2).expect("Failed to insert run");
+
+        let run_software_version2 = RunSoftwareVersionData::create(conn, NewRunSoftwareVersion {
+            run_id: run2.run_id,
+            software_version_id: software_version2.software_version_id
+        });
+
+        let new_run_result = NewRunResult {
+            run_id: run2.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean Paul Gasse!".to_string(),
+        };
+
+        let _new_run_result2_1 =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run2.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result2/greeting.txt"),
+        };
+
+        let _new_run_result2_2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        let software_version3 = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: "6bc11915b165ad8b6b6e2599fc52e3a6ee97456d".to_string(),
+            software_id: software.software_id,
+            commit_date: "2022-01-11T00:00:00".parse::<NaiveDateTime>().unwrap()
+        }).unwrap();
+
+        let software_version3_tag = SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: software_version3.software_version_id,
+            tag: "1.1.2".to_string()
+        }).unwrap();
+
+        let new_run3 = NewRun {
+            test_id: test.test_id,
+            name: String::from("Kevin's test run 3"),
+            status: RunStatusEnum::Succeeded,
+            test_wdl: String::from("testtest"),
+            test_wdl_dependencies: None,
+            eval_wdl: String::from("evaltest"),
+            eval_wdl_dependencies: None,
+            test_input: json!({
+                "greeting_workflow.docker": "carrot_build:ExampleRepo2|1.1.2",
+                "greeting_workflow.in_greeting": "Yo",
+                "greeting_workflow.in_greeted": "Jean-Paul Gasse"
+            }),
+            test_options: None,
+            eval_input: json!({
+                "greeting_file_workflow.in_output_filename": "greeting.txt",
+                "greeting_file_workflow.in_greeting":"test_output:greeting_workflow.out_greeting"
+            }),
+            eval_options: None,
+            test_cromwell_job_id: Some(String::from("123456789")),
+            eval_cromwell_job_id: Some(String::from("12345678902")),
+            created_by: Some(String::from("Kevin@example.com")),
+            finished_at: Some(Utc::now().naive_utc()),
+        };
+
+        let run3 = RunData::create(&conn, new_run3).expect("Failed to insert run");
+
+        let run_software_version3 = RunSoftwareVersionData::create(conn, NewRunSoftwareVersion {
+            run_id: run3.run_id,
+            software_version_id: software_version3.software_version_id
+        });
+
+        let new_run_result = NewRunResult {
+            run_id: run3.run_id,
+            result_id: new_result.result_id,
+            value: "Yo, Jean Paul Gasse!?".to_string(),
+        };
+
+        let _new_run_result3_1 =
+            RunResultData::create(conn, new_run_result).expect("Failed inserting test run_result");
+
+        let new_run_result2 = NewRunResult {
+            run_id: run3.run_id,
+            result_id: new_result2.result_id,
+            value: String::from("example.com/test/result2/greeting.txt"),
+        };
+
+        let _new_run_result3_2 =
+            RunResultData::create(conn, new_run_result2).expect("Failed inserting test run_result");
+
+        (pipeline, template, test, run, run2, run3)
     }
 
     fn insert_test_template_report(
@@ -1021,6 +1618,20 @@ mod tests {
             insert_test_template_report(conn, template.template_id, report.report_id);
 
         (report.report_id, run.run_id)
+    }
+
+    fn insert_data_for_create_for_run_group_success(conn: &PgConnection) -> (Uuid, Uuid) {
+        let report = insert_test_report(conn);
+        let (_pipeline, _template, _test, _run1, _run2, run_group) = insert_test_run_group_with_results(conn);
+
+        (report.report_id, run_group.run_group_id)
+    }
+
+    fn insert_data_for_create_for_query_success(conn: &PgConnection) -> (PipelineData, TemplateData, TestData, RunData, RunData, RunData, ReportData) {
+        let report = insert_test_report(conn);
+        let (pipeline, template, test, run1, run2, run3) = insert_test_runs_with_results(conn);
+
+        (pipeline, template, test, run1, run2, run3, report)
     }
 
     fn insert_test_report_map_failed_for_run_and_report(
@@ -1151,7 +1762,7 @@ mod tests {
         let pool = get_test_db_pool();
 
         // Set up data in DB
-        let (report_id, run_id) = insert_data_for_create_report_map_success(&pool.get().unwrap());
+        let (report_id, run_group_id) = insert_data_for_create_for_run_group_success(&pool.get().unwrap());
         // Make mockito mapping for cromwell
         let mock_response_body = json!({
           "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
@@ -1174,7 +1785,7 @@ mod tests {
         .await;
         // Make the request
         let req = test::TestRequest::post()
-            .uri(&format!("/runs/{}/reports/{}", run_id, report_id))
+            .uri(&format!("/run-groups/{}/reports/{}", run_group_id, report_id))
             .set_json(&NewReportMapIncomplete {
                 created_by: Some(String::from("kevin@example.com")),
             })
@@ -1188,7 +1799,8 @@ mod tests {
         let result = test::read_body(resp).await;
         let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(result_report_map.entity_id, run_id);
+        assert!(matches!(result_report_map.entity_type, ReportableEnum::RunGroup));
+        assert_eq!(result_report_map.entity_id, run_group_id);
         assert_eq!(result_report_map.report_id, report_id);
         assert_eq!(
             result_report_map.created_by,
@@ -1199,6 +1811,423 @@ mod tests {
             Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
         );
         assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_pipeline_success() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+        // Set up data in DB
+        let (pipeline, _template, _test, run1, run2, run3, report) = insert_data_for_create_for_query_success(&pool.get().unwrap());
+        // Make mockito mapping for cromwell
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_enabled),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::List {
+            name: String::from("ExampleRepo"),
+            commits_and_tags: vec![String::from("1.1.0"), String::from("1.1.1")]
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/pipelines/{}/runs/reports/{}?software_versions={}", pipeline.pipeline_id, report.report_id, software_versions_query_param))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        cromwell_mock.assert();
+
+        let result = test::read_body(resp).await;
+        let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(result_report_map.report_id, report.report_id);
+        assert_eq!(
+            result_report_map.created_by,
+            Some(String::from("kevin@example.com"))
+        );
+        assert_eq!(
+            result_report_map.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
+        assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_pipeline_failure_not_found() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_enabled),
+        )
+            .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/pipelines/{}/runs/reports/{}", Uuid::new_v4(), Uuid::new_v4()))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No runs found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No runs found with the specified parameters");
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_pipeline_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_disabled),
+        )
+            .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/pipelines/{}/runs/reports/{}", Uuid::new_v4(), Uuid::new_v4()))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_template_success() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+        // Set up data in DB
+        let (_pipeline, template, _test, run1, run2, run3, report) = insert_data_for_create_for_query_success(&pool.get().unwrap());
+        // Make mockito mapping for cromwell
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_enabled),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::List {
+            name: String::from("ExampleRepo"),
+            commits_and_tags: vec![String::from("1.1.0"), String::from("1.1.1")]
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/templates/{}/runs/reports/{}?software_versions={}", template.template_id, report.report_id, software_versions_query_param))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        cromwell_mock.assert();
+
+        let result = test::read_body(resp).await;
+        let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(result_report_map.report_id, report.report_id);
+        assert_eq!(
+            result_report_map.created_by,
+            Some(String::from("kevin@example.com"))
+        );
+        assert_eq!(
+            result_report_map.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
+        assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_template_failure_not_found() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_enabled),
+        )
+            .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/templates/{}/runs/reports/{}", Uuid::new_v4(), Uuid::new_v4()))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No runs found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No runs found with the specified parameters");
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_template_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_disabled),
+        )
+            .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/templates/{}/runs/reports/{}", Uuid::new_v4(), Uuid::new_v4()))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_test_success() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+        // Set up data in DB
+        let (_pipeline, _template, test, run1, run2, run3, report) = insert_data_for_create_for_query_success(&pool.get().unwrap());
+        // Make mockito mapping for cromwell
+        let mock_response_body = json!({
+          "id": "53709600-d114-4194-a7f7-9e41211ca2ce",
+          "status": "Submitted"
+        });
+        let cromwell_mock = mockito::mock("POST", "/api/workflows/v1")
+            .with_status(201)
+            .with_header("content_type", "application/json")
+            .with_body(mock_response_body.to_string())
+            .create();
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_enabled),
+        )
+            .await;
+
+        let software_versions_query = SoftwareVersionQueryForRun::List {
+            name: String::from("ExampleRepo"),
+            commits_and_tags: vec![String::from("1.1.0"), String::from("1.1.1")]
+        };
+        let software_versions_query_string = serde_json::to_string(&software_versions_query).unwrap();
+        let software_versions_query_param = utf8_percent_encode(&software_versions_query_string, NON_ALPHANUMERIC);
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/tests/{}/runs/reports/{}?software_versions={}", test.test_id, report.report_id, software_versions_query_param))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        cromwell_mock.assert();
+
+        let result = test::read_body(resp).await;
+        let result_report_map: ReportMapData = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(result_report_map.report_id, report.report_id);
+        assert_eq!(
+            result_report_map.created_by,
+            Some(String::from("kevin@example.com"))
+        );
+        assert_eq!(
+            result_report_map.cromwell_job_id,
+            Some(String::from("53709600-d114-4194-a7f7-9e41211ca2ce"))
+        );
+        assert_eq!(result_report_map.status, ReportStatusEnum::Submitted);
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_test_failure_not_found() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_enabled),
+        )
+            .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/tests/{}/runs/reports/{}", Uuid::new_v4(), Uuid::new_v4()))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "No runs found");
+        assert_eq!(error_body.status, 404);
+        assert_eq!(error_body.detail, "No runs found with the specified parameters");
+    }
+
+    #[actix_rt::test]
+    async fn create_for_query_with_test_failure_reporting_disabled() {
+        let pool = get_test_db_pool();
+        let test_config = load_default_config();
+        let temp_repo_dir = TempDir::new().unwrap();
+        let git_repo_manager = GitRepoManager::new(None, temp_repo_dir.path().to_str().unwrap().to_owned());
+
+        // Set up the actix app so we can send a request to it
+        let test_report_builder = create_test_report_builder();
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .data(Some(test_report_builder))
+                .data(git_repo_manager)
+                .data(test_config)
+                .configure(init_routes_reporting_disabled),
+        )
+            .await;
+        // Make the request
+        let req = test::TestRequest::post()
+            .uri(&format!("/tests/{}/runs/reports/{}", Uuid::new_v4(), Uuid::new_v4()))
+            .set_json(&NewReportMapIncomplete {
+                created_by: Some(String::from("kevin@example.com")),
+            })
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+        let result = test::read_body(resp).await;
+        let error_body: ErrorBody = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(error_body.title, "Reporting disabled");
+        assert_eq!(error_body.status, 422);
+        assert_eq!(error_body.detail, "You are trying to access a reporting-related endpoint, but the reporting feature is disabled for this CARROT server");
     }
 
     #[actix_rt::test]

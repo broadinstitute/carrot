@@ -9,7 +9,9 @@ use crate::models::run_result::RunResultData;
 use crate::models::run_software_version::RunSoftwareVersionData;
 use crate::schema::run;
 use crate::schema::run::dsl::*;
+use crate::schema::run_in_group;
 use crate::schema::run_with_results_and_errors;
+use crate::schema::run_software_versions_with_identifiers;
 use crate::schema::template;
 use crate::schema::test;
 use crate::util;
@@ -20,6 +22,7 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+use crate::models::run_in_group::RunInGroupData;
 
 /// Mapping to a run as it exists in the RUN table in the database.
 ///
@@ -28,7 +31,6 @@ use uuid::Uuid;
 pub struct RunData {
     pub run_id: Uuid,
     pub test_id: Uuid,
-    pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_wdl: String,
@@ -55,7 +57,7 @@ pub struct RunData {
 pub struct RunWithResultsAndErrorsData {
     pub run_id: Uuid,
     pub test_id: Uuid,
-    pub run_group_id: Option<Uuid>,
+    pub run_group_ids: Vec<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_wdl: String,
@@ -98,7 +100,7 @@ where
 /// All values are optional, so any combination can be used during a query.  Limit and offset are
 /// used for pagination.  Sort expects a comma-separated list of sort keys, optionally enclosed
 /// with either asc() or desc().  For example: asc(name),desc(description),run_id
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct RunQuery {
     pub pipeline_id: Option<Uuid>,
     pub template_id: Option<Uuid>,
@@ -112,6 +114,8 @@ pub struct RunQuery {
     pub eval_options: Option<Value>,
     pub test_cromwell_job_id: Option<String>,
     pub eval_cromwell_job_id: Option<String>,
+    /// Vector of software versions in the form "{software_name}|{commit_or_tag}"
+    pub software_versions: Option<Vec<String>>,
     pub created_before: Option<NaiveDateTime>,
     pub created_after: Option<NaiveDateTime>,
     pub created_by: Option<String>,
@@ -131,7 +135,6 @@ pub struct RunQuery {
 #[table_name = "run"]
 pub struct NewRun {
     pub test_id: Uuid,
-    pub run_group_id: Option<Uuid>,
     pub name: String,
     pub status: RunStatusEnum,
     pub test_wdl: String,
@@ -154,7 +157,6 @@ pub struct NewRun {
 #[derive(Deserialize, Serialize, AsChangeset, Debug)]
 #[table_name = "run"]
 pub struct RunChangeset {
-    pub run_group_id: Option<Uuid>,
     pub name: Option<String>,
     pub status: Option<RunStatusEnum>,
     pub test_cromwell_job_id: Option<String>,
@@ -209,6 +211,22 @@ impl RunData {
         // Put the query into a box (pointer) so it can be built dynamically and filter by test_id
         let mut query = run.into_boxed();
 
+        // If software_versions have been specified, add a subquery for that
+        if let Some(software_versions) = params.software_versions {
+            let software_version_subquery = run_software_versions_with_identifiers::dsl::run_software_versions_with_identifiers
+                .filter(run_software_versions_with_identifiers::dsl::software_with_identifier.eq_any(software_versions))
+                .select(run_software_versions_with_identifiers::dsl::run_id);
+            query = query.filter(run_id.eq_any(software_version_subquery));
+        }
+
+        // If run_group_id has been specified, add a subquery for that
+        if let Some(param) = params.run_group_id {
+            let run_group_subquery = run_in_group::dsl::run_in_group
+                .filter(run_in_group::dsl::run_group_id.eq(param))
+                .select(run_in_group::dsl::run_id);
+            query = query.filter(run_id.eq_any(run_group_subquery));
+        }
+
         // Adding filters for template_id and pipeline_id requires subqueries
         if let Some(param) = params.pipeline_id {
             // Subquery for getting all test_ids for test belonging the to templates belonging to the
@@ -231,12 +249,10 @@ impl RunData {
             query = query.filter(test_id.eq_any(template_subquery));
         }
 
+
         // Add filters for each of the other params if they have values
         if let Some(param) = params.test_id {
             query = query.filter(test_id.eq(param));
-        }
-        if let Some(param) = params.run_group_id {
-            query = query.filter(run_group_id.eq(param));
         }
         if let Some(param) = params.name {
             query = query.filter(name.eq(param));
@@ -295,13 +311,6 @@ impl RunData {
                             query = query.then_order_by(test_id.asc());
                         } else {
                             query = query.then_order_by(test_id.desc());
-                        }
-                    }
-                    "run_group_id" => {
-                        if sort_clause.ascending {
-                            query = query.then_order_by(run_group_id.asc());
-                        } else {
-                            query = query.then_order_by(run_group_id.desc());
                         }
                     }
                     "name" => {
@@ -398,6 +407,211 @@ impl RunData {
         query.load::<Self>(conn)
     }
 
+    /// Queries the DB for ids for runs matching the specified query criteria
+    ///
+    /// Queries the DB using `conn` to retrieve ids for runs matching the criteria in `params`
+    /// Returns result containing either a vector of the retrieved runs as RunData
+    /// instances or an error if the query fails for some reason
+    pub fn find_ids(conn: &PgConnection, params: RunQuery) -> Result<Vec<Uuid>, diesel::result::Error> {
+        // Put the query into a box (pointer) so it can be built dynamically and filter by test_id
+        let mut query = run.into_boxed();
+
+        // If software_versions have been specified, add a subquery for that
+        if let Some(software_versions) = params.software_versions {
+            let software_version_subquery = run_software_versions_with_identifiers::dsl::run_software_versions_with_identifiers
+                .filter(run_software_versions_with_identifiers::dsl::software_with_identifier.eq_any(software_versions))
+                .select(run_software_versions_with_identifiers::dsl::run_id);
+            query = query.filter(run_id.eq_any(software_version_subquery));
+        }
+
+        // If run_group_id has been specified, add a subquery for that
+        if let Some(param) = params.run_group_id {
+            let run_group_subquery = run_in_group::dsl::run_in_group
+                .filter(run_in_group::dsl::run_group_id.eq(param))
+                .select(run_in_group::dsl::run_id);
+            query = query.filter(run_id.eq_any(run_group_subquery));
+        }
+
+        // Adding filters for template_id and pipeline_id requires subqueries
+        if let Some(param) = params.pipeline_id {
+            // Subquery for getting all test_ids for test belonging the to templates belonging to the
+            // specified pipeline
+            let pipeline_subquery = template::dsl::template
+                .filter(template::dsl::pipeline_id.eq(param))
+                .select(template::dsl::template_id);
+            let template_subquery = test::dsl::test
+                .filter(test::dsl::template_id.eq_any(pipeline_subquery))
+                .select(test::dsl::test_id);
+            // Filter by the results of the template subquery
+            query = query.filter(test_id.eq_any(template_subquery));
+        }
+        if let Some(param) = params.template_id {
+            // Subquery for getting all test_ids for test belonging the to specified template
+            let template_subquery = test::dsl::test
+                .filter(test::dsl::template_id.eq(param))
+                .select(test::dsl::test_id);
+            // Filter by the results of the template subquery
+            query = query.filter(test_id.eq_any(template_subquery));
+        }
+
+
+        // Add filters for each of the other params if they have values
+        if let Some(param) = params.test_id {
+            query = query.filter(test_id.eq(param));
+        }
+        if let Some(param) = params.name {
+            query = query.filter(name.eq(param));
+        }
+        if let Some(param) = params.status {
+            query = query.filter(status.eq(param));
+        }
+        if let Some(param) = params.test_input {
+            query = query.filter(test_input.eq(param));
+        }
+        if let Some(param) = params.test_options {
+            query = query.filter(test_options.eq(param));
+        }
+        if let Some(param) = params.eval_input {
+            query = query.filter(eval_input.eq(param));
+        }
+        if let Some(param) = params.eval_options {
+            query = query.filter(eval_options.eq(param));
+        }
+        if let Some(param) = params.test_cromwell_job_id {
+            query = query.filter(test_cromwell_job_id.eq(param));
+        }
+        if let Some(param) = params.eval_cromwell_job_id {
+            query = query.filter(eval_cromwell_job_id.eq(param));
+        }
+        if let Some(param) = params.created_before {
+            query = query.filter(created_at.lt(param));
+        }
+        if let Some(param) = params.created_after {
+            query = query.filter(created_at.gt(param));
+        }
+        if let Some(param) = params.created_by {
+            query = query.filter(created_by.eq(param));
+        }
+        if let Some(param) = params.finished_before {
+            query = query.filter(finished_at.lt(param));
+        }
+        if let Some(param) = params.finished_after {
+            query = query.filter(finished_at.gt(param));
+        }
+
+        // If there is a sort param, parse it and add to the order by clause accordingly
+        if let Some(sort) = params.sort {
+            let sort = util::sort_string::parse(&sort);
+            for sort_clause in sort {
+                match &sort_clause.key[..] {
+                    "run_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(run_id.asc());
+                        } else {
+                            query = query.then_order_by(run_id.desc());
+                        }
+                    }
+                    "test_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_id.asc());
+                        } else {
+                            query = query.then_order_by(test_id.desc());
+                        }
+                    }
+                    "name" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(name.asc());
+                        } else {
+                            query = query.then_order_by(name.desc());
+                        }
+                    }
+                    "status" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(status.asc());
+                        } else {
+                            query = query.then_order_by(status.desc());
+                        }
+                    }
+                    "test_input" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_input.asc());
+                        } else {
+                            query = query.then_order_by(test_input.desc());
+                        }
+                    }
+                    "test_options" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_options.asc());
+                        } else {
+                            query = query.then_order_by(test_options.desc());
+                        }
+                    }
+                    "eval_input" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_input.asc());
+                        } else {
+                            query = query.then_order_by(eval_input.desc());
+                        }
+                    }
+                    "eval_options" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_options.asc());
+                        } else {
+                            query = query.then_order_by(eval_options.desc());
+                        }
+                    }
+                    "test_cromwell_job_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(test_cromwell_job_id.asc());
+                        } else {
+                            query = query.then_order_by(test_cromwell_job_id.desc());
+                        }
+                    }
+                    "eval_cromwell_job_id" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(eval_cromwell_job_id.asc());
+                        } else {
+                            query = query.then_order_by(eval_cromwell_job_id.desc());
+                        }
+                    }
+                    "created_at" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(created_at.asc());
+                        } else {
+                            query = query.then_order_by(created_at.desc());
+                        }
+                    }
+                    "finished_at" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(finished_at.asc());
+                        } else {
+                            query = query.then_order_by(finished_at.desc());
+                        }
+                    }
+                    "created_by" => {
+                        if sort_clause.ascending {
+                            query = query.then_order_by(created_by.asc());
+                        } else {
+                            query = query.then_order_by(created_by.desc());
+                        }
+                    }
+                    // Don't add to the order by clause of the sort key isn't recognized
+                    &_ => {}
+                }
+            }
+        }
+
+        if let Some(param) = params.limit {
+            query = query.limit(param);
+        }
+        if let Some(param) = params.offset {
+            query = query.offset(param);
+        }
+
+        // Perform the query
+        query.select(run_id).load::<Uuid>(conn)
+    }
+
     /// Queries the DB for runs that haven't finished yet
     ///
     /// Returns result containing either a vector of the retrieved runs (which have a null value
@@ -470,12 +684,13 @@ impl RunData {
         }
         // Do all the actual deleting in a closure so we can run it in a transaction
         let delete_closure = || {
-            // Delete run_software_version, run_result, run_error, and run_is_from_github rows tied
-            // to this run
+            // Delete run_software_version, run_result, run_error, run_in_group, and
+            // run_is_from_github rows tied to this run
             RunSoftwareVersionData::delete_by_run_id(conn, id)?;
             RunResultData::delete_by_run_id(conn, id)?;
             RunIsFromGithubData::delete_by_run_id(conn, id)?;
             RunErrorData::delete_by_run_id(conn, id)?;
+            RunInGroupData::delete_by_run_id(conn, id)?;
 
             // Delete and return result
             Ok(diesel::delete(run.filter(run_id.eq(id))).execute(conn)?)
@@ -505,7 +720,7 @@ impl RunWithResultsAndErrorsData {
             .select((
                 run_with_results_and_errors::dsl::run_id,
                 run_with_results_and_errors::dsl::test_id,
-                run_with_results_and_errors::dsl::run_group_id,
+                run_with_results_and_errors::dsl::run_group_ids,
                 run_with_results_and_errors::dsl::name,
                 run_with_results_and_errors::dsl::status,
                 run_with_results_and_errors::dsl::test_wdl,
@@ -540,6 +755,22 @@ impl RunWithResultsAndErrorsData {
         // Put the query into a box (pointer) so it can be built dynamically
         let mut query = run_with_results_and_errors::dsl::run_with_results_and_errors.into_boxed();
 
+        // If software_versions have been specified, add a subquery for that
+        if let Some(software_versions) = params.software_versions {
+            let software_version_subquery = run_software_versions_with_identifiers::dsl::run_software_versions_with_identifiers
+                .filter(run_software_versions_with_identifiers::dsl::software_with_identifier.eq_any(software_versions))
+                .select(run_software_versions_with_identifiers::dsl::run_id);
+            query = query.filter(run_with_results_and_errors::dsl::run_id.eq_any(software_version_subquery));
+        }
+
+        // If run_group_id has been specified, add a subquery for that
+        if let Some(param) = params.run_group_id {
+            let run_group_subquery = run_in_group::dsl::run_in_group
+                .filter(run_in_group::dsl::run_group_id.eq(param))
+                .select(run_in_group::dsl::run_id);
+            query = query.filter(run_with_results_and_errors::dsl::run_id.eq_any(run_group_subquery));
+        }
+
         // Adding filters for template_id and pipeline_id requires subqueries
         if let Some(param) = params.pipeline_id {
             // Subquery for getting all test_ids for test belonging the to templates belonging to the
@@ -569,7 +800,7 @@ impl RunWithResultsAndErrorsData {
             query = query.filter(run_with_results_and_errors::dsl::test_id.eq(param));
         }
         if let Some(param) = params.run_group_id {
-            query = query.filter(run_with_results_and_errors::dsl::run_group_id.eq(param));
+            query = query.filter(run_with_results_and_errors::dsl::run_group_ids.contains(vec![param]));
         }
         if let Some(param) = params.name {
             query = query.filter(run_with_results_and_errors::dsl::name.eq(param));
@@ -632,17 +863,6 @@ impl RunWithResultsAndErrorsData {
                         } else {
                             query = query
                                 .then_order_by(run_with_results_and_errors::dsl::test_id.desc());
-                        }
-                    }
-                    "run_group_id" => {
-                        if sort_clause.ascending {
-                            query = query.then_order_by(
-                                run_with_results_and_errors::dsl::run_group_id.asc(),
-                            );
-                        } else {
-                            query = query.then_order_by(
-                                run_with_results_and_errors::dsl::run_group_id.desc(),
-                            );
                         }
                     }
                     "name" => {
@@ -771,7 +991,7 @@ impl RunWithResultsAndErrorsData {
             .select((
                 run_with_results_and_errors::dsl::run_id,
                 run_with_results_and_errors::dsl::test_id,
-                run_with_results_and_errors::dsl::run_group_id,
+                run_with_results_and_errors::dsl::run_group_ids,
                 run_with_results_and_errors::dsl::name,
                 run_with_results_and_errors::dsl::status,
                 run_with_results_and_errors::dsl::test_wdl,
@@ -825,6 +1045,8 @@ mod tests {
     use rand::prelude::*;
     use serde_json::json;
     use uuid::Uuid;
+    use crate::models::run_in_group::{NewRunInGroup, RunInGroupData};
+    use crate::models::software_version_tag::{NewSoftwareVersionTag, SoftwareVersionTagData};
 
     fn insert_test_run_with_results(conn: &PgConnection) -> RunWithResultsAndErrorsData {
         let test_run = insert_test_run(&conn);
@@ -844,32 +1066,7 @@ mod tests {
             hex::decode("abc7d8bc990447c7ec35557040756db2a9ff7cdab53911f3c7995bc6bf3572cda8c94fa53789e523a680de9921c067f6717e79426df467185fc7a6dbec4b2d57").unwrap()
         ).unwrap();
 
-        RunWithResultsAndErrorsData {
-            run_id: test_run.run_id,
-            test_id: test_run.test_id,
-            run_group_id: test_run.run_group_id,
-            name: test_run.name,
-            status: test_run.status,
-            test_wdl: test_run.test_wdl.clone(),
-            test_wdl_hash: Some(test_wdl_hash.hash.clone()),
-            test_wdl_dependencies: None,
-            test_wdl_dependencies_hash: None,
-            eval_wdl: test_run.eval_wdl.clone(),
-            eval_wdl_hash: Some(eval_wdl_hash.hash.clone()),
-            eval_wdl_dependencies: None,
-            eval_wdl_dependencies_hash: None,
-            test_input: test_run.test_input,
-            test_options: test_run.test_options,
-            eval_input: test_run.eval_input,
-            eval_options: test_run.eval_options,
-            test_cromwell_job_id: test_run.test_cromwell_job_id,
-            eval_cromwell_job_id: test_run.eval_cromwell_job_id,
-            created_at: test_run.created_at,
-            created_by: test_run.created_by,
-            finished_at: test_run.finished_at,
-            results: Some(test_results),
-            errors: Some(test_errors),
-        }
+        RunWithResultsAndErrorsData::find_by_id(conn, test_run.run_id).unwrap()
     }
 
     fn insert_test_results_with_run_id(conn: &PgConnection, id: &Uuid) -> Value {
@@ -1003,7 +1200,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -1020,7 +1216,14 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunData::create(&conn, new_run).expect("Failed to insert run")
+        let created_run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: created_run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        created_run
     }
 
     fn insert_test_run_failed(conn: &PgConnection) -> RunData {
@@ -1064,7 +1267,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: test.test_id,
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("Kevin's test run"),
             status: RunStatusEnum::EvalFailed,
             test_wdl: String::from("testtest"),
@@ -1081,7 +1283,14 @@ mod tests {
             finished_at: Some(Utc::now().naive_utc()),
         };
 
-        RunData::create(&conn, new_run).expect("Failed to insert run")
+        let created_run = RunData::create(&conn, new_run).expect("Failed to insert run");
+
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: created_run.run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
+        created_run
     }
 
     fn insert_runs_with_test_and_template(
@@ -1177,7 +1386,6 @@ mod tests {
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("name1"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -1196,11 +1404,15 @@ mod tests {
 
         runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
 
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: runs.last().unwrap().run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
         let run_group = RunGroupData::create(conn).expect("Failed to insert run group");
 
         let new_run = NewRun {
             test_id: id,
-            run_group_id: Some(run_group.run_group_id),
             name: String::from("name2"),
             status: RunStatusEnum::TestSubmitted,
             test_wdl: String::from("testtest"),
@@ -1219,9 +1431,13 @@ mod tests {
 
         runs.push(RunData::create(conn, new_run).expect("Failed inserting test run"));
 
+        RunInGroupData::create(conn, NewRunInGroup {
+            run_id: runs.last().unwrap().run_id,
+            run_group_id: run_group.run_group_id
+        }).unwrap();
+
         let new_run = NewRun {
             test_id: id,
-            run_group_id: None,
             name: String::from("name3"),
             status: RunStatusEnum::Succeeded,
             test_wdl: String::from("testtest"),
@@ -1326,6 +1542,36 @@ mod tests {
         RunErrorData::create(conn, new_run_error).expect("Failed inserting test run_error")
     }
 
+    fn create_test_software_with_versions(conn: &PgConnection) -> (SoftwareData, SoftwareVersionData, SoftwareVersionData) {
+        let test_software = SoftwareData::create(conn, NewSoftware {
+            name: "TestSoftware".to_string(),
+            description: None,
+            repository_url: String::from("example.com/repo.git"),
+            machine_type: None,
+            created_by: None
+        }).unwrap();
+        let test_software_version = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: String::from("2009358fd05c3fb67117d909f8e4f93f19239d0c"),
+            software_id: test_software.software_id,
+            commit_date: NaiveDateTime::parse_from_str("2021-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+        }).unwrap();
+        let test_software_version2 = SoftwareVersionData::create(conn, NewSoftwareVersion {
+            commit: String::from("fc11bd7dd6b4e2aa257266b7c3c7819047cd9f42"),
+            software_id: test_software.software_id,
+            commit_date: NaiveDateTime::parse_from_str("2022-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+        }).unwrap();
+        SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: test_software_version.software_version_id,
+            tag: "first".to_string()
+        }).unwrap();
+        SoftwareVersionTagData::create(conn, NewSoftwareVersionTag {
+            software_version_id: test_software_version.software_version_id,
+            tag: "beginning".to_string()
+        }).unwrap();
+
+        (test_software, test_software_version, test_software_version2)
+    }
+
     #[test]
     fn find_by_id_exists() {
         let conn = get_test_db_connection();
@@ -1381,6 +1627,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1419,6 +1666,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1458,6 +1706,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1481,12 +1730,13 @@ mod tests {
         let test = insert_test_test(&conn);
         insert_test_runs_with_test_id(&conn, test.test_id);
         let test_run = insert_test_run(&conn);
+        let test_run_with_results_and_errors = RunWithResultsAndErrorsData::find_by_id(&conn, test_run.run_id).unwrap();
 
         let test_query = RunQuery {
             pipeline_id: None,
             template_id: None,
             test_id: None,
-            run_group_id: test_run.run_group_id,
+            run_group_id: Some(test_run_with_results_and_errors.run_group_ids[0]),
             name: None,
             status: None,
             test_input: None,
@@ -1495,6 +1745,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1531,6 +1782,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1567,6 +1819,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1604,6 +1857,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1641,6 +1895,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1677,6 +1932,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1713,6 +1969,7 @@ mod tests {
             eval_options: test_runs[0].eval_options.clone(),
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1750,6 +2007,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: test_run.test_cromwell_job_id.clone(),
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1787,6 +2045,54 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: test_run.eval_cromwell_job_id.clone(),
+            software_versions: None,
+            created_before: None,
+            created_after: None,
+            created_by: None,
+            finished_before: None,
+            finished_after: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        };
+
+        let found_runs = RunData::find(&conn, test_query).expect("Failed to find runs");
+
+        assert_eq!(found_runs.len(), 1);
+        assert_eq!(found_runs[0], test_run);
+    }
+
+    #[test]
+    fn find_with_software_versions() {
+        let conn = get_test_db_connection();
+
+        let test = insert_test_test(&conn);
+        let other_test_runs = insert_test_runs_with_test_id(&conn, test.test_id);
+        let test_run = insert_test_run(&conn);
+        let (test_software, test_software_version, test_software_version2) = create_test_software_with_versions(&conn);
+        let test_run_software_version = RunSoftwareVersionData::create(&conn, NewRunSoftwareVersion {
+            run_id: test_run.run_id,
+            software_version_id: test_software_version.software_version_id
+        }).unwrap();
+        RunSoftwareVersionData::create(&conn, NewRunSoftwareVersion {
+            run_id: other_test_runs[0].run_id,
+            software_version_id: test_software_version2.software_version_id
+        }).unwrap();
+
+        let test_query = RunQuery {
+            pipeline_id: None,
+            template_id: None,
+            test_id: None,
+            run_group_id: None,
+            name: None,
+            status: None,
+            test_input: None,
+            test_options: None,
+            eval_input: None,
+            eval_options: None,
+            test_cromwell_job_id: None,
+            eval_cromwell_job_id: None,
+            software_versions: Some(vec![format!("{}|{}", test_software.name, "first")]),
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1824,6 +2130,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1853,6 +2160,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1889,6 +2197,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_by: None,
@@ -1916,6 +2225,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: Some("2099-01-01T00:00:00".parse::<NaiveDateTime>().unwrap()),
             created_after: None,
             created_by: None,
@@ -1951,6 +2261,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -1978,6 +2289,7 @@ mod tests {
             eval_options: None,
             test_cromwell_job_id: None,
             eval_cromwell_job_id: None,
+            software_versions: None,
             created_before: None,
             created_after: None,
             created_by: None,
@@ -2012,10 +2324,7 @@ mod tests {
 
         let test_run = insert_test_run(&conn);
 
-        let run_group = RunGroupData::create(&conn).unwrap();
-
         let changes = RunChangeset {
-            run_group_id: Some(run_group.run_group_id),
             name: Some(String::from("TestTestTestTest")),
             status: Some(RunStatusEnum::CarrotFailed),
             test_cromwell_job_id: None,
@@ -2042,7 +2351,6 @@ mod tests {
         let test_runs = insert_test_runs_with_test_id(&conn, test.test_id);
 
         let changes = RunChangeset {
-            run_group_id: None,
             name: Some(test_runs[0].name.clone()),
             status: None,
             test_cromwell_job_id: None,
@@ -2058,30 +2366,6 @@ mod tests {
                 diesel::result::DatabaseErrorKind::UniqueViolation,
                 _,
             ),)
-        ));
-    }
-
-    #[test]
-    fn update_failure_nonexistent_run_group() {
-        let conn = get_test_db_connection();
-
-        let test = insert_test_test(&conn);
-        let test_runs = insert_test_runs_with_test_id(&conn, test.test_id);
-
-        let changes = RunChangeset {
-            run_group_id: Some(Uuid::new_v4()),
-            name: None,
-            status: None,
-            test_cromwell_job_id: None,
-            eval_cromwell_job_id: None,
-            finished_at: None,
-        };
-
-        let updated_run = RunData::update(&conn, test_runs[1].run_id, changes);
-
-        assert!(matches!(
-            updated_run,
-            Err(diesel::result::Error::DatabaseError(_, _))
         ));
     }
 
