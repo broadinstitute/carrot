@@ -1625,8 +1625,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_format_test_json_for_cromwell_success() {
+    // This test would not normally need to be async because it doesn't call any async methods, but
+    // it creates an actix Client and therefore needs to be an actix_rt::test, or the thread will
+    // panic because no actix system is running
+    #[actix_rt::test]
+    async fn test_format_test_json_for_cromwell_success() {
         let conn = get_test_db_connection();
 
         let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
@@ -1650,8 +1653,11 @@ mod tests {
         assert_eq!(formatted_json, expected_json);
     }
 
-    #[test]
-    fn test_format_test_json_for_cromwell_success_tag() {
+    // This test would not normally need to be async because it doesn't call any async methods, but
+    // it creates an actix Client and therefore needs to be an actix_rt::test, or the thread will
+    // panic because no actix system is running
+    #[actix_rt::test]
+    async fn test_format_test_json_for_cromwell_success_tag() {
         let conn = get_test_db_connection();
 
         let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
@@ -1682,8 +1688,11 @@ mod tests {
         assert_eq!(formatted_json, expected_json);
     }
 
-    #[test]
-    fn test_format_eval_json_for_cromwell_success() {
+    // This test would not normally need to be async because it doesn't call any async methods, but
+    // it creates an actix Client and therefore needs to be an actix_rt::test, or the thread will
+    // panic because no actix system is running
+    #[actix_rt::test]
+    async fn test_format_eval_json_for_cromwell_success() {
         let conn = get_test_db_connection();
 
         let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
@@ -1708,8 +1717,11 @@ mod tests {
         assert_eq!(formatted_json, expected_json);
     }
 
-    #[test]
-    fn test_format_eval_json_for_cromwell_success_tag() {
+    // This test would not normally need to be async because it doesn't call any async methods, but
+    // it creates an actix Client and therefore needs to be an actix_rt::test, or the thread will
+    // panic because no actix system is running
+    #[actix_rt::test]
+    async fn test_format_eval_json_for_cromwell_success_tag() {
         let conn = get_test_db_connection();
 
         let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
@@ -1740,6 +1752,22 @@ mod tests {
         assert_eq!(formatted_json, expected_json);
     }
 
+    // This test would not normally need to be async because it doesn't call any async methods, but
+    // it creates an actix Client and therefore needs to be an actix_rt::test, or the thread will
+    // panic because no actix system is running
+    #[actix_rt::test]
+    async fn test_format_test_json_for_cromwell_failure() {
+        let conn = get_test_db_connection();
+
+        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
+
+        let test_json = json!(["test", "1"]);
+
+        let formatted_json = test_test_runner.format_test_json_for_cromwell(&conn, &test_json);
+
+        assert!(matches!(formatted_json, Err(Error::Json)));
+    }
+
     #[test]
     fn test_check_if_run_with_name_exists_true() {
         let conn = get_test_db_connection();
@@ -1760,19 +1788,6 @@ mod tests {
         let result = TestRunner::check_if_run_with_name_exists(&conn, "Kevin'stestrun").unwrap();
 
         assert!(!result);
-    }
-
-    #[test]
-    fn test_format_test_json_for_cromwell_failure() {
-        let conn = get_test_db_connection();
-
-        let test_test_runner: TestRunner = get_test_test_runner_building_enabled();
-
-        let test_json = json!(["test", "1"]);
-
-        let formatted_json = test_test_runner.format_test_json_for_cromwell(&conn, &test_json);
-
-        assert!(matches!(formatted_json, Err(Error::Json)));
     }
 
     #[test]
