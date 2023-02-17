@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 
 # following src dir layout according to
 # https://blog.ionelmc.ro/2014/05/25/python-packaging/#the-structure
-version = "0.6.3"
+version = "1.0.0"
 setup(
     name="carrot_cli",
     version=version,

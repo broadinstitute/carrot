@@ -1,6 +1,6 @@
 [package]
 name = "carrot"
-version = "0.6.3"
+version = "1.0.0"
 authors = ["Kevin Lydon <klydon@broadinstitute.org>"]
 edition = "2018"
 
