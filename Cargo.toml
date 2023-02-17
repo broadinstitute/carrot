@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 # Web framework
-actix-web = { version = "^3.3.2", features=["openssl"] }
+actix-web = { version = "3.3.2", features=["openssl"] }
 actix-rt = "1.0.0"
 actix-service = "1.0.5"
 actix-codec = "0.3.0"

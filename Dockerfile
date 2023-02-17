@@ -1,4 +1,4 @@
-FROM rust:1.59.0-buster as builder
+FROM rust:1.67.1-buster as builder
 WORKDIR /usr/src/carrot
 COPY . .
 RUN cargo install --path .
