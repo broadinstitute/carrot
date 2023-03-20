@@ -1,3 +1,4 @@
+tox
 requests
 coverage >= 4.5
 mockito

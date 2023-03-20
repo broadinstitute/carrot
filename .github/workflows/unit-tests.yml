@@ -1,0 +1,65 @@
+name: Unit Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  carrot-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:12.1
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install rustup
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.67.1
+      - name: Install java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'adopt'
+          java-version: 11
+      - name: Install womtool
+        run: |
+          sudo apt-get -y --no-install-recommends install wget;
+          wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/54/womtool-54.jar;
+      - name: Setup postgres db
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c 'create database test_framework_db_test;';
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c "create user test_framework_user with password 'test';";
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c "grant usage on schema public to test_framework_user;";
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c 'create extension if not exists "uuid-ossp";' test_framework_db_test;
+      - name: Setup git for testing git repo functionality
+        run: |
+          git config --global user.email "test@example.com";
+          git config --global user.name "Test";
+      - name: Run tests with cargo
+        uses: actions-rs/cargo@v1.0.1
+        with:
+          command: test
+          args: -- --test-threads=1
+  cli-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup python and requirements
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install requirements
+        working-directory: ./carrot_cli
+        run: pip install -r test-requirements.txt
+      - name: Tox unit tests
+        working-directory: ./carrot_cli
+        run: tox -e unit

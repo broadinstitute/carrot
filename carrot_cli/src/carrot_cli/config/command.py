@@ -3,6 +3,7 @@ import logging
 import click
 
 from . import manager
+from ..rest import config as config_rest
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,3 +45,8 @@ def set_var(variable, value):
 def get_config():
     """Prints the current config"""
     print(manager.get_config())
+
+@main.command(name="cromwell")
+def cromwell():
+    """Prints the address for the Cromwell server being used by the CARROT server at config.carrot_server_address"""
+    print(config_rest.get_cromwell_address())

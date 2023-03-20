@@ -1,6 +1,7 @@
 //! Contains modules for defining REST API mappings
 
 // Declare route modules as public so they can be accessed elsewhere
+pub mod config;
 pub mod pipeline;
 pub mod report;
 pub mod report_map;

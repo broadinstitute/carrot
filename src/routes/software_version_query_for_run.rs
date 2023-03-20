@@ -281,13 +281,14 @@ mod tests {
         let test_query_for_run = SoftwareVersionQueryForRun::Count {
             name: String::from("TestSoftware"),
             branch: None,
-            count: 1,
+            count: 2,
             tags_only: true
 
         };
 
         let strings = test_query_for_run.get_strings_for_query(&conn, &git_repo_manager).unwrap();
-        assert_eq!(strings, vec!["TestSoftware|first"]);
+        assert!(strings.contains(&String::from("TestSoftware|first")));
+        assert!(strings.contains(&String::from("TestSoftware|beginning")));
     }
 
     #[test]
