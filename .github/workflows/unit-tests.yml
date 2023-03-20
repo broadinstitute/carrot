@@ -32,11 +32,13 @@ jobs:
           sudo apt-get -y --no-install-recommends install wget;
           wget -P /usr/local/bin/womtool https://github.com/broadinstitute/cromwell/releases/download/54/womtool-54.jar;
       - name: Setup postgres db
+        env:
+          PGPASSWORD: postgres
         run: |
-          PGPASSWORD=postgres psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c 'create database test_framework_db_test;';
-          PGPASSWORD=postgres psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c "create user test_framework_user with password 'test';";
-          PGPASSWORD=postgres psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c "grant usage on schema public to test_framework_user;";
-          PGPASSWORD=postgres psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c 'create extension if not exists "uuid-ossp";' test_framework_db_test;
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c 'create database test_framework_db_test;';
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c "create user test_framework_user with password 'test';";
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c "grant usage on schema public to test_framework_user;";
+          psql -h localhost -p 5432 -v ON_ERROR_STOP=1 --username "postgres" -c 'create extension if not exists "uuid-ossp";' test_framework_db_test;
       - name: Setup git for testing git repo functionality
         run: |
           git config --global user.email "test@example.com";

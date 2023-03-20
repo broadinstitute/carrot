@@ -126,6 +126,7 @@ pub fn routes_config(
     enable_reporting: bool,
     enable_custom_image_builds: bool,
 ) {
+    routes::config::init_routes(cfg);
     routes::pipeline::init_routes(cfg);
     routes::template::init_routes(cfg);
     routes::test::init_routes(cfg);
