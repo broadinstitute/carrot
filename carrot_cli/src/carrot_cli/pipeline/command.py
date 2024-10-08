@@ -1,14 +1,10 @@
-import json
 import logging
 import sys
 
 import click
 
-from .. import command_util
-from .. import dependency_util
-from .. import email_util
-from .. import file_util
-from .. import software_version_query_util
+from .. import (command_util, dependency_util, email_util, file_util,
+                software_version_query_util)
 from ..config import manager as config
 from ..rest import pipelines, report_maps, reports, runs
 
@@ -29,9 +25,14 @@ def find_by_id(id):
 
 @main.command(name="find")
 @click.option("--pipeline_id", default=None, type=str, help="The pipeline's ID")
-@click.option("--name", default=None, type=str, help="The name of the pipeline, case-sensitive")
 @click.option(
-    "--description", default=None, type=str, help="The description of the pipeline, case-sensitive"
+    "--name", default=None, type=str, help="The name of the pipeline, case-sensitive"
+)
+@click.option(
+    "--description",
+    default=None,
+    type=str,
+    help="The description of the pipeline, case-sensitive",
 )
 @click.option(
     "--created_before",
@@ -101,7 +102,9 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the pipeline", required=True)
-@click.option("--description", default=None, type=str, help="The description of the pipeline")
+@click.option(
+    "--description", default=None, type=str, help="The description of the pipeline"
+)
 @click.option(
     "--created_by",
     default=None,
@@ -118,11 +121,15 @@ def create(name, description, created_by):
 @main.command(name="update")
 @click.argument("pipeline")
 @click.option("--name", default=None, type=str, help="The name of the pipeline")
-@click.option("--description", default=None, type=str, help="The description of the pipeline")
+@click.option(
+    "--description", default=None, type=str, help="The description of the pipeline"
+)
 def update(pipeline, name, description):
     """Update pipeline specified by PIPELINE (id or name) with the specified parameters"""
     # Process pipeline to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        pipeline, pipelines, "pipeline_id", "pipeline"
+    )
     print(pipelines.update(id, name, description))
 
 
@@ -139,13 +146,20 @@ def update(pipeline, name, description):
 def delete(pipeline, yes):
     """Delete a pipeline by its id or name, if the pipeline has no templates associated with it."""
     # Process pipeline to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        pipeline, pipelines, "pipeline_id", "pipeline"
+    )
     command_util.delete(id, yes, pipelines, "Pipeline")
 
 
 @main.command(name="find_runs")
 @click.argument("pipeline")
-@click.option("--run_group_id", default=None, type=str, help="The id of the run group to which the run belongs")
+@click.option(
+    "--run_group_id",
+    default=None,
+    type=str,
+    help="The id of the run group to which the run belongs",
+)
 @click.option("--name", default=None, type=str, help="The name of the run")
 @click.option(
     "--status",
@@ -195,9 +209,9 @@ def delete(pipeline, yes):
     default=None,
     type=str,
     help="The name of a software for which an image was built for the run.  Must be used in conjunction with either a "
-         "list of commits/tags (--commits_and_tags), a count of commits on a branch (--commit_count and optionally "
-         "--software_branch), or a date range for the commits (--commit_to and/or --commit_from and optionally "
-         "--software_branch)"
+    "list of commits/tags (--commits_and_tags), a count of commits on a branch (--commit_count and optionally "
+    "--software_branch), or a date range for the commits (--commit_to and/or --commit_from and optionally "
+    "--software_branch)",
 )
 @click.option(
     "--commit_or_tag",
@@ -205,40 +219,40 @@ def delete(pipeline, yes):
     type=str,
     multiple=True,
     help="A commit or tag corresponding to the software specified using --software_name for which an image was built "
-         "for the run.  Can be used multiple times to list multiple commits and/or tags."
+    "for the run.  Can be used multiple times to list multiple commits and/or tags.",
 )
 @click.option(
     "--commit_count",
     default=None,
     type=int,
     help="A count of the most recent commits (on --software_branch if specified) to the software specified using "
-         "--software_name for which an image was built for the run."
+    "--software_name for which an image was built for the run.",
 )
 @click.option(
     "--commit_from",
     default=None,
     type=str,
     help="A lower bound (in the format YYYY-MM-DDThh:mm:ss.ssssss) of a range of commits (on --software_branch if "
-         "specified) to the software specified using --software_name for which an image was built for the run."
+    "specified) to the software specified using --software_name for which an image was built for the run.",
 )
 @click.option(
     "--commit_to",
     default=None,
     type=str,
     help="An upper bound (in the format YYYY-MM-DDThh:mm:ss.ssssss) of a range of commits (on --software_branch if "
-         "specified) to the software specified using --software_name for which an image was built for the run."
+    "specified) to the software specified using --software_name for which an image was built for the run.",
 )
 @click.option(
     "--software_branch",
     default=None,
     type=str,
     help="A branch on the software specified using --software_name from which to retrieve commits using "
-         "--commit_count or --commit_from and/or --commit_to for which an image was built for the run."
+    "--commit_count or --commit_from and/or --commit_to for which an image was built for the run.",
 )
 @click.option(
     "--tags_only",
     is_flag=True,
-    help="If using --commit_count, specifies that the results should be the last n tags instead of the last n commits"
+    help="If using --commit_count, specifies that the results should be the last n tags instead of the last n commits",
 )
 @click.option(
     "--created_before",
@@ -252,7 +266,9 @@ def delete(pipeline, yes):
     type=str,
     help="Lower bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--created_by", default=None, type=str, help="Email of the creator of the run")
+@click.option(
+    "--created_by", default=None, type=str, help="Email of the creator of the run"
+)
 @click.option(
     "--finished_before",
     default=None,
@@ -290,7 +306,7 @@ def delete(pipeline, yes):
     "--zip_csv",
     "--instead_of_json_give_me_a_zipped_folder_with_csvs_in_it_please_and_thank_you",
     type=click.Path(),
-    help="Instead of writing results to stdout as JSON, writes as a zip of CSV files to the specified file"
+    help="Instead of writing results to stdout as JSON, writes as a zip of CSV files to the specified file",
 )
 def find_runs(
     pipeline,
@@ -318,7 +334,7 @@ def find_runs(
     sort,
     limit,
     offset,
-    zip_csv
+    zip_csv,
 ):
     """
     Retrieve runs related to the pipeline specified by PIPELINE (id or name), filtered by the
@@ -330,9 +346,19 @@ def find_runs(
     eval_input = file_util.read_file_to_json(eval_input)
     eval_options = file_util.read_file_to_json(eval_options)
     # Process pipeline to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        pipeline, pipelines, "pipeline_id", "pipeline"
+    )
     # Process software version query info into the proper format
-    software_versions = software_version_query_util.get_software_version_query(software_name, commit_or_tag, commit_count, commit_from, commit_to, software_branch, tags_only)
+    software_versions = software_version_query_util.get_software_version_query(
+        software_name,
+        commit_or_tag,
+        commit_count,
+        commit_from,
+        commit_to,
+        software_branch,
+        tags_only,
+    )
     print(
         runs.find(
             "pipelines",
@@ -355,7 +381,7 @@ def find_runs(
             sort,
             limit,
             offset,
-            csv=zip_csv
+            csv=zip_csv,
         )
     )
 
@@ -363,15 +389,25 @@ def find_runs(
 @main.command(name="create_report_for_runs")
 @click.argument("pipeline")
 @click.argument("report")
-@click.option("--created_by", default=None, type=str, help="Email of the creator of the report mapping (you)")
-@click.option("--run_group_id", default=None, type=str, help="The id of the run group to which the run belongs")
+@click.option(
+    "--created_by",
+    default=None,
+    type=str,
+    help="Email of the creator of the report mapping (you)",
+)
+@click.option(
+    "--run_group_id",
+    default=None,
+    type=str,
+    help="The id of the run group to which the run belongs",
+)
 @click.option("--name", default=None, type=str, help="The name of the run")
 @click.option(
     "--status",
     default=None,
     type=str,
     help="The status of the run. Status include: aborted, building, created, failed, "
-         "queued_in_cromwell, running, starting, submitted, succeeded, waiting_for_queue_space",
+    "queued_in_cromwell, running, starting, submitted, succeeded, waiting_for_queue_space",
 )
 @click.option(
     "--test_input",
@@ -414,9 +450,9 @@ def find_runs(
     default=None,
     type=str,
     help="The name of a software for which an image was built for the run.  Must be used in conjunction with either a "
-         "list of commits/tags (--commits_and_tags), a count of commits on a branch (--commit_count and optionally "
-         "--software_branch), or a date range for the commits (--commit_to and/or --commit_from and optionally "
-         "--software_branch)"
+    "list of commits/tags (--commits_and_tags), a count of commits on a branch (--commit_count and optionally "
+    "--software_branch), or a date range for the commits (--commit_to and/or --commit_from and optionally "
+    "--software_branch)",
 )
 @click.option(
     "--commit_or_tag",
@@ -424,40 +460,40 @@ def find_runs(
     type=str,
     multiple=True,
     help="A commit or tag corresponding to the software specified using --software_name for which an image was built "
-         "for the run.  Can be used multiple times to list multiple commits and/or tags."
+    "for the run.  Can be used multiple times to list multiple commits and/or tags.",
 )
 @click.option(
     "--commit_count",
     default=None,
     type=int,
     help="A count of the most recent commits (on --software_branch if specified) to the software specified using "
-         "--software_name for which an image was built for the run."
+    "--software_name for which an image was built for the run.",
 )
 @click.option(
     "--commit_from",
     default=None,
     type=str,
     help="A lower bound (in the format YYYY-MM-DDThh:mm:ss.ssssss) of a range of commits (on --software_branch if "
-         "specified) to the software specified using --software_name for which an image was built for the run."
+    "specified) to the software specified using --software_name for which an image was built for the run.",
 )
 @click.option(
     "--commit_to",
     default=None,
     type=str,
     help="An upper bound (in the format YYYY-MM-DDThh:mm:ss.ssssss) of a range of commits (on --software_branch if "
-         "specified) to the software specified using --software_name for which an image was built for the run."
+    "specified) to the software specified using --software_name for which an image was built for the run.",
 )
 @click.option(
     "--software_branch",
     default=None,
     type=str,
     help="A branch on the software specified using --software_name from which to retrieve commits using "
-         "--commit_count or --commit_from and/or --commit_to for which an image was built for the run."
+    "--commit_count or --commit_from and/or --commit_to for which an image was built for the run.",
 )
 @click.option(
     "--tags_only",
     is_flag=True,
-    help="If using --commit_count, specifies that the results should be the last n tags instead of the last n commits"
+    help="If using --commit_count, specifies that the results should be the last n tags instead of the last n commits",
 )
 @click.option(
     "--created_before",
@@ -471,7 +507,9 @@ def find_runs(
     type=str,
     help="Lower bound for run's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--run_created_by", default=None, type=str, help="Email of the creator of the run")
+@click.option(
+    "--run_created_by", default=None, type=str, help="Email of the creator of the run"
+)
 @click.option(
     "--finished_before",
     default=None,
@@ -489,7 +527,7 @@ def find_runs(
     default=None,
     type=str,
     help="A comma-separated list of sort keys, enclosed in asc() for ascending or desc() for "
-         "descending.  Ex. asc(status),desc(created_at)",
+    "descending.  Ex. asc(status),desc(created_at)",
 )
 @click.option(
     "--limit",
@@ -502,37 +540,37 @@ def find_runs(
     default=0,
     show_default=True,
     help="The offset to start at within the list of records to return.  Ex. Sorting by "
-         "asc(created_at) with offset=1 would return records sorted by when they were created "
-         "starting from the second record to be created",
+    "asc(created_at) with offset=1 would return records sorted by when they were created "
+    "starting from the second record to be created",
 )
 def create_report_for_runs(
-        pipeline,
-        report,
-        created_by,
-        run_group_id,
-        name,
-        status,
-        test_input,
-        test_options,
-        eval_input,
-        eval_options,
-        test_cromwell_job_id,
-        eval_cromwell_job_id,
-        software_name,
-        commit_or_tag,
-        commit_count,
-        commit_from,
-        commit_to,
-        software_branch,
-        tags_only,
-        created_before,
-        created_after,
-        run_created_by,
-        finished_before,
-        finished_after,
-        sort,
-        limit,
-        offset
+    pipeline,
+    report,
+    created_by,
+    run_group_id,
+    name,
+    status,
+    test_input,
+    test_options,
+    eval_input,
+    eval_options,
+    test_cromwell_job_id,
+    eval_cromwell_job_id,
+    software_name,
+    commit_or_tag,
+    commit_count,
+    commit_from,
+    commit_to,
+    software_branch,
+    tags_only,
+    created_before,
+    created_after,
+    run_created_by,
+    finished_before,
+    finished_after,
+    sort,
+    limit,
+    offset,
 ):
     """
     Query for runs of the pipeline specified by PIPELINE (id or name), filtered by the specified parameters, then
@@ -541,16 +579,28 @@ def create_report_for_runs(
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
     # Process pipeline to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        pipeline, pipelines, "pipeline_id", "pipeline"
+    )
     # Same for report
-    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
+    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        report, reports, "report_id", "report"
+    )
     # Load data from files for test_input, test_options, eval_input and eval_options, if set
     test_input = file_util.read_file_to_json(test_input)
     test_options = file_util.read_file_to_json(test_options)
     eval_input = file_util.read_file_to_json(eval_input)
     eval_options = file_util.read_file_to_json(eval_options)
     # Process software version query info into the proper format
-    software_versions = software_version_query_util.get_software_version_query(software_name, commit_or_tag, commit_count, commit_from, commit_to, software_branch, tags_only)
+    software_versions = software_version_query_util.get_software_version_query(
+        software_name,
+        commit_or_tag,
+        commit_count,
+        commit_from,
+        commit_to,
+        software_branch,
+        tags_only,
+    )
     print(
         report_maps.create_map_from_run_query(
             report_id,
@@ -574,7 +624,7 @@ def create_report_for_runs(
             finished_after,
             sort,
             limit,
-            offset
+            offset,
         )
     )
 
@@ -603,7 +653,9 @@ def subscribe(pipeline, email):
             )
             sys.exit(1)
     # Process pipeline to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        pipeline, pipelines, "pipeline_id", "pipeline"
+    )
     print(pipelines.subscribe(id, email))
 
 
@@ -631,5 +683,7 @@ def unsubscribe(pipeline, email):
             )
             sys.exit(1)
     # Process pipeline to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(pipeline, pipelines, "pipeline_id", "pipeline")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        pipeline, pipelines, "pipeline_id", "pipeline"
+    )
     print(pipelines.unsubscribe(id, email))

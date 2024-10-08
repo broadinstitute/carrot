@@ -29,6 +29,7 @@ def read_file_to_json(filename):
     else:
         return None
 
+
 def write_data_to_file(data, filename):
     """
     Writes data to the file specified by filename
@@ -43,4 +44,3 @@ def write_data_to_file(data, filename):
             f"Encountered the following error while trying to write data to file {filename}: {e}"
         )
         sys.exit(1)
-

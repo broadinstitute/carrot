@@ -1,10 +1,10 @@
 import json
 import logging
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
 from carrot_cli.rest import report_maps, reports, runs, templates, tests
@@ -273,8 +273,7 @@ def find_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(tests).find(
@@ -334,7 +333,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
-                None
+                None,
             ],
             "return": json.dumps(
                 {
@@ -362,7 +361,7 @@ def test_find(find_data):
                 "--created_by",
                 "adora@example.com",
                 "--copy",
-                "550e8400-e29b-41d4-a716-446655440000"
+                "550e8400-e29b-41d4-a716-446655440000",
             ],
             "params": [
                 "Sword of Protection test2",
@@ -373,7 +372,7 @@ def test_find(find_data):
                 None,
                 None,
                 "adora@example.com",
-                "550e8400-e29b-41d4-a716-446655440000"
+                "550e8400-e29b-41d4-a716-446655440000",
             ],
             "return": json.dumps(
                 {
@@ -422,7 +421,7 @@ def test_find(find_data):
                 {"in_output_filename": "test_greeting.txt"},
                 {"option": "value"},
                 "adora@example.com",
-                None
+                None,
             ],
             "from_name": {
                 "name": "Sword of Protection template",
@@ -497,8 +496,7 @@ def create_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -608,7 +606,9 @@ def test_create(create_data, caplog):
                             "description": "",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
                             "test_option_defaults": {"option": "other_value"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "eval_option_defaults": {"option": "value"},
                             "name": "Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
@@ -653,8 +653,7 @@ def update_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -726,7 +725,9 @@ def test_update(update_data):
                             "created_by": "adora@example.com",
                             "description": "This test replaced the broken one",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "name": "New Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                             "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -851,8 +852,7 @@ def delete_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(tests).delete(request.param["id"]).thenReturn(request.param["return"])
@@ -969,7 +969,9 @@ def test_delete(delete_data, caplog):
                             "created_by": "adora@example.com",
                             "description": "This test replaced the broken one",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "name": "New Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                             "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -1074,8 +1076,7 @@ def run_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     if len(request.param["params"]) > 0:
@@ -1176,7 +1177,10 @@ def test_run(run_data, caplog):
                         "created_at": "2020-09-16T18:48:06.371563",
                         "finished_at": "2020-09-16T18:58:06.371563",
                         "created_by": "glimmer@example.com",
-                        "test_input": {"in_mother": "Angella", "docker": "image_build:test_software|1.1.0"},
+                        "test_input": {
+                            "in_mother": "Angella",
+                            "docker": "image_build:test_software|1.1.0",
+                        },
                         "test_options": {"option": "other_value"},
                         "eval_input": {"in_friend": "Bow"},
                         "eval_options": {"option": "value"},
@@ -1252,7 +1256,12 @@ def test_run(run_data, caplog):
                 {"option": "value"},
                 "d9855002-6b71-429c-a4de-8e90222488cd",
                 "03958293-6b71-429c-a4de-8e90222488cd",
-                {"name": "test_software", "count": 1, "branch": "master", "tags_only": True},
+                {
+                    "name": "test_software",
+                    "count": 1,
+                    "branch": "master",
+                    "tags_only": True,
+                },
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
                 "glimmer@example.com",
@@ -1269,7 +1278,10 @@ def test_run(run_data, caplog):
                         "created_at": "2020-09-16T18:48:06.371563",
                         "finished_at": "2020-09-16T18:58:06.371563",
                         "created_by": "glimmer@example.com",
-                        "test_input": {"in_mother": "Angella", "docker": "image_build:test_software|1.1.0"},
+                        "test_input": {
+                            "in_mother": "Angella",
+                            "docker": "image_build:test_software|1.1.0",
+                        },
                         "test_options": {"option": "other_value"},
                         "eval_input": {"in_friend": "Bow"},
                         "eval_options": {"option": "value"},
@@ -1327,7 +1339,7 @@ def test_run(run_data, caplog):
                 "--offset",
                 0,
                 "--zip_csv",
-                "csvs.zip"
+                "csvs.zip",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -1413,7 +1425,7 @@ def test_run(run_data, caplog):
                 "asc(name)",
                 1,
                 0,
-                None
+                None,
             ],
             "from_name": {
                 "name": "New Sword of Protection test",
@@ -1424,7 +1436,9 @@ def test_run(run_data, caplog):
                             "created_by": "adora@example.com",
                             "description": "This test replaced the broken one",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "name": "New Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                             "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -1512,8 +1526,7 @@ def find_runs_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     if len(request.param["params"]) > 0:
@@ -1625,7 +1638,7 @@ def test_find_runs(find_runs_data, caplog):
                 "2020-09-00T00:00:00.000000",
                 "asc(name)",
                 1,
-                0
+                0,
             ],
             "return": json.dumps(
                 {
@@ -1707,7 +1720,12 @@ def test_find_runs(find_runs_data, caplog):
                 {"option": "value"},
                 "d9855002-6b71-429c-a4de-8e90222488cd",
                 "03958293-6b71-429c-a4de-8e90222488cd",
-                {"name": "test_software", "count": 1, "branch": "master", "tags_only": True},
+                {
+                    "name": "test_software",
+                    "count": 1,
+                    "branch": "master",
+                    "tags_only": True,
+                },
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
                 "glimmer@example.com",
@@ -1715,7 +1733,7 @@ def test_find_runs(find_runs_data, caplog):
                 "2020-09-00T00:00:00.000000",
                 "asc(name)",
                 1,
-                0
+                0,
             ],
             "return": json.dumps(
                 {
@@ -1798,7 +1816,7 @@ def test_find_runs(find_runs_data, caplog):
                 "2020-09-00T00:00:00.000000",
                 "asc(name)",
                 1,
-                0
+                0,
             ],
             "from_name": {
                 "name": "Sword of Protection test",
@@ -1809,7 +1827,9 @@ def test_find_runs(find_runs_data, caplog):
                             "created_by": "adora@example.com",
                             "description": "This test replaced the broken one",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "name": "Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                             "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -1817,7 +1837,7 @@ def test_find_runs(find_runs_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "report_from_name": {
                 "name": "Sword of Protection report",
@@ -1832,7 +1852,10 @@ def test_find_runs(find_runs_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -1913,7 +1936,7 @@ def test_find_runs(find_runs_data, caplog):
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
                 "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
                 "--created_by",
-                "adora@example.com"
+                "adora@example.com",
             ],
             "params": [
                 "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
@@ -1937,7 +1960,7 @@ def test_find_runs(find_runs_data, caplog):
                 None,
                 None,
                 20,
-                0
+                0,
             ],
             "return": json.dumps(
                 {
@@ -1972,13 +1995,11 @@ def create_report_for_runs_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     if "report_from_name" in request.param:
         mockito.when(reports).find(
-            name=request.param["report_from_name"]["name"],
-            limit=2
+            name=request.param["report_from_name"]["name"], limit=2
         ).thenReturn(request.param["report_from_name"]["return"])
     # Mock up request response
     if len(request.param["params"]) > 0:
@@ -2059,7 +2080,9 @@ def test_create_report_for_runs(create_report_for_runs_data, caplog):
                             "created_by": "adora@example.com",
                             "description": "This test replaced the broken one",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "name": "New Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                             "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -2128,8 +2151,7 @@ def subscribe_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(tests).subscribe(
@@ -2177,7 +2199,9 @@ def test_subscribe(subscribe_data):
                             "created_by": "adora@example.com",
                             "description": "This test replaced the broken one",
                             "test_input_defaults": {"in_greeted": "Cool Person"},
-                            "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                            "eval_input_defaults": {
+                                "in_output_filename": "test_greeting.txt"
+                            },
                             "name": "New Sword of Protection test",
                             "template_id": "4d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                             "test_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -2230,8 +2254,7 @@ def unsubscribe_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(tests).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(tests).unsubscribe(

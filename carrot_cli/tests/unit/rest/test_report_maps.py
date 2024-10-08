@@ -1,9 +1,10 @@
+import copy
 import json
 
-import copy
 import mockito
 import pytest
-from carrot_cli.rest import request_handler, report_maps
+
+from carrot_cli.rest import report_maps, request_handler
 
 
 @pytest.fixture(
@@ -97,7 +98,10 @@ def test_create_map(create_map_data):
                 ("eval_options", None),
                 ("test_cromwell_job_id", None),
                 ("eval_cromwell_job_id", None),
-                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                (
+                    "software_versions",
+                    {"name": "test_software", "commits_and_tags": ["1.1.0"]},
+                ),
                 ("created_before", None),
                 ("created_after", None),
                 ("created_by", None),
@@ -138,7 +142,10 @@ def test_create_map(create_map_data):
                 ("eval_options", None),
                 ("test_cromwell_job_id", None),
                 ("eval_cromwell_job_id", None),
-                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                (
+                    "software_versions",
+                    {"name": "test_software", "commits_and_tags": ["1.1.0"]},
+                ),
                 ("created_before", None),
                 ("created_after", None),
                 ("created_by", None),
@@ -168,7 +175,10 @@ def create_map_from_run_query_data(request):
         ("created_by", request.param["created_by"]),
     ]
     params_for_mock = copy.deepcopy(request.param["params"])
-    params_for_mock[9] = ("software_versions", json.dumps(params_for_mock[9][1]) if params_for_mock[9][1] else None)
+    params_for_mock[9] = (
+        "software_versions",
+        json.dumps(params_for_mock[9][1]) if params_for_mock[9][1] else None,
+    )
     mockito.when(request_handler).create_report_map_from_run_query(
         request.param["report_id"],
         request.param["parent_entity"],
@@ -276,7 +286,10 @@ def find_maps_data(request):
     mockito.when(request_handler).find_maps(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).find_maps(
-        request.param["entity"], request.param["entity_id"], "reports", request.param["params"]
+        request.param["entity"],
+        request.param["entity_id"],
+        "reports",
+        request.param["params"],
     ).thenReturn(request.param["return"])
     return request.param
 
@@ -344,14 +357,19 @@ def find_map_by_ids_data(request):
     mockito.when(request_handler).find_map_by_ids(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).find_map_by_ids(
-        request.param["entity"], request.param["entity_id"], "reports", request.param["report_id"]
+        request.param["entity"],
+        request.param["entity_id"],
+        "reports",
+        request.param["report_id"],
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find_maps_by_id(find_map_by_ids_data):
     report = report_maps.find_map_by_ids(
-        find_map_by_ids_data["entity"], find_map_by_ids_data["entity_id"], find_map_by_ids_data["report_id"]
+        find_map_by_ids_data["entity"],
+        find_map_by_ids_data["entity_id"],
+        find_map_by_ids_data["report_id"],
     )
     assert report == find_map_by_ids_data["return"]
 
@@ -387,13 +405,18 @@ def delete_map_by_ids_data(request):
     mockito.when(request_handler).delete_map_by_ids(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).delete_map_by_ids(
-        request.param["entity"], request.param["entity_id"], "reports", request.param["report_id"]
+        request.param["entity"],
+        request.param["entity_id"],
+        "reports",
+        request.param["report_id"],
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_delete_maps_by_id(delete_map_by_ids_data):
     report = report_maps.delete_map_by_ids(
-        delete_map_by_ids_data["entity"], delete_map_by_ids_data["entity_id"], delete_map_by_ids_data["report_id"]
+        delete_map_by_ids_data["entity"],
+        delete_map_by_ids_data["entity_id"],
+        delete_map_by_ids_data["report_id"],
     )
     assert report == delete_map_by_ids_data["return"]

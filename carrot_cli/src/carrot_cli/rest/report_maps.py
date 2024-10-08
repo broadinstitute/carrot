@@ -21,6 +21,7 @@ def create_map(entity, entity_id, report_id, created_by, delete_failed):
         [("delete_failed", delete_failed)],
     )
 
+
 def create_map_from_run_query(
     report_id,
     created_by,
@@ -57,7 +58,10 @@ def create_map_from_run_query(
         ("eval_options", eval_options),
         ("test_cromwell_job_id", test_cromwell_job_id),
         ("eval_cromwell_job_id", eval_cromwell_job_id),
-        ("software_versions", json.dumps(software_versions) if software_versions else None),
+        (
+            "software_versions",
+            json.dumps(software_versions) if software_versions else None,
+        ),
         ("created_before", created_before),
         ("created_after", created_after),
         ("created_by", run_created_by),
@@ -67,9 +71,7 @@ def create_map_from_run_query(
         ("limit", limit),
         ("offset", offset),
     ]
-    body_params = [
-        ("created_by", created_by)
-    ]
+    body_params = [("created_by", created_by)]
     return request_handler.create_report_map_from_run_query(
         report_id, parent_entity, parent_entity_id, body_params, query_params
     )

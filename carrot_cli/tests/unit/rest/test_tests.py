@@ -2,6 +2,7 @@ import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, tests
 
 
@@ -247,9 +248,9 @@ def create_data(request):
     query_params = None
     if request.param["copy"] is not None:
         query_params = [("copy", request.param["copy"])]
-    mockito.when(request_handler).create("tests", request.param["params"], query_params=query_params).thenReturn(
-        request.param["return"]
-    )
+    mockito.when(request_handler).create(
+        "tests", request.param["params"], query_params=query_params
+    ).thenReturn(request.param["return"])
     return request.param
 
 
@@ -278,7 +279,7 @@ def test_create(create_data):
                 ("test_input_defaults", {"in_nemesis?": "She-Ra"}),
                 ("test_option_defaults", {"option": "other_value"}),
                 ("eval_input_defaults", {"in_mother_figure": "Shadow Weaver"}),
-                ("eval_option_defaults", {"option": "value"})
+                ("eval_option_defaults", {"option": "value"}),
             ],
             "return": json.dumps(
                 {

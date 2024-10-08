@@ -22,16 +22,16 @@ def find_by_id(id):
 
 
 @main.command(name="find")
-@click.option(
-    "--subscription_id", default=None, type=str, help="The subscription's ID"
-)
+@click.option("--subscription_id", default=None, type=str, help="The subscription's ID")
 @click.option(
     "--entity_type",
     default=None,
     type=str,
     help="The type of the entity subscribed to (pipeline, template, or test)",
 )
-@click.option("--entity", "--entity_id", default=None, type=str, help="The entity's ID or name")
+@click.option(
+    "--entity", "--entity_id", default=None, type=str, help="The entity's ID or name"
+)
 @click.option(
     "--created_before",
     default=None,
@@ -44,7 +44,9 @@ def find_by_id(id):
     type=str,
     help="Lower bound for subscription's created_at value, in the format YYYY-MM-DDThh:mm:ss.ssssss",
 )
-@click.option("--email", default=None, type=str, help="Email of the subscriber, case sensitive")
+@click.option(
+    "--email", default=None, type=str, help="Email of the subscriber, case sensitive"
+)
 @click.option(
     "--sort",
     default=None,
@@ -80,13 +82,21 @@ def find(
     """Retrieve subscriptions filtered to match the specified parameters"""
     # Process entity in case it's a name
     if entity_type.lower() == "pipeline":
-        entity_id = dependency_util.get_id_from_id_or_name_and_handle_error(entity, pipelines, "pipeline_id", "pipeline")
+        entity_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+            entity, pipelines, "pipeline_id", "pipeline"
+        )
     elif entity_type.lower() == "template":
-        entity_id = dependency_util.get_id_from_id_or_name_and_handle_error(entity, templates, "template_id", "template")
+        entity_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+            entity, templates, "template_id", "template"
+        )
     elif entity_type.lower() == "test":
-        entity_id = dependency_util.get_id_from_id_or_name_and_handle_error(entity, tests, "test_id", "test")
+        entity_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+            entity, tests, "test_id", "test"
+        )
     else:
-        LOGGER.error("Invalid value for entity_type.  Must be pipeline, template, or test")
+        LOGGER.error(
+            "Invalid value for entity_type.  Must be pipeline, template, or test"
+        )
         sys.exit(1)
 
     print(

@@ -4,6 +4,7 @@ import tempfile
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, runs
 
 
@@ -52,7 +53,7 @@ def unstub():
             "id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
             "csv": True,
             "file_contents": b"randombytesrepresentingazip",
-            "return": "Success!"
+            "return": "Success!",
         },
     ]
 )
@@ -65,17 +66,15 @@ def find_by_id_data(request):
             "runs",
             request.param["id"],
             params=[("csv", str(request.param["csv"]).lower())],
-            expected_format=request_handler.ResponseFormat.BYTES
-        ).thenReturn(
-            request.param["file_contents"]
-        )
+            expected_format=request_handler.ResponseFormat.BYTES,
+        ).thenReturn(request.param["file_contents"])
         # Create a temp file that we'll write to
         request.param["file"] = tempfile.NamedTemporaryFile()
         request.param["csv"] = request.param["file"].name
     else:
-        mockito.when(request_handler).find_by_id("runs", request.param["id"]).thenReturn(
-            request.param["return"]
-        )
+        mockito.when(request_handler).find_by_id(
+            "runs", request.param["id"]
+        ).thenReturn(request.param["return"])
     return request.param
 
 
@@ -153,7 +152,10 @@ def test_find_by_id(find_by_id_data):
                 ("eval_options", None),
                 ("test_cromwell_job_id", None),
                 ("eval_cromwell_job_id", None),
-                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                (
+                    "software_versions",
+                    {"name": "test_software", "commits_and_tags": ["1.1.0"]},
+                ),
                 ("created_before", None),
                 ("created_after", None),
                 ("created_by", None),
@@ -170,7 +172,10 @@ def test_find_by_id(find_by_id_data):
                         "created_at": "2020-09-16T18:48:06.371563",
                         "finished_at": None,
                         "created_by": "glimmer@example.com",
-                        "test_input": {"in_daughter": "Glimmer", "docker": "image_build:test_software|1.1.0"},
+                        "test_input": {
+                            "in_daughter": "Glimmer",
+                            "docker": "image_build:test_software|1.1.0",
+                        },
                         "test_options": {"option": "other_value"},
                         "eval_input": {"in_wife": "Angella"},
                         "eval_options": {"option": "value"},
@@ -210,7 +215,7 @@ def test_find_by_id(find_by_id_data):
                 ("sort", None),
                 ("limit", None),
                 ("offset", None),
-                ("csv", False)
+                ("csv", False),
             ],
             "return": json.dumps(
                 {
@@ -246,8 +251,8 @@ def test_find_by_id(find_by_id_data):
                 ("offset", None),
                 ("csv", True),
             ],
-            "file_contents": b'randombytespresentingazip',
-            "return": "Success!"
+            "file_contents": b"randombytespresentingazip",
+            "return": "Success!",
         },
     ]
 )
@@ -257,7 +262,10 @@ def find_data(request):
     # Mock up request response
     # Create a copy of the params so we can pass it to the mock and modify the original
     params_for_mock = copy.deepcopy(request.param["params"])
-    params_for_mock[9] = ("software_versions", json.dumps(params_for_mock[9][1]) if params_for_mock[9][1] else None)
+    params_for_mock[9] = (
+        "software_versions",
+        json.dumps(params_for_mock[9][1]) if params_for_mock[9][1] else None,
+    )
     # If csv param is true, we have to create a temp file and include expected format in the function call
     if request.param["params"][18][1]:
         params_for_mock[18] = ("csv", "true")
@@ -265,7 +273,7 @@ def find_data(request):
             request.param["parent_entity"],
             request.param["parent_entity_id"],
             params_for_mock,
-            expected_format=request_handler.ResponseFormat.BYTES
+            expected_format=request_handler.ResponseFormat.BYTES,
         ).thenReturn(request.param["file_contents"])
         # Create a temp file that we'll write to
         request.param["file"] = tempfile.NamedTemporaryFile()

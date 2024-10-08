@@ -1,6 +1,5 @@
 import logging
 
-from .. import config
 from . import request_handler
 
 LOGGER = logging.getLogger(__name__)

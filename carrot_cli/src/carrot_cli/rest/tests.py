@@ -56,7 +56,7 @@ def create(
     eval_input_defaults,
     eval_option_defaults,
     created_by,
-    copy
+    copy,
 ):
     """Submits a request to CARROT's tests create mapping"""
     # Create parameter list
@@ -84,7 +84,7 @@ def update(
     test_input_defaults,
     test_option_defaults,
     eval_input_defaults,
-    eval_option_defaults
+    eval_option_defaults,
 ):
     """Submits a request to CARROT's tests update mapping"""
     # Create parameter list

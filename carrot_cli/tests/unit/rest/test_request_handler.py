@@ -1,10 +1,9 @@
 import json
-import logging
-
-import requests
 
 import mockito
 import pytest
+import requests
+
 from carrot_cli.config import manager as config
 from carrot_cli.rest import request_handler
 
@@ -87,9 +86,12 @@ def find_by_id_data(request):
         request.param["entity"],
         request.param["id"],
     )
-    mockito.when(request_handler).send_request("GET", address, params=request.param["params"], expected_format=request.param["expected_format"]).thenReturn(
-        request.param["return"]
-    )
+    mockito.when(request_handler).send_request(
+        "GET",
+        address,
+        params=request.param["params"],
+        expected_format=request.param["expected_format"],
+    ).thenReturn(request.param["return"])
     return request.param
 
 
@@ -98,7 +100,7 @@ def test_find_by_id(find_by_id_data):
         find_by_id_data["entity"],
         find_by_id_data["id"],
         params=find_by_id_data["params"],
-        expected_format=find_by_id_data["expected_format"]
+        expected_format=find_by_id_data["expected_format"],
     )
     assert result == find_by_id_data["return"]
 
@@ -155,7 +157,9 @@ def find_data(request):
 
 
 def test_find(find_data):
-    result = request_handler.find(find_data["entity"], find_data["params"], find_data["expected_format"])
+    result = request_handler.find(
+        find_data["entity"], find_data["params"], find_data["expected_format"]
+    )
     assert result == find_data["return"]
 
 
@@ -189,9 +193,7 @@ def test_find(find_data):
                 ("template_id", "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8"),
                 ("created_by", "hordak@example.com"),
             ],
-            "query_params": [
-                ("copy", "cd987859-06fe-4b1a-9e96-47d4f36bf819")
-            ],
+            "query_params": [("copy", "cd987859-06fe-4b1a-9e96-47d4f36bf819")],
             "return": json.dumps(
                 {
                     "created_at": "2020-09-16T18:48:06.371563",
@@ -224,14 +226,18 @@ def create_data(request):
     address = "http://%s/api/v1/%s" % ("example.com", request.param["entity"])
     # Get params converted to dict
     params = dict(request.param["params"])
-    mockito.when(request_handler).send_request("POST", address, json=params, params=request.param["query_params"]).thenReturn(
-        request.param["return"]
-    )
+    mockito.when(request_handler).send_request(
+        "POST", address, json=params, params=request.param["query_params"]
+    ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_create(create_data):
-    result = request_handler.create(create_data["entity"], create_data["params"], query_params=create_data["query_params"])
+    result = request_handler.create(
+        create_data["entity"],
+        create_data["params"],
+        query_params=create_data["query_params"],
+    )
     assert result == create_data["return"]
 
 
@@ -575,7 +581,7 @@ def test_run(run_data):
             "id": "5fad47be-0d23-4679-8d8c-deff717d5419",
             "params": [("name", "Entrapta Test Run"), ("csv", "true")],
             "expected_format": request_handler.ResponseFormat.BYTES,
-            "return": b'randombytesthatrepresentazip',
+            "return": b"randombytesthatrepresentazip",
         },
     ]
 )
@@ -600,7 +606,10 @@ def find_runs_data(request):
 
 def test_find_runs(find_runs_data):
     result = request_handler.find_runs(
-        find_runs_data["entity"], find_runs_data["id"], find_runs_data["params"], find_runs_data["expected_format"]
+        find_runs_data["entity"],
+        find_runs_data["id"],
+        find_runs_data["params"],
+        find_runs_data["expected_format"],
     )
     assert result == find_runs_data["return"]
 
@@ -700,7 +709,10 @@ def test_create_map(create_map_data):
                 ("eval_options", None),
                 ("test_cromwell_job_id", None),
                 ("eval_cromwell_job_id", None),
-                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                (
+                    "software_versions",
+                    {"name": "test_software", "commits_and_tags": ["1.1.0"]},
+                ),
                 ("created_before", None),
                 ("created_after", None),
                 ("created_by", None),
@@ -743,7 +755,10 @@ def test_create_map(create_map_data):
                 ("eval_options", None),
                 ("test_cromwell_job_id", None),
                 ("eval_cromwell_job_id", None),
-                ("software_versions", {"name": "test_software", "commits_and_tags": ["1.1.0"]}),
+                (
+                    "software_versions",
+                    {"name": "test_software", "commits_and_tags": ["1.1.0"]},
+                ),
                 ("created_before", None),
                 ("created_after", None),
                 ("created_by", None),
@@ -780,7 +795,9 @@ def create_report_map_from_run_query_data(request):
     # Get body_params converted to dict
     body_params = dict(request.param["body_params"])
     # Get params filtered
-    query_params = list(filter(lambda param: param[1] is not None, request.param["query_params"]))
+    query_params = list(
+        filter(lambda param: param[1] is not None, request.param["query_params"])
+    )
     mockito.when(request_handler).send_request(
         "POST", address, json=body_params, params=query_params
     ).thenReturn(request.param["return"])
@@ -854,7 +871,7 @@ def create_map_with_other_thing_data(request):
         request.param["entity1_id"],
         request.param["entity2"],
         request.param["entity2_id"],
-        request.param["other_thing"]
+        request.param["other_thing"],
     )
     # Get params converted to dict
     params = dict(request.param["params"])
@@ -991,7 +1008,7 @@ def find_map_by_ids_and_other_thing_data(request):
         request.param["entity1_id"],
         request.param["entity2"],
         request.param["entity2_id"],
-        request.param["other_thing"]
+        request.param["other_thing"],
     )
     mockito.when(request_handler).send_request("GET", address).thenReturn(
         request.param["return"]
@@ -1109,7 +1126,7 @@ def delete_map_by_ids_and_other_thing_data(request):
         request.param["entity1_id"],
         request.param["entity2"],
         request.param["entity2_id"],
-        request.param["other_thing"]
+        request.param["other_thing"],
     )
     mockito.when(request_handler).send_request("DELETE", address).thenReturn(
         request.param["return"]
@@ -1123,10 +1140,9 @@ def test_delete_map_by_ids_and_other_thing(delete_map_by_ids_and_other_thing_dat
         delete_map_by_ids_and_other_thing_data["entity1_id"],
         delete_map_by_ids_and_other_thing_data["entity2"],
         delete_map_by_ids_and_other_thing_data["entity2_id"],
-        delete_map_by_ids_and_other_thing_data["other_thing"]
+        delete_map_by_ids_and_other_thing_data["other_thing"],
     )
     assert result == delete_map_by_ids_and_other_thing_data["return"]
-
 
 
 @pytest.fixture(
@@ -1218,28 +1234,28 @@ def test_find_maps(find_maps_data):
         {
             "exception": requests.ConnectionError,
             "log": "Encountered a connection error. Enable verbose logging (-v) for more info",
-            "exit": True
+            "exit": True,
         },
         {
             "exception": requests.URLRequired,
             "log": "Invalid URL. Enable verbose logging (-v) for more info",
-            "exit": True
+            "exit": True,
         },
         {
             "exception": requests.Timeout,
             "log": "Request timed out. Enable verbose logging (-v) for more info",
-            "exit": True
+            "exit": True,
         },
         {
             "exception": requests.TooManyRedirects,
             "log": "Too many redirects. Enable verbose logging (-v) for more info",
-            "exit": True
+            "exit": True,
         },
         {
             "status_code": 400,
             "text": json.dumps({"Body": "", "Status": 400}),
             "log": json.dumps({"Body": "", "Status": 400}, indent=4, sort_keys=True),
-            "exit": True
+            "exit": True,
         },
         {
             "status_code": 200,
@@ -1247,7 +1263,7 @@ def test_find_maps(find_maps_data):
             "return": json.dumps(
                 {"name": "test_name", "test_id": "123456789"}, indent=4, sort_keys=True
             ),
-            "exit": False
+            "exit": False,
         },
     ]
 )
@@ -1260,7 +1276,12 @@ def send_request_data(request):
     # For exceptions, if we get a request, raise the exception
     if "exception" in request.param:
         mockito.when(requests).request(
-            "POST", "http://example.com/api/v1/pipelines", params=params, json=json_body, data=None, files=None
+            "POST",
+            "http://example.com/api/v1/pipelines",
+            params=params,
+            json=json_body,
+            data=None,
+            files=None,
         ).thenRaise(request.param["exception"])
     # Otherwise, set it to return the specified response
     else:
@@ -1272,7 +1293,12 @@ def send_request_data(request):
         if request.param["text"] is not None:
             mockito.when(response).json().thenReturn(json.loads(request.param["text"]))
         mockito.when(requests).request(
-            "POST", "http://example.com/api/v1/pipelines", params=params, json=json_body, data=None, files=None
+            "POST",
+            "http://example.com/api/v1/pipelines",
+            params=params,
+            json=json_body,
+            data=None,
+            files=None,
         ).thenReturn(response)
 
     return request.param
@@ -1305,20 +1331,20 @@ def test_send_request(send_request_data, caplog):
                 "test_wdl_file": "tests/data/test.wdl",
                 "eval_wdl_file": "tests/data/eval.wdl",
                 "test_wdl_dependencies_file": "tests/data/test_dep.zip",
-                "eval_wdl_dependencies_file": "tests/data/eval_dep.zip"
+                "eval_wdl_dependencies_file": "tests/data/eval_dep.zip",
             },
-            "success": True
+            "success": True,
         },
         {
             "files": {
                 "test_wdl_file": "tests/data/not_a_real.wdl",
                 "eval_wdl_file": "tests/data/eval.wdl",
                 "test_wdl_dependencies_file": "tests/data/test_dep.zip",
-                "eval_wdl_dependencies_file": "tests/data/eval_dep.zip"
+                "eval_wdl_dependencies_file": "tests/data/eval_dep.zip",
             },
             "success": False,
-            "logging": "Failed to open test_wdl_file file with path tests/data/not_a_real.wdl"
-        }
+            "logging": "Failed to open test_wdl_file file with path tests/data/not_a_real.wdl",
+        },
     ]
 )
 def process_file_dict_data(request):

@@ -1,9 +1,7 @@
 import json as json_lib
 import logging
 import os
-import pprint
 import sys
-import urllib
 from enum import Enum
 
 import requests
@@ -12,11 +10,14 @@ from ..config import manager as config
 
 LOGGER = logging.getLogger(__name__)
 
+
 class ResponseFormat(Enum):
     """Expected response format for a request"""
+
     JSON = 1
     BYTES = 2
     TEXT = 3
+
 
 def find_by_id(entity, id, params=None, expected_format=ResponseFormat.JSON):
     """
@@ -175,16 +176,17 @@ def create_map(entity1, entity1_id, entity2, entity2_id, params, query_params=No
     # Create and send request
     return send_request("POST", address, json=body, params=query_params)
 
-def create_report_map_from_run_query(report_id, parent_entity, parent_entity_id, body_params, query_params):
+
+def create_report_map_from_run_query(
+    report_id, parent_entity, parent_entity_id, body_params, query_params
+):
     """
     Submits a request for creating a run report mapping for the report specified by report_id, querying for runs
     belonging to the parent specified by parent_entity and parent_id
     """
     # Build request address
     server_address = config.load_var("carrot_server_address")
-    address = (
-        f"http://{server_address}/api/v1/{parent_entity}/{parent_entity_id}/runs/reports/{report_id}"
-    )
+    address = f"http://{server_address}/api/v1/{parent_entity}/{parent_entity_id}/runs/reports/{report_id}"
     # Build request json body from params, filtering out empty ones
     body = {}
     for param in body_params:
@@ -237,16 +239,17 @@ def delete_map_by_ids(entity1, entity1_id, entity2, entity2_id):
     # Create and send request
     return send_request("DELETE", address)
 
-def create_map_with_target(entity1, entity1_id, entity2, entity2_id, target, params, query_params=None):
+
+def create_map_with_target(
+    entity1, entity1_id, entity2, entity2_id, target, params, query_params=None
+):
     """
     Submits a request for creating a mapping between entity1 and entity2 with the target, with the specified
     params.
     """
     # Build request address
     server_address = config.load_var("carrot_server_address")
-    address = (
-        f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
-    )
+    address = f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
     # Build request json body from params, filtering out empty ones
     body = {}
     for param in params:
@@ -255,6 +258,7 @@ def create_map_with_target(entity1, entity1_id, entity2, entity2_id, target, par
     # Create and send request
     return send_request("POST", address, json=body, params=query_params)
 
+
 def find_map_by_ids_and_target(entity1, entity1_id, entity2, entity2_id, target):
     """
     Submits a request for finding a mapping between entity1 and entity2, with the specified
@@ -262,9 +266,7 @@ def find_map_by_ids_and_target(entity1, entity1_id, entity2, entity2_id, target)
     """
     # Build request address
     server_address = config.load_var("carrot_server_address")
-    address = (
-        f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
-    )
+    address = f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
     # Create and send request
     return send_request("GET", address)
 
@@ -276,13 +278,20 @@ def delete_map_by_ids_and_target(entity1, entity1_id, entity2, entity2_id, targe
     """
     # Build request address
     server_address = config.load_var("carrot_server_address")
-    address = (
-        f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
-    )
+    address = f"http://{server_address}/api/v1/{entity1}/{entity1_id}/{entity2}/{entity2_id}/{target}"
     # Create and send request
     return send_request("DELETE", address)
 
-def send_request(method, url, params=None, json=None, body=None, files=None, expected_format=ResponseFormat.JSON):
+
+def send_request(
+    method,
+    url,
+    params=None,
+    json=None,
+    body=None,
+    files=None,
+    expected_format=ResponseFormat.JSON,
+):
     """
     Sends a request to url with method, optionally with query params, json, form data body, and
     files, and handles potential errors. expected_format specifies the format we expect the
@@ -300,9 +309,11 @@ def send_request(method, url, params=None, json=None, body=None, files=None, exp
             params,
             json,
             body,
-            files
+            files,
         )
-        response = requests.request(method, url, params=params, json=json, data=body, files=processed_files)
+        response = requests.request(
+            method, url, params=params, json=json, data=body, files=processed_files
+        )
         LOGGER.debug(
             "Received response with status %i and body %s",
             response.status_code,
@@ -313,7 +324,8 @@ def send_request(method, url, params=None, json=None, body=None, files=None, exp
             json_body = response.json()
             if json_body is None:
                 LOGGER.error(
-                    "Received response with status %i and empty body" % response.status_code
+                    "Received response with status %i and empty body"
+                    % response.status_code
                 )
             else:
                 LOGGER.error(json_lib.dumps(json_body, indent=4, sort_keys=True))
@@ -324,7 +336,8 @@ def send_request(method, url, params=None, json=None, body=None, files=None, exp
             json_body = response.json()
             if json_body is None:
                 LOGGER.error(
-                    "Received response with status %i and empty body" % response.status_code
+                    "Received response with status %i and empty body"
+                    % response.status_code
                 )
                 sys.exit(1)
             return json_lib.dumps(json_body, indent=4, sort_keys=True)
@@ -340,7 +353,9 @@ def send_request(method, url, params=None, json=None, body=None, files=None, exp
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
             LOGGER.error("Encountered a connection error.")
         else:
-            LOGGER.error("Encountered a connection error. Enable verbose logging (-v) for more info")
+            LOGGER.error(
+                "Encountered a connection error. Enable verbose logging (-v) for more info"
+            )
         sys.exit(1)
     except requests.URLRequired as err:
         LOGGER.debug(err)
@@ -361,19 +376,24 @@ def send_request(method, url, params=None, json=None, body=None, files=None, exp
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
             LOGGER.error("Too many redirects")
         else:
-            LOGGER.error("Too many redirects. Enable verbose logging (-v) for more info")
+            LOGGER.error(
+                "Too many redirects. Enable verbose logging (-v) for more info"
+            )
         sys.exit(1)
     except IOError as err:
         LOGGER.debug(err)
         if LOGGER.getEffectiveLevel() == logging.DEBUG:
             LOGGER.error("Encountered an IO error")
         else:
-            LOGGER.error("Encountered an IO error. Enable verbose logging (-v) for more info")
+            LOGGER.error(
+                "Encountered an IO error. Enable verbose logging (-v) for more info"
+            )
         sys.exit(1)
     finally:
         # Close any open files
         if processed_files is not None:
             __close_files(processed_files)
+
 
 def __process_file_dict(files):
     """
@@ -405,6 +425,7 @@ def __process_file_dict(files):
             __close_files(processed_files)
             raise e
     return processed_files
+
 
 def __close_files(files):
     """

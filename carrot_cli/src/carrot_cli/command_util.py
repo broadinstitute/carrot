@@ -8,6 +8,7 @@ from .config import manager as config
 
 LOGGER = logging.getLogger(__name__)
 
+
 def delete(id, yes, entity, entity_name):
     """
     Calls entity's delete function with id
@@ -25,14 +26,23 @@ def delete(id, yes, entity, entity_name):
         if "created_by" in record and record["created_by"] != user_email:
             # If they decide not to delete, exit
             if not click.confirm(
-                    f"{entity_name} with id {id} was created by {record['created_by']}. Are you sure you want to delete?"
+                f"{entity_name} with id {id} was created by {record['created_by']}. Are you sure you want to delete?"
             ):
                 LOGGER.info("Okay, aborting delete operation")
                 sys.exit(0)
 
     print(entity.delete(id))
 
-def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_name, entity1_rest_name=None):
+
+def delete_map(
+    entity1_id,
+    entity2_id,
+    yes,
+    map_entity,
+    entity1_name,
+    entity2_name,
+    entity1_rest_name=None,
+):
     """
     Calls map_entity's delete map function with entity1_id and entity2_id
     If yes is false, it first checks to see if the entity belongs to the user and prompts them to confirm the delete
@@ -44,7 +54,9 @@ def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_na
     if not yes:
         # Try to find the record by id
         if entity1_rest_name:
-            record = json.loads(map_entity.find_map_by_ids(entity1_rest_name, entity1_id, entity2_id))
+            record = json.loads(
+                map_entity.find_map_by_ids(entity1_rest_name, entity1_id, entity2_id)
+            )
         else:
             record = json.loads(map_entity.find_map_by_ids(entity1_id, entity2_id))
         # If the returned record has a created_by field that does not match the user email, prompt the user to confirm
@@ -53,8 +65,8 @@ def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_na
         if "created_by" in record and record["created_by"] != user_email:
             # If they decide not to delete, exit
             if not click.confirm(
-                    f"Mapping for {entity1_name} with id {entity1_id} and {entity2_name} with id {entity2_id} was "
-                    f"created by {record['created_by']}. Are you sure you want to delete?"
+                f"Mapping for {entity1_name} with id {entity1_id} and {entity2_name} with id {entity2_id} was "
+                f"created by {record['created_by']}. Are you sure you want to delete?"
             ):
                 LOGGER.info("Okay, aborting delete operation")
                 sys.exit(0)
@@ -62,4 +74,3 @@ def delete_map(entity1_id, entity2_id, yes, map_entity, entity1_name, entity2_na
         print(map_entity.delete_map_by_ids(entity1_rest_name, entity1_id, entity2_id))
     else:
         print(map_entity.delete_map_by_ids(entity1_id, entity2_id))
-

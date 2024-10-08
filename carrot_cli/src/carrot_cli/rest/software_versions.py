@@ -38,8 +38,7 @@ def find(
     ]
     return request_handler.find("software_versions", params)
 
-def update(
-    software_version_id
-):
+
+def update(software_version_id):
     """Submits a request to CARROT's software_versions update mapping"""
     return request_handler.update("software_versions", software_version_id, [])

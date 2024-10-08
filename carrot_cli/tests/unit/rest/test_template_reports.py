@@ -2,6 +2,7 @@ import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, template_reports
 
 
@@ -183,14 +184,20 @@ def find_map_by_ids_data(request):
     mockito.when(request_handler).find_map_by_ids_and_target(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).find_map_by_ids_and_target(
-        "templates", request.param["template_id"], "reports", request.param["report_id"], request.param["report_trigger"]
+        "templates",
+        request.param["template_id"],
+        "reports",
+        request.param["report_id"],
+        request.param["report_trigger"],
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find_maps_by_id(find_map_by_ids_data):
     report = template_reports.find_map_by_ids(
-        find_map_by_ids_data["template_id"], find_map_by_ids_data["report_id"], find_map_by_ids_data["report_trigger"]
+        find_map_by_ids_data["template_id"],
+        find_map_by_ids_data["report_id"],
+        find_map_by_ids_data["report_trigger"],
     )
     assert report == find_map_by_ids_data["return"]
 
@@ -226,13 +233,19 @@ def delete_map_by_ids_data(request):
     mockito.when(request_handler).delete_map_by_ids_and_target(...).thenReturn(None)
     # Mock up request response
     mockito.when(request_handler).delete_map_by_ids_and_target(
-        "templates", request.param["template_id"], "reports", request.param["report_id"], request.param["report_trigger"]
+        "templates",
+        request.param["template_id"],
+        "reports",
+        request.param["report_id"],
+        request.param["report_trigger"],
     ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_delete_maps_by_id(delete_map_by_ids_data):
     report = template_reports.delete_map_by_ids(
-        delete_map_by_ids_data["template_id"], delete_map_by_ids_data["report_id"], delete_map_by_ids_data["report_trigger"]
+        delete_map_by_ids_data["template_id"],
+        delete_map_by_ids_data["report_id"],
+        delete_map_by_ids_data["report_trigger"],
     )
     assert report == delete_map_by_ids_data["return"]

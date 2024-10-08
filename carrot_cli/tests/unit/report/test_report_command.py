@@ -1,10 +1,10 @@
 import json
 import logging
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
 from carrot_cli.rest import reports
@@ -680,7 +680,7 @@ def test_create(create_data, caplog):
                 sort_keys=True,
             ),
         },
-{
+        {
             "args": [
                 "report",
                 "update",
@@ -767,7 +767,10 @@ def test_create(create_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -823,7 +826,7 @@ def test_create(create_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -909,8 +912,7 @@ def update_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:

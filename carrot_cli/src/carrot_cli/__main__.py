@@ -17,19 +17,16 @@ from .test import command as test
 
 # Version number is automatically set via bumpversion.
 # DO NOT MODIFY:
-__version = "1.0.0"
+__version__ = "1.0.0"
 
 # Create a logger for this module:
 LOGGER = logging.getLogger(__name__)
 
 # Context settings for commands, for overwriting some click defaults
-CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
 
-@click.group(
-    name="carrot_cli",
-    context_settings=CONTEXT_SETTINGS
-)
+@click.group(name="carrot_cli", context_settings=CONTEXT_SETTINGS)
 @click.option(
     "-q",
     "--quiet",

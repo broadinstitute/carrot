@@ -2,8 +2,8 @@ import logging
 
 import click
 
-from . import manager
 from ..rest import config as config_rest
+from . import manager
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ def set_var(variable, value):
 def get_config():
     """Prints the current config"""
     print(manager.get_config())
+
 
 @main.command(name="cromwell")
 def cromwell():

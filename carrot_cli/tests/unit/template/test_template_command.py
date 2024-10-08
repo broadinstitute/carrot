@@ -1,13 +1,14 @@
 import json
 import logging
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
-from carrot_cli.rest import pipelines, report_maps, reports, results, runs, template_reports, template_results, templates
+from carrot_cli.rest import (pipelines, report_maps, reports, results, runs,
+                             template_reports, template_results, templates)
 
 
 @pytest.fixture(autouse=True)
@@ -248,8 +249,7 @@ def find_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(pipelines).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(templates).find(
@@ -307,7 +307,7 @@ def test_find(find_data):
                 "example.com/she-ra_eval.wdl",
                 "example.com/she-ra_eval_dep.zip",
                 "adora@example.com",
-                None
+                None,
             ],
             "return": json.dumps(
                 {
@@ -356,7 +356,7 @@ def test_find(find_data):
                 "example.com/she-ra_eval.wdl",
                 "example.com/she-ra_eval_dep.zip",
                 "adora@example.com",
-                None
+                None,
             ],
             "from_name": {
                 "name": "Sword of Protection pipeline",
@@ -372,7 +372,7 @@ def test_find(find_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -406,7 +406,7 @@ def test_find(find_data):
                 "--created_by",
                 "adora2@example.com",
                 "--copy",
-                "Sword of Protection template"
+                "Sword of Protection template",
             ],
             "params": [
                 "Sword of Protection template copy",
@@ -417,7 +417,7 @@ def test_find(find_data):
                 None,
                 None,
                 "adora2@example.com",
-                "cd987859-06fe-4b1a-9e96-47d4f36bf819"
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
             ],
             "copy": {
                 "name": "Sword of Protection template",
@@ -438,7 +438,7 @@ def test_find(find_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -484,7 +484,7 @@ def test_find(find_data):
             "args": ["template", "create"],
             "params": [],
             "logging": "If a value is not specified for '--copy', then '--name', '--pipeline', '--test_wdl', and "
-                       "'--eval_wdl are required."
+            "'--eval_wdl are required.",
         },
     ]
 )
@@ -495,13 +495,11 @@ def create_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(pipelines).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     if "copy" in request.param:
         mockito.when(templates).find(
-            name=request.param["copy"]["name"],
-            limit=2
+            name=request.param["copy"]["name"], limit=2
         ).thenReturn(request.param["copy"]["return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -620,7 +618,7 @@ def test_create(create_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -656,8 +654,7 @@ def update_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -737,7 +734,7 @@ def test_update(update_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "email": "adora@example.com",
             "return": json.dumps(
@@ -859,8 +856,7 @@ def delete_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(templates).delete(request.param["id"]).thenReturn(
@@ -960,7 +956,7 @@ def test_delete(delete_data, caplog):
                 "asc(name)",
                 1,
                 0,
-                None
+                None,
             ],
             "return": json.dumps(
                 [
@@ -968,7 +964,10 @@ def test_delete(delete_data, caplog):
                         "created_at": "2020-09-16T18:48:06.371563",
                         "finished_at": "2020-09-16T18:58:06.371563",
                         "created_by": "glimmer@example.com",
-                        "test_input": {"in_greeted": "Cool Person", "docker": "image_build:test_software|1.1.0"},
+                        "test_input": {
+                            "in_greeted": "Cool Person",
+                            "docker": "image_build:test_software|1.1.0",
+                        },
                         "test_options": {"option": "other_value"},
                         "eval_input": {"in_output_filename": "test_greeting.txt"},
                         "eval_options": {"option": "value"},
@@ -1044,7 +1043,12 @@ def test_delete(delete_data, caplog):
                 {"option": "value"},
                 "d9855002-6b71-429c-a4de-8e90222488cd",
                 "03958293-6b71-429c-a4de-8e90222488cd",
-                {"name": "test_software", "count": 1, "branch": "master", "tags_only": True},
+                {
+                    "name": "test_software",
+                    "count": 1,
+                    "branch": "master",
+                    "tags_only": True,
+                },
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
                 "glimmer@example.com",
@@ -1053,7 +1057,7 @@ def test_delete(delete_data, caplog):
                 "asc(name)",
                 1,
                 0,
-                None
+                None,
             ],
             "return": json.dumps(
                 [
@@ -1061,7 +1065,10 @@ def test_delete(delete_data, caplog):
                         "created_at": "2020-09-16T18:48:06.371563",
                         "finished_at": "2020-09-16T18:58:06.371563",
                         "created_by": "glimmer@example.com",
-                        "test_input": {"in_greeted": "Cool Person", "docker": "image_build:test_software|1.1.0"},
+                        "test_input": {
+                            "in_greeted": "Cool Person",
+                            "docker": "image_build:test_software|1.1.0",
+                        },
                         "test_options": {"option": "other_value"},
                         "eval_input": {"in_output_filename": "test_greeting.txt"},
                         "eval_options": {"option": "value"},
@@ -1119,7 +1126,7 @@ def test_delete(delete_data, caplog):
                 "--offset",
                 0,
                 "--zip_csv",
-                "csvs.zip"
+                "csvs.zip",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -1143,7 +1150,7 @@ def test_delete(delete_data, caplog):
                 0,
                 "csvs.zip",
             ],
-            "return": "Success!"
+            "return": "Success!",
         },
         {
             "args": [
@@ -1205,7 +1212,7 @@ def test_delete(delete_data, caplog):
                 "asc(name)",
                 1,
                 0,
-                None
+                None,
             ],
             "from_name": {
                 "name": "Sword of Protection template",
@@ -1224,7 +1231,7 @@ def test_delete(delete_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 [
@@ -1234,7 +1241,9 @@ def test_delete(delete_data, caplog):
                         "created_by": "glimmer@example.com",
                         "test_input_defaults": {"in_greeted": "Cool Person"},
                         "test_option_defaults": {"option": "other_value"},
-                        "eval_input_defaults": {"in_output_filename": "test_greeting.txt"},
+                        "eval_input_defaults": {
+                            "in_output_filename": "test_greeting.txt"
+                        },
                         "eval_option_defaults": {"option": "value"},
                         "status": "succeeded",
                         "results": {},
@@ -1304,8 +1313,7 @@ def find_runs_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     if len(request.param["params"]) > 0:
@@ -1417,7 +1425,7 @@ def test_find_runs(find_runs_data, caplog):
                 "2020-09-00T00:00:00.000000",
                 "asc(name)",
                 1,
-                0
+                0,
             ],
             "return": json.dumps(
                 {
@@ -1499,7 +1507,12 @@ def test_find_runs(find_runs_data, caplog):
                 {"option": "value"},
                 "d9855002-6b71-429c-a4de-8e90222488cd",
                 "03958293-6b71-429c-a4de-8e90222488cd",
-                {"name": "test_software", "count": 1, "branch": "master", "tags_only": True},
+                {
+                    "name": "test_software",
+                    "count": 1,
+                    "branch": "master",
+                    "tags_only": True,
+                },
                 "2020-10-00T00:00:00.000000",
                 "2020-09-00T00:00:00.000000",
                 "glimmer@example.com",
@@ -1507,7 +1520,7 @@ def test_find_runs(find_runs_data, caplog):
                 "2020-09-00T00:00:00.000000",
                 "asc(name)",
                 1,
-                0
+                0,
             ],
             "return": json.dumps(
                 {
@@ -1590,7 +1603,7 @@ def test_find_runs(find_runs_data, caplog):
                 "2020-09-00T00:00:00.000000",
                 "asc(name)",
                 1,
-                0
+                0,
             ],
             "from_name": {
                 "name": "Sword of Protection template",
@@ -1609,7 +1622,7 @@ def test_find_runs(find_runs_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "report_from_name": {
                 "name": "Sword of Protection report",
@@ -1624,7 +1637,10 @@ def test_find_runs(find_runs_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -1705,7 +1721,7 @@ def test_find_runs(find_runs_data, caplog):
                 "986325ba-06fe-4b1a-9e96-47d4f36bf819",
                 "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
                 "--created_by",
-                "adora@example.com"
+                "adora@example.com",
             ],
             "params": [
                 "dd1b6094-b43a-4d98-8873-cc9b38e8b85d",
@@ -1729,7 +1745,7 @@ def test_find_runs(find_runs_data, caplog):
                 None,
                 None,
                 20,
-                0
+                0,
             ],
             "return": json.dumps(
                 {
@@ -1764,13 +1780,11 @@ def create_report_for_runs_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     if "report_from_name" in request.param:
         mockito.when(reports).find(
-            name=request.param["report_from_name"]["name"],
-            limit=2
+            name=request.param["report_from_name"]["name"], limit=2
         ).thenReturn(request.param["report_from_name"]["return"])
     # Mock up request response
     if len(request.param["params"]) > 0:
@@ -1859,7 +1873,7 @@ def test_create_report_for_runs(create_report_for_runs_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -1920,8 +1934,7 @@ def subscribe_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(templates).subscribe(
@@ -1977,7 +1990,7 @@ def test_subscribe(subscribe_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {"message": "Successfully deleted 1 row(s)"}, indent=4, sort_keys=True
@@ -2022,8 +2035,7 @@ def unsubscribe_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(templates).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(templates).unsubscribe(
@@ -2116,7 +2128,7 @@ def test_unsubscribe(unsubscribe_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -2159,12 +2171,10 @@ def map_to_result_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(results).find(
-            name=request.param["from_names"]["result_name"],
-            limit=2
+            name=request.param["from_names"]["result_name"], limit=2
         ).thenReturn(request.param["from_names"]["result_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -2254,7 +2264,7 @@ def test_map_to_result(map_to_result_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -2285,12 +2295,10 @@ def find_result_map_by_id_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(results).find(
-            name=request.param["from_names"]["result_name"],
-            limit=2
+            name=request.param["from_names"]["result_name"], limit=2
         ).thenReturn(request.param["from_names"]["result_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -2421,7 +2429,7 @@ def test_find_result_map_by_id(find_result_map_by_id_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 [
@@ -2473,12 +2481,10 @@ def find_result_maps_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(results).find(
-            name=request.param["from_names"]["result_name"],
-            limit=2
+            name=request.param["from_names"]["result_name"], limit=2
         ).thenReturn(request.param["from_names"]["result_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response
     mockito.when(template_results).find_maps(
@@ -2584,7 +2590,7 @@ def test_find_result_maps(find_result_maps_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "email": "adora@example.com",
             "return": json.dumps(
@@ -2736,12 +2742,10 @@ def delete_result_map_by_id_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(results).find(
-            name=request.param["from_names"]["result_name"],
-            limit=2
+            name=request.param["from_names"]["result_name"], limit=2
         ).thenReturn(request.param["from_names"]["result_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["ids"]) > 0:
@@ -2838,7 +2842,10 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -2911,7 +2918,7 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -2931,7 +2938,7 @@ def test_delete_result_map_by_id(delete_result_map_by_id_data, caplog):
                 "map_to_report",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "params": [],
             "logging": "No email config variable set.  If a value is not specified for --created_by, "
@@ -2954,12 +2961,10 @@ def map_to_report_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -2967,7 +2972,7 @@ def map_to_report_data(request):
             request.param["params"][0],
             request.param["params"][1],
             request.param["params"][2],
-            request.param["params"][3]
+            request.param["params"][3],
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -2989,12 +2994,12 @@ def test_map_to_report(map_to_report_data, caplog):
                 "find_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "return": json.dumps(
                 {
@@ -3015,12 +3020,12 @@ def test_map_to_report(map_to_report_data, caplog):
                 "find_report_map_by_id",
                 "Horde Template",
                 "Horde Report",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "from_names": {
                 "report_name": "Horde Report",
@@ -3035,7 +3040,10 @@ def test_map_to_report(map_to_report_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -3108,7 +3116,7 @@ def test_map_to_report(map_to_report_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -3141,19 +3149,17 @@ def find_report_map_by_id_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
         mockito.when(template_reports).find_map_by_ids(
             request.param["params"][0],
             request.param["params"][1],
-            request.param["params"][2]
+            request.param["params"][2],
         ).thenReturn(request.param["return"])
     return request.param
 
@@ -3259,7 +3265,10 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -3332,7 +3341,7 @@ def test_find_report_map_by_id(find_report_map_by_id_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 [
@@ -3384,12 +3393,10 @@ def find_report_maps_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response
     mockito.when(template_reports).find_maps(
@@ -3420,12 +3427,12 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "find_return": json.dumps(
                 {
@@ -3449,12 +3456,12 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "Horde Template",
                 "Horde Report",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "find_return": json.dumps(
                 {
@@ -3480,7 +3487,10 @@ def test_find_report_maps(find_report_maps_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -3553,7 +3563,7 @@ def test_find_report_maps(find_report_maps_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "email": "rogelio@example.com",
             "return": json.dumps(
@@ -3567,12 +3577,12 @@ def test_find_report_maps(find_report_maps_data):
                 "-y",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "find_return": json.dumps(
                 {
@@ -3596,12 +3606,12 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "find_return": json.dumps(
                 {
@@ -3631,12 +3641,12 @@ def test_find_report_maps(find_report_maps_data):
                 "delete_report_map_by_id",
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "params": [
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
-                "single"
+                "single",
             ],
             "find_return": json.dumps(
                 {
@@ -3655,7 +3665,7 @@ def test_find_report_maps(find_report_maps_data):
                 "input": "n",
                 "message": "Mapping for template with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and "
                 "report with id 3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 triggered by single was created by "
-               "adora@example.com. Are you sure you want to delete? [y/N]: n",
+                "adora@example.com. Are you sure you want to delete? [y/N]: n",
             },
             "logging": "Okay, aborting delete operation",
         },
@@ -3664,7 +3674,7 @@ def test_find_report_maps(find_report_maps_data):
             "params": [],
             "email": "rogelio@example.com",
             "return": "Usage: carrot_cli template delete_report_map_by_id [OPTIONS] TEMPLATE REPORT\n"
-                      "                                                   {single|pr}\n"
+            "                                                   {single|pr}\n"
             "Try 'carrot_cli template delete_report_map_by_id -h' for help.\n"
             "\n"
             "Error: Missing argument 'TEMPLATE'.",
@@ -3681,12 +3691,10 @@ def delete_report_map_by_id_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
         mockito.when(templates).find(
-            name=request.param["from_names"]["template_name"],
-            limit=2
+            name=request.param["from_names"]["template_name"], limit=2
         ).thenReturn(request.param["from_names"]["template_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:

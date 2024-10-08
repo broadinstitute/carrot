@@ -2,12 +2,15 @@ import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, run_groups
+
 
 @pytest.fixture(autouse=True)
 def unstub():
     yield
     mockito.unstub()
+
 
 @pytest.fixture(
     params=[
@@ -26,7 +29,7 @@ def unstub():
                     "owner": "me",
                     "repo": "example_software",
                     "run_group_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                    "test_input_key": "test.key"
+                    "test_input_key": "test.key",
                 },
                 indent=4,
                 sort_keys=True,
@@ -50,15 +53,16 @@ def find_by_id_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).find_by_id(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).find_by_id("run-groups", request.param["id"]).thenReturn(
-        request.param["return"]
-    )
+    mockito.when(request_handler).find_by_id(
+        "run-groups", request.param["id"]
+    ).thenReturn(request.param["return"])
     return request.param
 
 
 def test_find_by_id(find_by_id_data):
     result = run_groups.find_by_id(find_by_id_data["id"])
     assert result == find_by_id_data["return"]
+
 
 @pytest.fixture(
     params=[
@@ -132,9 +136,9 @@ def find_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(request_handler).find(...).thenReturn(None)
     # Mock up request response
-    mockito.when(request_handler).find("run-groups", request.param["params"]).thenReturn(
-        request.param["return"]
-    )
+    mockito.when(request_handler).find(
+        "run-groups", request.param["params"]
+    ).thenReturn(request.param["return"])
     return request.param
 
 
@@ -156,6 +160,7 @@ def test_find(find_data):
         find_data["params"][13][1],
     )
     assert run_group == find_data["return"]
+
 
 @pytest.fixture(
     params=[

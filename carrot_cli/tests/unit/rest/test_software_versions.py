@@ -2,6 +2,7 @@ import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, software_versions
 
 
@@ -22,7 +23,7 @@ def unstub():
                     "commit_date": "2020-09-10T18:48:06.371563",
                     "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                    "tags": []
+                    "tags": [],
                 },
                 indent=4,
                 sort_keys=True,
@@ -80,7 +81,7 @@ def test_find_by_id(find_by_id_data):
                         "commit_date": "2020-09-10T18:48:06.371563",
                         "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        "tags": []
+                        "tags": [],
                     }
                 ],
                 indent=4,
@@ -137,6 +138,7 @@ def test_find(find_data):
     )
     assert result == find_data["return"]
 
+
 @pytest.fixture(
     params=[
         {
@@ -148,7 +150,7 @@ def test_find(find_data):
                     "commit_date": "2020-09-10T18:48:06.371563",
                     "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                    "tags": ["tag1", "tag2"]
+                    "tags": ["tag1", "tag2"],
                 },
                 indent=4,
                 sort_keys=True,

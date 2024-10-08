@@ -1,13 +1,8 @@
-import json
 import logging
-import sys
 
 import click
 
-from .. import command_util
-from .. import dependency_util
-from .. import email_util
-from ..config import manager as config
+from .. import command_util, dependency_util, email_util
 from ..rest import results, template_results, templates
 
 LOGGER = logging.getLogger(__name__)
@@ -27,12 +22,20 @@ def find_by_id(id):
 
 @main.command(name="find")
 @click.option("--result_id", default=None, type=str, help="The result's ID")
-@click.option("--name", default=None, type=str, help="The name of the result, case-sensitive")
 @click.option(
-    "--description", default=None, type=str, help="The description of the result, case-sensitive"
+    "--name", default=None, type=str, help="The name of the result, case-sensitive"
 )
 @click.option(
-    "--result_type", default=None, type=str, help="The type of the result: numeric, file, or text"
+    "--description",
+    default=None,
+    type=str,
+    help="The description of the result, case-sensitive",
+)
+@click.option(
+    "--result_type",
+    default=None,
+    type=str,
+    help="The type of the result: numeric, file, or text",
 )
 @click.option(
     "--created_before",
@@ -104,7 +107,9 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the result", required=True)
-@click.option("--description", default=None, type=str, help="The description of the result")
+@click.option(
+    "--description", default=None, type=str, help="The description of the result"
+)
 @click.option(
     "--result_type",
     help="The type of the result: numeric, file, or text",
@@ -126,11 +131,15 @@ def create(name, description, result_type, created_by):
 @main.command(name="update")
 @click.argument("result")
 @click.option("--name", default=None, type=str, help="The name of the result")
-@click.option("--description", default=None, type=str, help="The description of the result")
+@click.option(
+    "--description", default=None, type=str, help="The description of the result"
+)
 def update(result, name, description):
     """Update result for RESULT (id or name) with the specified parameters"""
     # Process result to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(result, results, "result_id", "result")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        result, results, "result_id", "result"
+    )
     print(results.update(id, name, description))
 
 
@@ -150,7 +159,9 @@ def delete(result, yes):
     any templates
     """
     # Process result to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(result, results, "result_id", "result")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        result, results, "result_id", "result"
+    )
     command_util.delete(id, yes, results, "Result")
 
 
@@ -172,7 +183,11 @@ def map_to_template(result, template, result_key, created_by):
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
     # Process result to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(result, results, "result_id", "result")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        result, results, "result_id", "result"
+    )
     # Same for template
-    template_id = dependency_util.get_id_from_id_or_name_and_handle_error(template, templates, "template_id", "template")
+    template_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        template, templates, "template_id", "template"
+    )
     print(template_results.create_map(template_id, id, result_key, created_by))

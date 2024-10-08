@@ -2,6 +2,7 @@ import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, subscriptions
 
 

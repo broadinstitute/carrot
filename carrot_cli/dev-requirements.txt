@@ -1,4 +1,4 @@
-isort==4.3.21
+isort
 tox
 wheel
 bumpversion
@@ -9,6 +9,6 @@ pylint
 cython
 sphinx
 sphinx-rtd-theme
-mypy==0.770
+mypy
 click
 requests

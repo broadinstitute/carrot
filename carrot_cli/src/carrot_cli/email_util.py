@@ -6,11 +6,13 @@ from .config import manager as config
 
 LOGGER = logging.getLogger(__name__)
 
+
 def verify_email(email_maybe):
-    """
+    r"""
     Returns True if the email matches the format .*@.*\..* and False if not
     """
     return bool(re.match(r".*@.*\..*", email_maybe))
+
 
 def check_created_by(created_by):
     """

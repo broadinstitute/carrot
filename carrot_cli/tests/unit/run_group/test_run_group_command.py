@@ -1,23 +1,25 @@
 import json
 import logging
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
 
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
-from carrot_cli.rest import reports, report_maps, run_groups
+from carrot_cli.rest import report_maps, reports, run_groups
+
 
 @pytest.fixture(autouse=True)
 def unstub():
     yield
     mockito.unstub()
 
+
 @pytest.fixture(autouse=True)
 def no_email():
     mockito.when(config).load_var_no_error("email").thenReturn(None)
+
 
 @pytest.fixture(
     params=[
@@ -71,6 +73,7 @@ def test_find_by_id(find_by_id_data):
     runner = CliRunner()
     result = runner.invoke(carrot, find_by_id_data["args"])
     assert result.output == find_by_id_data["return"] + "\n"
+
 
 @pytest.fixture(
     params=[
@@ -204,6 +207,7 @@ def test_find(find_data):
     result = runner.invoke(carrot, find_data["args"])
     assert result.output == find_data["return"] + "\n"
 
+
 @pytest.fixture(
     params=[
         {
@@ -306,7 +310,10 @@ def test_delete(delete_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -388,15 +395,15 @@ def test_delete(delete_data):
             ],
             "params": [],
             "logging": "No email config variable set.  If a value is not specified for --created_by, "
-                       "there must be a value set for email.",
+            "there must be a value set for email.",
         },
         {
             "args": ["run_group", "create_report"],
             "params": [],
             "return": "Usage: carrot_cli run_group create_report [OPTIONS] RUN_GROUP_ID REPORT\n"
-                      "Try 'carrot_cli run_group create_report -h' for help.\n"
-                      "\n"
-                      "Error: Missing argument 'RUN_GROUP_ID'.",
+            "Try 'carrot_cli run_group create_report -h' for help.\n"
+            "\n"
+            "Error: Missing argument 'RUN_GROUP_ID'.",
         },
     ]
 )
@@ -407,8 +414,7 @@ def create_report_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -483,7 +489,10 @@ def test_create_report(create_report_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -561,9 +570,9 @@ def test_create_report(create_report_data, caplog):
             "args": ["run_group", "find_report_by_ids"],
             "params": [],
             "return": "Usage: carrot_cli run_group find_report_by_ids [OPTIONS] RUN_GROUP_ID REPORT\n"
-                      "Try 'carrot_cli run_group find_report_by_ids -h' for help.\n"
-                      "\n"
-                      "Error: Missing argument 'RUN_GROUP_ID'.",
+            "Try 'carrot_cli run_group find_report_by_ids -h' for help.\n"
+            "\n"
+            "Error: Missing argument 'RUN_GROUP_ID'.",
         },
     ]
 )
@@ -574,8 +583,7 @@ def find_report_by_ids_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -716,7 +724,10 @@ def test_find_report_by_ids(find_report_by_ids_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -832,8 +843,7 @@ def find_reports_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response
     mockito.when(report_maps).find_maps(
@@ -933,7 +943,10 @@ def test_find_reports(find_reports_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -1061,8 +1074,8 @@ def test_find_reports(find_reports_data):
             "interactive": {
                 "input": "y",
                 "message": "Mapping for run-group with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and report with id "
-                           "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
-                           "want to delete? [y/N]: y\n",
+                "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
+                "want to delete? [y/N]: y\n",
             },
         },
         {
@@ -1096,8 +1109,8 @@ def test_find_reports(find_reports_data):
             "interactive": {
                 "input": "n",
                 "message": "Mapping for run-group with id cd987859-06fe-4b1a-9e96-47d4f36bf819 and report with id "
-                           "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
-                           "want to delete? [y/N]: n",
+                "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8 was created by adora@example.com. Are you sure you "
+                "want to delete? [y/N]: n",
             },
             "logging": "Okay, aborting delete operation",
         },
@@ -1121,9 +1134,9 @@ def test_find_reports(find_reports_data):
             ),
             "email": "adora@example.com",
             "return": "Usage: carrot_cli run_group delete_report_by_ids [OPTIONS] RUN_GROUP_ID REPORT\n"
-                      "Try 'carrot_cli run_group delete_report_by_ids -h' for help.\n"
-                      "\n"
-                      "Error: Missing argument 'RUN_GROUP_ID'.",
+            "Try 'carrot_cli run_group delete_report_by_ids -h' for help.\n"
+            "\n"
+            "Error: Missing argument 'RUN_GROUP_ID'.",
         },
     ]
 )
@@ -1137,8 +1150,7 @@ def delete_report_by_ids_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["ids"]) > 0:
@@ -1161,9 +1173,9 @@ def test_delete_report_by_ids(delete_report_by_ids_data, caplog):
     # Include interactive input and expected message if this test should trigger interactive stuff
     if "interactive" in delete_report_by_ids_data:
         expected_output = (
-                delete_report_by_ids_data["interactive"]["message"]
-                + delete_report_by_ids_data["return"]
-                + "\n"
+            delete_report_by_ids_data["interactive"]["message"]
+            + delete_report_by_ids_data["return"]
+            + "\n"
         )
         result = runner.invoke(
             carrot,

@@ -1,11 +1,8 @@
 import logging
-import sys
 
 import click
 
-from .. import dependency_util
-from .. import email_util
-from ..config import manager as config
+from .. import dependency_util, email_util
 from ..rest import software as software_rest
 from .software_version import command as software_version
 
@@ -26,9 +23,14 @@ def find_by_id(id):
 
 @main.command(name="find")
 @click.option("--software_id", default=None, type=str, help="The software's ID")
-@click.option("--name", default=None, type=str, help="The name of the software, case-sensitive")
 @click.option(
-    "--description", default=None, type=str, help="The description of the software, case-sensitive"
+    "--name", default=None, type=str, help="The name of the software, case-sensitive"
+)
+@click.option(
+    "--description",
+    default=None,
+    type=str,
+    help="The description of the software, case-sensitive",
 )
 @click.option(
     "--repository_url",
@@ -40,7 +42,17 @@ def find_by_id(id):
     "--machine_type",
     default=None,
     help="Optional machine type for Google Cloud Build to use for building this software.",
-    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", "e2-highcpu-8", "e2-highcpu-32", ''], case_sensitive=False)
+    type=click.Choice(
+        [
+            "standard",
+            "n1-highcpu-8",
+            "n1-highcpu-32",
+            "e2-highcpu-8",
+            "e2-highcpu-32",
+            "",
+        ],
+        case_sensitive=False,
+    ),
 )
 @click.option(
     "--created_before",
@@ -114,7 +126,9 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the software", required=True)
-@click.option("--description", default=None, type=str, help="The description of the software")
+@click.option(
+    "--description", default=None, type=str, help="The description of the software"
+)
 @click.option(
     "--repository_url",
     default=None,
@@ -126,7 +140,17 @@ def find(
     "--machine_type",
     default="",
     help="Optional machine type for Google Cloud Build to use for building this software.",
-    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", "e2-highcpu-8", "e2-highcpu-32", ""], case_sensitive=False)
+    type=click.Choice(
+        [
+            "standard",
+            "n1-highcpu-8",
+            "n1-highcpu-32",
+            "e2-highcpu-8",
+            "e2-highcpu-32",
+            "",
+        ],
+        case_sensitive=False,
+    ),
 )
 @click.option(
     "--created_by",
@@ -138,23 +162,41 @@ def create(name, description, repository_url, machine_type, created_by):
     """Create software definition with the specified parameters"""
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
-    print(software_rest.create(name, description, repository_url, machine_type, created_by))
+    print(
+        software_rest.create(
+            name, description, repository_url, machine_type, created_by
+        )
+    )
 
 
 @main.command(name="update")
 @click.argument("software")
 @click.option("--name", default=None, type=str, help="The name of the software")
-@click.option("--description", default=None, type=str, help="The description of the software")
+@click.option(
+    "--description", default=None, type=str, help="The description of the software"
+)
 @click.option(
     "--machine_type",
     default="",
     help="Optional machine type for Google Cloud Build to use for building this software.",
-    type=click.Choice(["standard", "n1-highcpu-8", "n1-highcpu-32", "e2-highcpu-8", "e2-highcpu-32", ""], case_sensitive=False)
+    type=click.Choice(
+        [
+            "standard",
+            "n1-highcpu-8",
+            "n1-highcpu-32",
+            "e2-highcpu-8",
+            "e2-highcpu-32",
+            "",
+        ],
+        case_sensitive=False,
+    ),
 )
 def update(software, name, description, machine_type):
     """Update software definition for SOFTWARE (id or name) with the specified parameters"""
     # Process software to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(software, software_rest, "software_id", "software")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        software, software_rest, "software_id", "software"
+    )
     if machine_type == "":
         machine_type = None
     print(software_rest.update(id, name, description, machine_type))

@@ -2,6 +2,7 @@ import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, software
 
 
@@ -236,7 +237,11 @@ def test_create(create_data):
         },
         {
             "id": "98536487-06fe-4b1a-9e96-47d4f36bf819",
-            "params": [("name", "Angella software"), ("description", ""), ("machine_type", "")],
+            "params": [
+                ("name", "Angella software"),
+                ("description", ""),
+                ("machine_type", ""),
+            ],
             "return": json.dumps(
                 {
                     "title": "Server error",

@@ -1,9 +1,9 @@
 import json
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.rest import software_builds
 

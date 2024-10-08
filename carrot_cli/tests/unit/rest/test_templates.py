@@ -1,8 +1,8 @@
-import builtins
 import json
 
 import mockito
 import pytest
+
 from carrot_cli.rest import request_handler, templates
 
 
@@ -158,9 +158,15 @@ def test_find(find_data):
                 ("description", "This template rules the known universe"),
                 ("created_by", "hordeprime@example.com"),
                 ("test_wdl", "http://example.com/horde_test.wdl"),
-                ("test_wdl_dependencies", "http://example.com/horde_test_dependencies.zip"),
+                (
+                    "test_wdl_dependencies",
+                    "http://example.com/horde_test_dependencies.zip",
+                ),
                 ("eval_wdl", "http://example.com/horde_eval.wdl"),
-                ("eval_wdl_dependencies", "http://example.com/horde_eval_dependencies.zip"),
+                (
+                    "eval_wdl_dependencies",
+                    "http://example.com/horde_eval_dependencies.zip",
+                ),
             ],
             "has_files": False,
             "copy": None,
@@ -218,9 +224,15 @@ def test_find(find_data):
                 ("description", "This template rules the known universe"),
                 ("created_by", "hordeprime@example.com"),
                 ("test_wdl", "http://example.com/horde_test.wdl"),
-                ("test_wdl_dependencies", "http://example.com/horde_test_dependencies.zip"),
+                (
+                    "test_wdl_dependencies",
+                    "http://example.com/horde_test_dependencies.zip",
+                ),
                 ("eval_wdl", "http://example.com/horde_eval.wdl"),
-                ("eval_wdl_dependencies", "http://example.com/horde_eval_dependencies.zip"),
+                (
+                    "eval_wdl_dependencies",
+                    "http://example.com/horde_eval_dependencies.zip",
+                ),
             ],
             "has_files": False,
             "copy": None,
@@ -241,7 +253,10 @@ def test_find(find_data):
                 ("description", None),
                 ("created_by", "hordeprime@example.com"),
                 ("test_wdl", "http://example.com/horde_test.wdl"),
-                ("test_wdl_dependencies", "http://example.com/horde_test_dependencies.zip"),
+                (
+                    "test_wdl_dependencies",
+                    "http://example.com/horde_test_dependencies.zip",
+                ),
                 ("eval_wdl", "http://example.com/horde_eval.wdl"),
                 ("eval_wdl_dependencies", None),
             ],
@@ -278,16 +293,16 @@ def create_data(request):
         files = {}
         if not request.param["params"][4][1].startswith("http"):
             params.remove(request.param["params"][4])
-            files['test_wdl_file'] = request.param["params"][4][1]
+            files["test_wdl_file"] = request.param["params"][4][1]
         if not request.param["params"][5][1].startswith("http"):
             params.remove(request.param["params"][5])
-            files['test_wdl_dependencies_file'] = request.param["params"][5][1]
+            files["test_wdl_dependencies_file"] = request.param["params"][5][1]
         if not request.param["params"][6][1].startswith("http"):
             params.remove(request.param["params"][6])
-            files['eval_wdl_file'] = request.param["params"][6][1]
+            files["eval_wdl_file"] = request.param["params"][6][1]
         if not request.param["params"][7][1].startswith("http"):
             params.remove(request.param["params"][7])
-            files['eval_wdl_dependencies_file'] = request.param["params"][7][1]
+            files["eval_wdl_dependencies_file"] = request.param["params"][7][1]
         # Mock up request response
         mockito.when(request_handler).create(
             "templates", params, files=files, query_params=query_params
@@ -318,6 +333,7 @@ def test_create(create_data):
         create_data["copy"],
     )
     assert result == create_data["return"]
+
 
 @pytest.fixture(
     params=[
@@ -414,16 +430,16 @@ def update_data(request):
         files = {}
         if not request.param["params"][2][1].startswith("http"):
             params.remove(request.param["params"][2])
-            files['test_wdl_file'] = request.param["params"][2][1]
+            files["test_wdl_file"] = request.param["params"][2][1]
         if not request.param["params"][3][1].startswith("http"):
             params.remove(request.param["params"][3])
-            files['test_wdl_dependencies_file'] = request.param["params"][3][1]
+            files["test_wdl_dependencies_file"] = request.param["params"][3][1]
         if not request.param["params"][4][1].startswith("http"):
             params.remove(request.param["params"][4])
-            files['eval_wdl_file'] = request.param["params"][4][1]
+            files["eval_wdl_file"] = request.param["params"][4][1]
         if not request.param["params"][5][1].startswith("http"):
             params.remove(request.param["params"][5])
-            files['eval_wdl_dependencies_file'] = request.param["params"][5][1]
+            files["eval_wdl_dependencies_file"] = request.param["params"][5][1]
         # Mock up request response
         mockito.when(request_handler).update(
             "templates", request.param["id"], params, files=files
@@ -578,12 +594,11 @@ def test_unsubscribe(unsubscribe_data):
     )
     assert result == unsubscribe_data["return"]
 
+
 @pytest.fixture(
     params=[
         {
-            "params": [
-                ("name", "Template name")
-            ],
+            "params": [("name", "Template name")],
             "files": {},
             "field_val": "http://example.com/test.wdl",
             "field_name": "test_wdl",
@@ -591,9 +606,7 @@ def test_unsubscribe(unsubscribe_data):
             "add_to_files": False,
         },
         {
-            "params": [
-                ("name", "Template name")
-            ],
+            "params": [("name", "Template name")],
             "files": {},
             "field_val": "tests/data/eval.wdl",
             "field_name": "eval_wdl",
@@ -601,12 +614,8 @@ def test_unsubscribe(unsubscribe_data):
             "add_to_files": True,
         },
         {
-            "params": [
-                ("name", "Template name")
-            ],
-            "files": {
-                "test_wdl_file": "tests/data/test.wdl"
-            },
+            "params": [("name", "Template name")],
+            "files": {"test_wdl_file": "tests/data/test.wdl"},
             "field_val": "tests/data/eval_deps.zip",
             "field_name": "eval_wdl_dependencies_file",
             "add_to_params": False,
@@ -626,14 +635,25 @@ def test_process_maybe_file_field(process_maybe_file_field_data):
         process_maybe_file_field_data["params"],
         process_maybe_file_field_data["files"],
         process_maybe_file_field_data["field_name"],
-        process_maybe_file_field_data["field_val"]
+        process_maybe_file_field_data["field_val"],
     )
     if process_maybe_file_field_data["add_to_params"]:
-        assert (process_maybe_file_field_data['field_name'], process_maybe_file_field_data["field_val"]) in process_maybe_file_field_data["params"]
+        assert (
+            process_maybe_file_field_data["field_name"],
+            process_maybe_file_field_data["field_val"],
+        ) in process_maybe_file_field_data["params"]
     else:
         assert process_maybe_file_field_data["params"] == params
     if process_maybe_file_field_data["add_to_files"]:
-        assert f"{process_maybe_file_field_data['field_name']}_file" in process_maybe_file_field_data["files"]
-        assert process_maybe_file_field_data["files"][f"{process_maybe_file_field_data['field_name']}_file"] == process_maybe_file_field_data["field_val"]
+        assert (
+            f"{process_maybe_file_field_data['field_name']}_file"
+            in process_maybe_file_field_data["files"]
+        )
+        assert (
+            process_maybe_file_field_data["files"][
+                f"{process_maybe_file_field_data['field_name']}_file"
+            ]
+            == process_maybe_file_field_data["field_val"]
+        )
     else:
         assert process_maybe_file_field_data["files"] == files

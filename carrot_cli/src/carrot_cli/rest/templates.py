@@ -1,5 +1,4 @@
 import logging
-import os
 
 from . import request_handler
 
@@ -53,7 +52,7 @@ def create(
     eval_wdl,
     eval_wdl_dependencies,
     created_by,
-    copy
+    copy,
 ):
     """Submits a request to CARROT's templates create mapping"""
     # Create parameter list
@@ -68,15 +67,21 @@ def create(
     # Process test and eval wdls and dependencies to put them in the correct lists depending on
     # how they are provided
     __process_maybe_file_field(params, files, "test_wdl", test_wdl)
-    __process_maybe_file_field(params, files, "test_wdl_dependencies", test_wdl_dependencies)
+    __process_maybe_file_field(
+        params, files, "test_wdl_dependencies", test_wdl_dependencies
+    )
     __process_maybe_file_field(params, files, "eval_wdl", eval_wdl)
-    __process_maybe_file_field(params, files, "eval_wdl_dependencies", eval_wdl_dependencies)
+    __process_maybe_file_field(
+        params, files, "eval_wdl_dependencies", eval_wdl_dependencies
+    )
     # Start with None for query params and add copy if specified
     query_params = None
     if copy is not None:
         query_params = [("copy", copy)]
     # Make the request
-    return request_handler.create("templates", params, files=(files if files else None), query_params=query_params)
+    return request_handler.create(
+        "templates", params, files=(files if files else None), query_params=query_params
+    )
 
 
 def update(
@@ -86,7 +91,7 @@ def update(
     test_wdl,
     test_wdl_dependencies,
     eval_wdl,
-    eval_wdl_dependencies
+    eval_wdl_dependencies,
 ):
     """Submits a request to CARROT's templates update mapping"""
     # Create parameter list
@@ -98,11 +103,17 @@ def update(
     files = {}
     # Process test and eval wdls and dependencies to put them in the correct lists depending on how they are provided
     __process_maybe_file_field(params, files, "test_wdl", test_wdl)
-    __process_maybe_file_field(params, files, "test_wdl_dependencies", test_wdl_dependencies)
+    __process_maybe_file_field(
+        params, files, "test_wdl_dependencies", test_wdl_dependencies
+    )
     __process_maybe_file_field(params, files, "eval_wdl", eval_wdl)
-    __process_maybe_file_field(params, files, "eval_wdl_dependencies", eval_wdl_dependencies)
+    __process_maybe_file_field(
+        params, files, "eval_wdl_dependencies", eval_wdl_dependencies
+    )
     # Make the request
-    return request_handler.update("templates", template_id, params, files=(files if files else None))
+    return request_handler.update(
+        "templates", template_id, params, files=(files if files else None)
+    )
 
 
 def delete(template_id):
@@ -138,11 +149,13 @@ def __process_maybe_file_field(params, files, field_name, field_val):
     None
     """
     # If field_val is an http or gs uri, we'll add it to params
-    if not field_val \
-            or field_val.startswith("http://") \
-            or field_val.startswith("https://") \
-            or field_val.startswith("gs://"):
+    if (
+        not field_val
+        or field_val.startswith("http://")
+        or field_val.startswith("https://")
+        or field_val.startswith("gs://")
+    ):
         params.append((field_name, field_val))
     # Otherwise, assume field_val is a file, so we'll throw it in the files list
     else:
-        files[f'{field_name}_file'] = field_val
+        files[f"{field_name}_file"] = field_val

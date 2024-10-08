@@ -1,9 +1,9 @@
 import json
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.rest import software, software_versions
 
@@ -30,7 +30,7 @@ def unstub():
                     "commit_date": "2020-09-10T18:48:06.371563",
                     "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                    "tags": []
+                    "tags": [],
                 },
                 indent=4,
                 sort_keys=True,
@@ -119,7 +119,7 @@ def test_find_by_id(find_by_id_data):
                         "commit_date": "2020-09-10T18:48:06.371563",
                         "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        "tags": ["tag1"]
+                        "tags": ["tag1"],
                     }
                 ],
                 indent=4,
@@ -179,7 +179,7 @@ def test_find_by_id(find_by_id_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 [
@@ -189,7 +189,7 @@ def test_find_by_id(find_by_id_data):
                         "commit_date": "2020-09-10T18:48:06.371563",
                         "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                         "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                        "tags": ["hi"]
+                        "tags": ["hi"],
                     }
                 ],
                 indent=4,
@@ -235,8 +235,7 @@ def find_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(software).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(software_versions).find(
@@ -259,6 +258,7 @@ def test_find(find_data):
     test_software_version = runner.invoke(carrot, find_data["args"])
     assert test_software_version.output == find_data["return"] + "\n"
 
+
 @pytest.fixture(
     params=[
         {
@@ -275,7 +275,7 @@ def test_find(find_data):
                     "commit_date": "2020-09-10T18:48:06.371563",
                     "software_id": "3d1bfbab-d9ec-46c7-aa8e-9c1d1808f2b8",
                     "software_version_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
-                    "tags": ["tag1"]
+                    "tags": ["tag1"],
                 },
                 indent=4,
                 sort_keys=True,

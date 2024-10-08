@@ -5,6 +5,7 @@ import uuid
 
 LOGGER = logging.getLogger(__name__)
 
+
 def get_id_from_id_or_name_and_handle_error(id_or_name, module, id_key, entity_name):
     """
     Convenience wrapper function for get_id_from_id_or_name that prints an error message and exits
@@ -23,14 +24,17 @@ def get_id_from_id_or_name_and_handle_error(id_or_name, module, id_key, entity_n
     """
     try:
         # Attempt to process id_or_name and return
-         return get_id_from_id_or_name(id_or_name, module, id_key)
+        return get_id_from_id_or_name(id_or_name, module, id_key)
     except RecordNotFoundError as e:
         LOGGER.debug(
             f"Encountered RecordNotFoundError when running get_id_from_id_or_name with params:"
             f"id_or_name: {id_or_name}, module: {module.__name__}, id_key: {id_key}, error: {e.message}"
         )
-        LOGGER.error(f"Encountered an error processing value for {entity_name}: {e.message}")
+        LOGGER.error(
+            f"Encountered an error processing value for {entity_name}: {e.message}"
+        )
         sys.exit(1)
+
 
 def get_id_from_id_or_name(id_or_name, module, id_key):
     """
@@ -61,6 +65,7 @@ def get_id_from_id_or_name(id_or_name, module, id_key):
             return id
         except RecordNotFoundError:
             raise
+
 
 def find_id_by_name(name, module, id_key):
     """
@@ -105,7 +110,6 @@ def find_id_by_name(name, module, id_key):
         raise RecordNotFoundError(
             f"Attempt to retrieve {id_key} by name failed with record: {record}"
         )
-
 
 
 class RecordNotFoundError(Exception):

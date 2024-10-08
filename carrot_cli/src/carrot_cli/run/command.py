@@ -1,15 +1,9 @@
-import json
 import logging
-import sys
 
 import click
 
-from .. import command_util
-from .. import dependency_util
-from .. import email_util
-from .. import file_util
-from ..config import manager as config
-from ..rest import reports, report_maps, runs
+from .. import command_util, dependency_util, email_util, file_util
+from ..rest import report_maps, reports, runs
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +19,7 @@ def main():
     "--zip_csv",
     "--instead_of_json_give_me_a_zipped_folder_with_csvs_in_it_please_and_thank_you",
     type=click.Path(),
-    help="Instead of writing results to stdout as JSON, writes as a zip of CSV files to the specified file"
+    help="Instead of writing results to stdout as JSON, writes as a zip of CSV files to the specified file",
 )
 def find_by_id(id, zip_csv=None):
     """Retrieve a run by its ID"""
@@ -47,14 +41,18 @@ def delete(run, yes):
     Delete the run specified by RUN (id or name), if the run has a failed status
     """
     # Process run to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        run, runs, "run_id", "run"
+    )
     command_util.delete(id, yes, runs, "Run")
 
 
 @main.command(name="create_report")
 @click.argument("run")
 @click.argument("report")
-@click.option("--created_by", default=None, type=str, help="Email of the creator of the mapping")
+@click.option(
+    "--created_by", default=None, type=str, help="Email of the creator of the mapping"
+)
 @click.option(
     "--delete_failed",
     is_flag=True,
@@ -69,9 +67,13 @@ def create_report(run, report, created_by, delete_failed):
     # If created_by is not set and there is an email config variable, fill with that
     created_by = email_util.check_created_by(created_by)
     # Process run to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        run, runs, "run_id", "run"
+    )
     # Do the same for report
-    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
+    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        report, reports, "report_id", "report"
+    )
     print(report_maps.create_map("runs", id, report_id, created_by, delete_failed))
 
 
@@ -84,17 +86,30 @@ def find_report_by_ids(run, report):
     by REPORT (id or name)
     """
     # Process run to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        run, runs, "run_id", "run"
+    )
     # Do the same for report
-    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
+    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        report, reports, "report_id", "report"
+    )
     print(report_maps.find_map_by_ids("runs", id, report_id))
 
 
 @main.command(name="find_reports")
 @click.argument("run")
-@click.option("--report", "--report_id", default=None, type=str, help="The id or name of the report")
 @click.option(
-    "--status", default=None, type=str, help="The status of the job generating the report"
+    "--report",
+    "--report_id",
+    default=None,
+    type=str,
+    help="The id or name of the report",
+)
+@click.option(
+    "--status",
+    default=None,
+    type=str,
+    help="The status of the job generating the report",
 )
 @click.option(
     "--cromwell_job_id",
@@ -178,10 +193,14 @@ def find_reports(
     Retrieve the report records for the run specified by RUN (id or name) for the specified params
     """
     # Process run to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        run, runs, "run_id", "run"
+    )
     # Same for report
     if report:
-        report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
+        report_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+            report, reports, "report_id", "report"
+        )
     else:
         report_id = None
     print(
@@ -221,7 +240,13 @@ def delete_report_by_ids(run, report, yes):
     REPORT (id or name)
     """
     # Process run to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(run, runs, "run_id", "run")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        run, runs, "run_id", "run"
+    )
     # Do the same for report
-    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
-    command_util.delete_map(id, report_id, yes, report_maps, "run", "report", entity1_rest_name="runs")
+    report_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        report, reports, "report_id", "report"
+    )
+    command_util.delete_map(
+        id, report_id, yes, report_maps, "run", "report", entity1_rest_name="runs"
+    )

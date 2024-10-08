@@ -1,13 +1,13 @@
 import json
 import logging
 
-from click.testing import CliRunner
-
 import mockito
 import pytest
+from click.testing import CliRunner
+
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
-from carrot_cli.rest import reports, report_maps, runs
+from carrot_cli.rest import report_maps, reports, runs
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +19,7 @@ def unstub():
 @pytest.fixture(autouse=True)
 def no_email():
     mockito.when(config).load_var_no_error("email").thenReturn(None)
+
 
 @pytest.fixture(
     params=[
@@ -58,9 +59,15 @@ def no_email():
             ),
         },
         {
-            "args": ["run", "find_by_id", "cd987859-06fe-4b1a-9e96-47d4f36bf819", "--zip_csv", "csvs.zip"],
+            "args": [
+                "run",
+                "find_by_id",
+                "cd987859-06fe-4b1a-9e96-47d4f36bf819",
+                "--zip_csv",
+                "csvs.zip",
+            ],
             "csv": "csvs.zip",
-            "return": "Success!"
+            "return": "Success!",
         },
     ]
 )
@@ -68,9 +75,9 @@ def find_by_id_data(request):
     # Set all requests to return None so only the one we expect will return a value
     mockito.when(runs).find_by_id(...).thenReturn(None)
     # Mock up request response
-    mockito.when(runs).find_by_id(request.param["args"][2], csv=request.param["csv"]).thenReturn(
-        request.param["return"]
-    )
+    mockito.when(runs).find_by_id(
+        request.param["args"][2], csv=request.param["csv"]
+    ).thenReturn(request.param["return"])
     return request.param
 
 
@@ -150,7 +157,7 @@ def test_find_by_id(find_by_id_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "email": "adora@example.com",
             "return": json.dumps(
@@ -279,8 +286,7 @@ def delete_data(request):
     # record
     if "from_name" in request.param:
         mockito.when(runs).find(
-            name=request.param["from_name"]["name"],
-            limit=2
+            name=request.param["from_name"]["name"], limit=2
         ).thenReturn(request.param["from_name"]["return"])
     # Mock up request response
     mockito.when(runs).delete(request.param["id"]).thenReturn(request.param["return"])
@@ -372,7 +378,10 @@ def test_delete(delete_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -449,7 +458,7 @@ def test_delete(delete_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -494,12 +503,10 @@ def create_report_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
+            name=request.param["from_names"]["run_name"], limit=2
         ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -574,7 +581,10 @@ def test_create_report(create_report_data, caplog):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -651,7 +661,7 @@ def test_create_report(create_report_data, caplog):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 {
@@ -685,12 +695,10 @@ def find_report_by_ids_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
+            name=request.param["from_names"]["run_name"], limit=2
         ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["params"]) > 0:
@@ -830,7 +838,10 @@ def test_find_report_by_ids(find_report_by_ids_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -907,7 +918,7 @@ def test_find_report_by_ids(find_report_by_ids_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "return": json.dumps(
                 [
@@ -966,12 +977,10 @@ def find_reports_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
+            name=request.param["from_names"]["run_name"], limit=2
         ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response
     mockito.when(report_maps).find_maps(
@@ -1071,7 +1080,10 @@ def test_find_reports(find_reports_data):
                             "notebook": {
                                 "metadata": {
                                     "language_info": {
-                                        "codemirror_mode": {"name": "ipython", "version": 3},
+                                        "codemirror_mode": {
+                                            "name": "ipython",
+                                            "version": 3,
+                                        },
                                         "file_extension": ".py",
                                         "mimetype": "text/x-python",
                                         "name": "python",
@@ -1148,7 +1160,7 @@ def test_find_reports(find_reports_data):
                     ],
                     indent=4,
                     sort_keys=True,
-                )
+                ),
             },
             "email": "adora@example.com",
             "return": json.dumps(
@@ -1296,12 +1308,10 @@ def delete_report_by_ids_data(request):
     # record
     if "from_names" in request.param:
         mockito.when(runs).find(
-            name=request.param["from_names"]["run_name"],
-            limit=2
+            name=request.param["from_names"]["run_name"], limit=2
         ).thenReturn(request.param["from_names"]["run_return"])
         mockito.when(reports).find(
-            name=request.param["from_names"]["report_name"],
-            limit=2
+            name=request.param["from_names"]["report_name"], limit=2
         ).thenReturn(request.param["from_names"]["report_return"])
     # Mock up request response only if we expect it to get that far
     if len(request.param["ids"]) > 0:

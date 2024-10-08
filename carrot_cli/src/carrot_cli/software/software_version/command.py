@@ -3,8 +3,8 @@ import logging
 import click
 
 from ... import dependency_util
-from ...rest import software_versions
 from ...rest import software as software_rest
+from ...rest import software_versions
 from .software_build import command as software_build
 
 LOGGER = logging.getLogger(__name__)
@@ -36,7 +36,9 @@ def find_by_id(id):
     type=str,
     help="The ID or name of the software to find version records of",
 )
-@click.option("--commit", default=None, type=str, help="The commit hash for the version")
+@click.option(
+    "--commit", default=None, type=str, help="The commit hash for the version"
+)
 @click.option(
     "--created_before",
     default=None,
@@ -56,14 +58,14 @@ def find_by_id(id):
     default=None,
     type=str,
     help="Upper bound for software version's commit_date value, in the format "
-         "YYYY-MM-DDThh:mm:ss.ssssss",
+    "YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--committed_after",
     default=None,
     type=str,
     help="Lower bound for software version's commit_date value, in the format "
-         "YYYY-MM-DDThh:mm:ss.ssssss",
+    "YYYY-MM-DDThh:mm:ss.ssssss",
 )
 @click.option(
     "--sort",
@@ -101,7 +103,9 @@ def find(
     """Retrieve software version records filtered to match the specified parameters"""
     # Process software to get id if it's a name
     if software:
-        software_id = dependency_util.get_id_from_id_or_name_and_handle_error(software, software_rest, "software_id", "software")
+        software_id = dependency_util.get_id_from_id_or_name_and_handle_error(
+            software, software_rest, "software_id", "software"
+        )
     else:
         software_id = None
     print(
@@ -119,12 +123,12 @@ def find(
         )
     )
 
+
 @main.command(name="update")
 @click.argument("id")
-def update(
-    id
-):
+def update(id):
     """Refreshes the commit, commit_date, and tags for the software_version specified by ID"""
     print(software_versions.update(id))
+
 
 main.add_command(software_build.main)

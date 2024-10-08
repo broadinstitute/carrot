@@ -1,16 +1,9 @@
-import json
 import logging
-import sys
 
 import click
 
-from .. import command_util
-from .. import dependency_util
-from .. import email_util
-from .. import file_util
-
+from .. import command_util, dependency_util, email_util, file_util
 # Naming this differently here than in other files because reports have a config attribute
-from ..config import manager as config_manager
 from ..rest import reports
 
 LOGGER = logging.getLogger(__name__)
@@ -30,9 +23,14 @@ def find_by_id(id):
 
 @main.command(name="find")
 @click.option("--report_id", default=None, type=str, help="The report's ID")
-@click.option("--name", default=None, type=str, help="The name of the report, case-sensitive")
 @click.option(
-    "--description", default=None, type=str, help="The description of the report, case-sensitive"
+    "--name", default=None, type=str, help="The name of the report, case-sensitive"
+)
+@click.option(
+    "--description",
+    default=None,
+    type=str,
+    help="The description of the report, case-sensitive",
 )
 @click.option(
     "--notebook",
@@ -119,7 +117,9 @@ def find(
 
 @main.command(name="create")
 @click.option("--name", help="The name of the report", required=True)
-@click.option("--description", default=None, type=str, help="The description of the report")
+@click.option(
+    "--description", default=None, type=str, help="The description of the report"
+)
 @click.option(
     "--notebook",
     default=None,
@@ -159,7 +159,9 @@ def create(name, description, notebook, config, created_by):
 @main.command(name="update")
 @click.argument("report")
 @click.option("--name", default=None, type=str, help="The name of the report")
-@click.option("--description", default=None, type=str, help="The description of the report")
+@click.option(
+    "--description", default=None, type=str, help="The description of the report"
+)
 @click.option(
     "--notebook",
     default=None,
@@ -177,7 +179,9 @@ def create(name, description, notebook, config, created_by):
 def update(report, name, description, notebook, config):
     """Update report specified by REPORT (id or name) with the specified parameters"""
     # Process report to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        report, reports, "report_id", "report"
+    )
     print(
         reports.update(
             id,
@@ -205,5 +209,7 @@ def delete(report, yes):
     runs associated with it.
     """
     # Process report to get id if it's a name
-    id = dependency_util.get_id_from_id_or_name_and_handle_error(report, reports, "report_id", "report")
+    id = dependency_util.get_id_from_id_or_name_and_handle_error(
+        report, reports, "report_id", "report"
+    )
     command_util.delete(id, yes, reports, "Report")
