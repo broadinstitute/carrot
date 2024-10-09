@@ -3,6 +3,7 @@ import logging
 import click
 
 from .. import command_util, dependency_util, email_util, file_util
+
 # Naming this differently here than in other files because reports have a config attribute
 from ..rest import reports
 

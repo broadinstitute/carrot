@@ -7,8 +7,16 @@ from click.testing import CliRunner
 
 from carrot_cli.__main__ import main_entry as carrot
 from carrot_cli.config import manager as config
-from carrot_cli.rest import (pipelines, report_maps, reports, results, runs,
-                             template_reports, template_results, templates)
+from carrot_cli.rest import (
+    pipelines,
+    report_maps,
+    reports,
+    results,
+    runs,
+    template_reports,
+    template_results,
+    templates,
+)
 
 
 @pytest.fixture(autouse=True)

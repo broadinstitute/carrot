@@ -10,6 +10,10 @@ from carrot_cli.config import manager as config
 from carrot_cli.rest import reports
 
 
+with open("tests/data/mock_report_notebook.ipynb", "r") as f:
+    MOCK_NOTEBOOK_DATA = json.loads(f.read())
+
+
 @pytest.fixture(autouse=True)
 def unstub():
     yield
@@ -30,60 +34,7 @@ def no_email():
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "description": "This report will save Etheria",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "config": {"cpu": 2},
                     "name": "Sword of Protection report",
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -155,60 +106,7 @@ def test_find_by_id(find_by_id_data):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "Sword of Protection report",
                 "This report will save Etheria",
-                {
-                    "metadata": {
-                        "language_info": {
-                            "codemirror_mode": {"name": "ipython", "version": 3},
-                            "file_extension": ".py",
-                            "mimetype": "text/x-python",
-                            "name": "python",
-                            "nbconvert_exporter": "python",
-                            "pygments_lexer": "ipython3",
-                            "version": "3.8.5-final",
-                        },
-                        "orig_nbformat": 2,
-                        "kernelspec": {
-                            "name": "python3",
-                            "display_name": "Python 3.8.5 64-bit",
-                            "metadata": {
-                                "interpreter": {
-                                    "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                }
-                            },
-                        },
-                    },
-                    "nbformat": 4,
-                    "nbformat_minor": 2,
-                    "cells": [
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message = carrot_run_data["results"]["Greeting"]\n',
-                                "print(message)",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                "print(message_file.read())",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": ["print('Thanks')"],
-                        },
-                    ],
-                },
+                MOCK_NOTEBOOK_DATA,
                 {"cpu": 2},
                 "adora@example.com",
                 "2020-10-00T00:00:00.000000",
@@ -222,60 +120,7 @@ def test_find_by_id(find_by_id_data):
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "description": "This report will save Etheria",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "config": {"cpu": 2},
                     "name": "Sword of Protection report",
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -362,60 +207,7 @@ def test_find(find_data):
             "params": [
                 "Sword of Protection report",
                 "This report will save Etheria",
-                {
-                    "metadata": {
-                        "language_info": {
-                            "codemirror_mode": {"name": "ipython", "version": 3},
-                            "file_extension": ".py",
-                            "mimetype": "text/x-python",
-                            "name": "python",
-                            "nbconvert_exporter": "python",
-                            "pygments_lexer": "ipython3",
-                            "version": "3.8.5-final",
-                        },
-                        "orig_nbformat": 2,
-                        "kernelspec": {
-                            "name": "python3",
-                            "display_name": "Python 3.8.5 64-bit",
-                            "metadata": {
-                                "interpreter": {
-                                    "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                }
-                            },
-                        },
-                    },
-                    "nbformat": 4,
-                    "nbformat_minor": 2,
-                    "cells": [
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message = carrot_run_data["results"]["Greeting"]\n',
-                                "print(message)",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                "print(message_file.read())",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": ["print('Thanks')"],
-                        },
-                    ],
-                },
+                MOCK_NOTEBOOK_DATA,
                 {"cpu": 2},
                 "adora@example.com",
             ],
@@ -424,60 +216,7 @@ def test_find(find_data):
                     "created_at": "2020-09-16T18:48:06.371563",
                     "created_by": "adora@example.com",
                     "description": "This report will save Etheria",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "config": {"cpu": 2},
                     "name": "Sword of Protection report",
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
@@ -557,60 +296,7 @@ def test_create(create_data, caplog):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection report",
                 "This new report replaced the broken one",
-                {
-                    "metadata": {
-                        "language_info": {
-                            "codemirror_mode": {"name": "ipython", "version": 3},
-                            "file_extension": ".py",
-                            "mimetype": "text/x-python",
-                            "name": "python",
-                            "nbconvert_exporter": "python",
-                            "pygments_lexer": "ipython3",
-                            "version": "3.8.5-final",
-                        },
-                        "orig_nbformat": 2,
-                        "kernelspec": {
-                            "name": "python3",
-                            "display_name": "Python 3.8.5 64-bit",
-                            "metadata": {
-                                "interpreter": {
-                                    "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                }
-                            },
-                        },
-                    },
-                    "nbformat": 4,
-                    "nbformat_minor": 2,
-                    "cells": [
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message = carrot_run_data["results"]["Greeting"]\n',
-                                "print(message)",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                "print(message_file.read())",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": ["print('Thanks')"],
-                        },
-                    ],
-                },
+                MOCK_NOTEBOOK_DATA,
                 {"cpu": 2},
             ],
             "return": json.dumps(
@@ -620,60 +306,7 @@ def test_create(create_data, caplog):
                     "created_by": "adora@example.com",
                     "description": "This new report replaced the broken one",
                     "name": "New Sword of Protection report",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,
@@ -698,60 +331,7 @@ def test_create(create_data, caplog):
                 "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 "New Sword of Protection report",
                 "This new report replaced the broken one",
-                {
-                    "metadata": {
-                        "language_info": {
-                            "codemirror_mode": {"name": "ipython", "version": 3},
-                            "file_extension": ".py",
-                            "mimetype": "text/x-python",
-                            "name": "python",
-                            "nbconvert_exporter": "python",
-                            "pygments_lexer": "ipython3",
-                            "version": "3.8.5-final",
-                        },
-                        "orig_nbformat": 2,
-                        "kernelspec": {
-                            "name": "python3",
-                            "display_name": "Python 3.8.5 64-bit",
-                            "metadata": {
-                                "interpreter": {
-                                    "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                }
-                            },
-                        },
-                    },
-                    "nbformat": 4,
-                    "nbformat_minor": 2,
-                    "cells": [
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message = carrot_run_data["results"]["Greeting"]\n',
-                                "print(message)",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": [
-                                'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                "print(message_file.read())",
-                            ],
-                        },
-                        {
-                            "cell_type": "code",
-                            "execution_count": None,
-                            "metadata": {},
-                            "outputs": [],
-                            "source": ["print('Thanks')"],
-                        },
-                    ],
-                },
+                MOCK_NOTEBOOK_DATA,
                 {"cpu": 2},
             ],
             "from_name": {
@@ -764,63 +344,7 @@ def test_create(create_data, caplog):
                             "created_by": "adora@example.com",
                             "description": "This old report is old",
                             "name": "Old Sword of Protection report",
-                            "notebook": {
-                                "metadata": {
-                                    "language_info": {
-                                        "codemirror_mode": {
-                                            "name": "ipython",
-                                            "version": 3,
-                                        },
-                                        "file_extension": ".py",
-                                        "mimetype": "text/x-python",
-                                        "name": "python",
-                                        "nbconvert_exporter": "python",
-                                        "pygments_lexer": "ipython3",
-                                        "version": "3.8.5-final",
-                                    },
-                                    "orig_nbformat": 2,
-                                    "kernelspec": {
-                                        "name": "python3",
-                                        "display_name": "Python 3.8.5 64-bit",
-                                        "metadata": {
-                                            "interpreter": {
-                                                "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                            }
-                                        },
-                                    },
-                                },
-                                "nbformat": 4,
-                                "nbformat_minor": 2,
-                                "cells": [
-                                    {
-                                        "cell_type": "code",
-                                        "execution_count": None,
-                                        "metadata": {},
-                                        "outputs": [],
-                                        "source": [
-                                            'message = carrot_run_data["results"]["Greeting"]\n',
-                                            "print(message)",
-                                        ],
-                                    },
-                                    {
-                                        "cell_type": "code",
-                                        "execution_count": None,
-                                        "metadata": {},
-                                        "outputs": [],
-                                        "source": [
-                                            'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                            "print(message_file.read())",
-                                        ],
-                                    },
-                                    {
-                                        "cell_type": "code",
-                                        "execution_count": None,
-                                        "metadata": {},
-                                        "outputs": [],
-                                        "source": ["print('Thanks')"],
-                                    },
-                                ],
-                            },
+                            "notebook": MOCK_NOTEBOOK_DATA,
                             "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                         }
                     ],
@@ -835,60 +359,7 @@ def test_create(create_data, caplog):
                     "created_by": "adora@example.com",
                     "description": "This new report replaced the broken one",
                     "name": "New Sword of Protection report",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,
@@ -944,60 +415,7 @@ def test_update(update_data):
                     "created_by": "adora@example.com",
                     "description": "This new report replaced the broken one",
                     "name": "New Sword of Protection report",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 }
             ),
@@ -1016,60 +434,7 @@ def test_update(update_data):
                     "created_by": "adora@example.com",
                     "description": "This new report replaced the broken one",
                     "name": "New Sword of Protection report",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 }
             ),
@@ -1088,60 +453,7 @@ def test_update(update_data):
                     "created_by": "adora@example.com",
                     "description": "This new report replaced the broken one",
                     "name": "New Sword of Protection report",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,
@@ -1167,60 +479,7 @@ def test_update(update_data):
                     "created_by": "adora@example.com",
                     "description": "This new report replaced the broken one",
                     "name": "New Sword of Protection report",
-                    "notebook": {
-                        "metadata": {
-                            "language_info": {
-                                "codemirror_mode": {"name": "ipython", "version": 3},
-                                "file_extension": ".py",
-                                "mimetype": "text/x-python",
-                                "name": "python",
-                                "nbconvert_exporter": "python",
-                                "pygments_lexer": "ipython3",
-                                "version": "3.8.5-final",
-                            },
-                            "orig_nbformat": 2,
-                            "kernelspec": {
-                                "name": "python3",
-                                "display_name": "Python 3.8.5 64-bit",
-                                "metadata": {
-                                    "interpreter": {
-                                        "hash": "1ee38ef4a5a9feb55287fd749643f13d043cb0a7addaab2a9c224cbe137c0062"
-                                    }
-                                },
-                            },
-                        },
-                        "nbformat": 4,
-                        "nbformat_minor": 2,
-                        "cells": [
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message = carrot_run_data["results"]["Greeting"]\n',
-                                    "print(message)",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": [
-                                    'message_file = open(carrot_downloads["results"]["File Result"], \'r\')\n',
-                                    "print(message_file.read())",
-                                ],
-                            },
-                            {
-                                "cell_type": "code",
-                                "execution_count": None,
-                                "metadata": {},
-                                "outputs": [],
-                                "source": ["print('Thanks')"],
-                            },
-                        ],
-                    },
+                    "notebook": MOCK_NOTEBOOK_DATA,
                     "report_id": "cd987859-06fe-4b1a-9e96-47d4f36bf819",
                 },
                 indent=4,

@@ -4,11 +4,24 @@ import sys
 
 import click
 
-from .. import (command_util, dependency_util, email_util, file_util,
-                software_version_query_util)
+from .. import (
+    command_util,
+    dependency_util,
+    email_util,
+    file_util,
+    software_version_query_util,
+)
 from ..config import manager as config
-from ..rest import (pipelines, report_maps, reports, results, runs,
-                    template_reports, template_results, templates)
+from ..rest import (
+    pipelines,
+    report_maps,
+    reports,
+    results,
+    runs,
+    template_reports,
+    template_results,
+    templates,
+)
 
 LOGGER = logging.getLogger(__name__)
 
