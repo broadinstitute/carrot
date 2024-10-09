@@ -26,6 +26,9 @@ def get_logging_format_string(package):
     """
     module_names = get_dot_separated_submodule_names(package)
     max_module_name_length = max(len(name) for name in module_names)
+    max_module_name_length = min(
+        max_module_name_length, 60
+    )  # TODO handle really long names better than this
     format_string = (
         f"%(asctime)s %(name)-{max_module_name_length}s %(levelname)-8s %(message)s"
     )
@@ -48,7 +51,7 @@ def get_package_paths(paths):
     """Recursively walk through all child packages of paths
     returns: iterator of ModuleInfo objects
     """
-    child_packages = pkgutil.walk_packages(paths)
+    child_packages = pkgutil.walk_packages(paths, onerror=lambda x: None)
     for child in child_packages:
         if child.ispkg:
             yield from get_package_paths(
